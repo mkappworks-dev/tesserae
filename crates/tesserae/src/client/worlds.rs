@@ -659,6 +659,7 @@ fn close_request(
 }
 
 fn logic(app: &mut App) {
+    super::frame::plugin(app);
     app.init_resource::<Queue>()
         .init_resource::<Scenery>()
         .init_resource::<LastFailure>()
@@ -682,7 +683,6 @@ fn logic(app: &mut App) {
                 placeholders,
                 opening,
                 (
-                    hero_size,
                     header_hover,
                     paint_picks,
                     shape_trees,
@@ -1235,34 +1235,6 @@ fn relative(then_s: u64) -> String {
         7200..86_400 => format!("{} hours ago", ago / 3600),
         86_400..172_800 => "yesterday".into(),
         _ => format!("{} days ago", ago / 86_400),
-    }
-}
-
-/// The headline follows the window's width as the prototype's `clamp()` does.
-fn hero_size(
-    mut heroes: Query<(&mut TextFont, &mut bevy::text::LetterSpacing), With<pages::Hero>>,
-    roots: Query<&ComputedNode, With<Root>>,
-) {
-    let Some(root) = roots.iter().next() else {
-        return;
-    };
-    let width = root.size().x * root.inverse_scale_factor();
-    if width <= 0.0 {
-        return;
-    }
-    let size = if width >= theme::WIDE_WINDOW {
-        theme::TEXT_HERO_WIDE
-    } else {
-        (width * theme::TEXT_HERO_VW / 100.0)
-            .clamp(*theme::TEXT_HERO.start(), *theme::TEXT_HERO.end())
-    };
-    for (mut font, mut spacing) in &mut heroes {
-        let wanted = bevy::text::FontSize::Px(size);
-        if font.font_size != wanted {
-            font.font_size = wanted;
-            font.font_variations = theme::optical(size);
-            *spacing = bevy::text::LetterSpacing::Px(theme::HERO_TRACKING * size);
-        }
     }
 }
 

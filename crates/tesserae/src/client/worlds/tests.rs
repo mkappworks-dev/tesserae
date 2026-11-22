@@ -1,3 +1,4 @@
+use super::super::frame;
 use super::*;
 use crate::launch::Switch;
 use bevy::ecs::message::Messages;
@@ -143,7 +144,7 @@ fn played(name: &str, game: &str, last_played_unix_s: u64) -> Sidecar {
 }
 
 #[test]
-fn the_title_continues_the_last_played_world_and_names_it_and_its_game() {
+fn the_title_continues_the_last_played_world_and_names_it() {
     let worlds = Directory::new();
     library::create(&worlds.0, &played("Old ridge", "terra", 10)).unwrap();
     let recent = library::create(&worlds.0, &played("River bend", "terra", 20)).unwrap();
@@ -152,7 +153,6 @@ fn the_title_continues_the_last_played_world_and_names_it_and_its_game() {
     app.update();
     assert_eq!(launcher(&app).screen, Screen::Title);
     assert!(shown(&mut app, "River bend"));
-    assert!(shown(&mut app, "Terra \u{00b7} Played"));
     assert_eq!(focused_act(&app), Some(Act::Continue));
     act(&mut app, Act::Continue);
     assert_eq!(
@@ -517,26 +517,114 @@ fn controls(app: &mut App, wanted: &Act) -> usize {
         .count()
 }
 
+fn header_shown(app: &mut App) -> bool {
+    app.world_mut()
+        .query::<&pages::HeaderButton>()
+        .iter(app.world())
+        .next()
+        .is_some()
+}
+
 #[test]
-fn quit_is_a_title_action_and_every_screen_keeps_settings_in_the_header() {
+fn the_title_is_framed_and_the_screens_not_yet_moved_keep_the_header() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     app.update();
+    assert!(!header_shown(&mut app), "the title has no header bar");
     assert_eq!(controls(&mut app, &Act::Quit), 1);
+    assert_eq!(controls(&mut app, &Act::Settings), 1, "in the title's menu");
+    assert!(shown(&mut app, &format!("v{}", env!("CARGO_PKG_VERSION"))));
+    let keys = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, l)| (k.to_string(), l.to_string()))
+            .collect()
+    };
     assert_eq!(
-        controls(&mut app, &Act::Settings),
-        2,
-        "the header's and the title's"
+        frame::testing::prompts(&mut app),
+        keys(&[("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")])
     );
     for screen in [Act::Worlds, Act::Home, Act::Library] {
         act(&mut app, screen);
         if launcher(&app).screen == Screen::Title {
             continue;
         }
+        assert!(header_shown(&mut app));
+        assert!(
+            frame::testing::prompts(&mut app).is_empty(),
+            "the old footer"
+        );
         assert_eq!(controls(&mut app, &Act::Quit), 0, "only the title quits");
         assert_eq!(controls(&mut app, &Act::Settings), 1);
     }
+}
+
+fn control(app: &mut App, wanted: &Act) -> Entity {
+    app.world_mut()
+        .query::<(Entity, &Act)>()
+        .iter(app.world())
+        .find_map(|(e, a)| (a == wanted).then_some(e))
+        .unwrap()
+}
+
+#[test]
+fn hovering_a_title_item_moves_focus_to_it() {
+    let worlds = Directory::new();
+    library::create(&worlds.0, &details("Mine", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<bevy::input::mouse::AccumulatedMouseMotion>();
+    app.update();
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::Continue));
+    let mods = control(&mut app, &Act::Library);
+    frame::testing::hover(&mut app, mods);
+    assert_eq!(focused_act(&app), Some(Act::Library));
+}
+
+#[test]
+fn a_title_press_shows_at_once_and_its_action_runs_in_the_same_frame() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    let settings = control(&mut app, &Act::Settings);
+    act(&mut app, Act::Settings);
+    assert!(
+        app.world()
+            .resource::<super::super::settings::Settings>()
+            .open
+    );
+    assert!(frame::testing::squeezed(&app, settings));
+}
+
+#[test]
+fn the_prompt_bar_shows_controller_buttons_after_controller_input_and_keys_after_a_key() {
+    let worlds = Directory::new();
+    library::create(&worlds.0, &details("Mine", true)).unwrap();
+    let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    let caps = |app: &mut App| -> Vec<String> {
+        frame::testing::prompts(app)
+            .into_iter()
+            .map(|(cap, _)| cap)
+            .collect()
+    };
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    tap(&mut app, pad, GamepadButton::DPadUp);
+    assert_eq!(
+        focused_act(&app),
+        Some(Act::Worlds),
+        "the D-pad moves focus"
+    );
+    assert_eq!(caps(&mut app), ["Tab", "A", "B"]);
+    key(&mut app, KeyCode::ArrowDown);
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    assert_eq!(focused_act(&app), Some(Act::Continue));
+    tap(&mut app, pad, GamepadButton::South);
+    assert!(
+        matches!(app.world().resource::<Switch>().0, Some(Target::World(_))),
+        "A acts as Enter"
+    );
 }
 
 fn resolved(app: &mut App) -> String {
@@ -1676,11 +1764,11 @@ fn arrow_keys_move_focus_between_buttons_and_enter_activates() {
     ));
     assert_eq!(focused_act(&app), Some(Act::Continue));
     // The headless layout stacks buttons in reverse spawn order.
-    key(&mut app, KeyCode::ArrowDown);
-    assert_eq!(focused_act(&app), Some(Act::Quit));
-    key(&mut app, KeyCode::ArrowDown);
-    assert_eq!(focused_act(&app), Some(Act::Settings));
-    key(&mut app, KeyCode::ArrowDown);
+    key(&mut app, KeyCode::ArrowUp);
+    assert_eq!(focused_act(&app), Some(Act::Worlds));
+    key(&mut app, KeyCode::ArrowUp);
+    assert_eq!(focused_act(&app), Some(Act::New));
+    key(&mut app, KeyCode::ArrowUp);
     assert_eq!(focused_act(&app), Some(Act::Library));
     key(&mut app, KeyCode::ArrowDown);
     assert_eq!(focused_act(&app), Some(Act::New));

@@ -19,6 +19,7 @@ mod death;
 pub mod drawn_mask;
 mod drops;
 pub mod edit;
+mod frame;
 mod game_mode;
 mod hand_anim;
 mod hand_fx;

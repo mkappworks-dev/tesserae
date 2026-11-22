@@ -7,6 +7,7 @@ use bevy::text::EditableText;
 use bevy::ui_widgets::TextInput;
 
 use super::super::cinematic::{self as cine, Kind, Sheet};
+use super::super::frame;
 use super::super::menu_ui::IconKind;
 use super::super::scenery;
 use super::*;
@@ -20,10 +21,6 @@ pub(super) struct Placeholder(pub(super) Entity);
 /// change never touches them.
 #[derive(Component)]
 pub(in crate::client) struct Backdrop(pub(in crate::client) scenery::Filter);
-
-/// The title screen's headline, sized from the window's width.
-#[derive(Component)]
-pub(super) struct Hero;
 
 /// The scenery a screen is drawn over: clear under the title and the Worlds, softened under a
 /// sheet with a rail or a form.
@@ -50,65 +47,86 @@ pub(super) fn spawn(
         Screen::Discard(step) => Screen::Create(*step),
         screen => screen.clone(),
     };
-    commands
-        .spawn((
-            Root,
-            TabGroup::default(),
-            Node {
-                // Absolute, like the in-game menus' roots: a flow root is as tall as its content,
-                // so a long page would overflow the window instead of scrolling inside it.
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-        ))
-        .with_children(|root| {
-            root.spawn((theme::shade(), fill(), Pickable::IGNORE));
+    // Screens move onto the frame one at a time; the rest keep the old header and footer.
+    let framed = page == Screen::Title;
+    let mut root = commands.spawn((
+        Root,
+        TabGroup::default(),
+        Node {
+            // Absolute, like the in-game menus' roots: a flow root is as tall as its content,
+            // so a long page would overflow the window instead of scrolling inside it.
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+    ));
+    if framed {
+        root.insert(frame::Frame);
+    }
+    root.with_children(|root| {
+        root.spawn((theme::shade(), fill(), Pickable::IGNORE));
+        if !framed {
             header(root, logo);
-            root.spawn(Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                padding: UiRect::new(
-                    Val::Px(theme::SCREEN_PAD_X),
-                    Val::Px(theme::SCREEN_PAD_X),
-                    Val::Px(28.0),
-                    Val::Px(22.0),
-                ),
-                justify_content: JustifyContent::Center,
-                ..default()
-            })
-            .with_children(|main| {
-                focus = match &page {
-                    Screen::Title => title(main, l, installed),
-                    Screen::Worlds => worlds(main, l, installed, scroll),
-                    Screen::Library => library_page(main, installed, scroll),
-                    Screen::Create(Step::World) => form(main, l, installed, scroll),
-                    Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
-                    Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
-                    Screen::Create(Step::Review) => review(main, l, installed, scroll),
-                    Screen::Delete(_) | Screen::Discard(_) => None,
-                    Screen::Edit(path) => edit(main, l, installed, path, scroll),
-                    Screen::Trust(next) => trust(main, l, installed, next, scroll),
-                    Screen::Opening(name) => {
-                        opening(main, name);
-                        None
-                    }
-                };
-            });
-            footer(root, SCENERY_PLACE);
-            let resetting = l.screen == Screen::Create(Step::Biomes)
-                && l.form.biomes.as_ref().is_some_and(|d| d.resetting);
-            match &l.screen {
-                Screen::Delete(path) => focus = delete(root, l, path),
-                Screen::Discard(_) => focus = discard(root),
-                _ if resetting => focus = reset(root),
-                _ => {}
-            }
+        }
+        root.spawn(Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            padding: UiRect::new(
+                Val::Px(theme::SCREEN_PAD_X),
+                Val::Px(theme::SCREEN_PAD_X),
+                Val::Px(28.0),
+                Val::Px(22.0),
+            ),
+            justify_content: JustifyContent::Center,
+            ..default()
+        })
+        .with_children(|main| {
+            focus = match &page {
+                Screen::Title => {
+                    title(main, l, installed, logo);
+                    None
+                }
+                Screen::Worlds => worlds(main, l, installed, scroll),
+                Screen::Library => library_page(main, installed, scroll),
+                Screen::Create(Step::World) => form(main, l, installed, scroll),
+                Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
+                Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
+                Screen::Create(Step::Review) => review(main, l, installed, scroll),
+                Screen::Delete(_) | Screen::Discard(_) => None,
+                Screen::Edit(path) => edit(main, l, installed, path, scroll),
+                Screen::Trust(next) => trust(main, l, installed, next, scroll),
+                Screen::Opening(name) => {
+                    opening(main, name);
+                    None
+                }
+            };
         });
+        if framed {
+            frame::prompt_bar(
+                root,
+                SCENERY_PLACE,
+                vec![
+                    frame::Prompt::<()>::new(frame::Cap::Tab, "Navigate"),
+                    frame::Prompt::new(frame::Cap::Enter, "Select"),
+                    frame::Prompt::new(frame::Cap::Esc, "Back"),
+                ],
+            );
+        } else {
+            footer(root, SCENERY_PLACE);
+        }
+        let resetting = l.screen == Screen::Create(Step::Biomes)
+            && l.form.biomes.as_ref().is_some_and(|d| d.resetting);
+        match &l.screen {
+            Screen::Delete(path) => focus = delete(root, l, path),
+            Screen::Discard(_) => focus = discard(root),
+            _ if resetting => focus = reset(root),
+            _ => {}
+        }
+    });
     focus
 }
 
@@ -279,192 +297,126 @@ pub(in crate::client) fn footer(root: &mut ChildSpawnerCommands, place: &str) {
 
 fn shadowed() -> TextShadow {
     TextShadow {
-        offset: Vec2::new(0.0, 1.0),
-        color: Color::BLACK.with_alpha(0.5),
+        offset: Vec2::new(0.0, 2.0),
+        color: Color::BLACK.with_alpha(0.45),
     }
 }
 
-fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
-    let mut focus = None;
+/// The logo beside Tesserae and one menu, Continue first.
+fn title(
+    main: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    logo: Option<&ui::Mosaic>,
+) {
     main.spawn(Node {
         flex_grow: 1.0,
+        max_width: Val::Px(1180.0),
         flex_direction: FlexDirection::Column,
         justify_content: JustifyContent::Center,
         align_items: AlignItems::FlexStart,
+        row_gap: Val::Px(6.0),
         padding: UiRect::left(Val::Vw(4.0)),
         ..default()
     })
-    .with_children(|hero| {
-        hero.spawn((
-            Text::new("A LITTLE CURIOSITY. A WHOLE WORLD."),
-            theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
-            bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
-            TextColor(theme::HERO_EYEBROW),
-            shadowed(),
-            Pickable::IGNORE,
-        ));
-        hero.spawn((
-            Hero,
-            Text::new("Make room\nfor wonder."),
-            theme::weighted(*theme::TEXT_HERO.end(), theme::BOOK),
-            bevy::text::LineHeight::RelativeToFont(1.04),
-            bevy::text::LetterSpacing::Px(theme::HERO_TRACKING * theme::TEXT_HERO.end()),
-            TextColor(theme::INK),
-            shadowed(),
-            Node {
-                margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(16.0), Val::Px(19.0)),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
-        hero.spawn((
-            Text::new(
-                "A place to explore, build and call your own.\nEvery world begins with a possibility.",
-            ),
-            theme::font(theme::TEXT_BODY),
-            bevy::text::LineHeight::RelativeToFont(1.8),
-            TextColor(theme::HERO_INK),
-            shadowed(),
-            Node {
-                margin: UiRect::bottom(Val::Px(26.0)),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
-        hero.spawn((
-            cine::surface(theme::panel()),
-            cine::framed(Node {
-                width: Val::Px(300.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            }),
-        ))
-        .with_children(|actions| {
-            let action = |actions: &mut ChildSpawnerCommands, label, act, kind, align| {
-                let entity = buttons::button(actions, label, act, ButtonStyle::Cinematic { kind, align });
-                actions.commands().entity(entity).insert(Node {
-                    min_height: Val::Px(47.0),
-                    padding: UiRect::axes(Val::Px(18.0), Val::Px(13.0)),
-                    border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                });
-                entity
-            };
-            let worlds = action(actions, "Your Worlds", Act::Worlds, Kind::Primary, Align::After("\u{2192}"));
-            let create = action(actions, "Create a World", Act::New, Kind::Plain, Align::After("+"));
-            action(actions, "Mods", Act::Library, Kind::Ghost, Align::After("\u{25c7}"));
-            action(actions, "Settings", Act::Settings, Kind::Ghost, Align::Icon(IconKind::Settings));
-            action(actions, "Quit", Act::Quit, Kind::Ghost, Align::Centre);
-            if installed.game.is_none() {
-                actions
-                    .commands()
-                    .entity(create)
-                    .insert(bevy::ui::InteractionDisabled);
-            }
-            focus = Some(if !l.entries.is_empty() || installed.game.is_none() {
-                worlds
-            } else {
-                create
-            });
-        });
-        if installed.game.is_none() {
-            hero.spawn(Node {
-                margin: UiRect::top(Val::Px(14.0)),
-                max_width: Val::Px(300.0),
+    .with_children(|screen| {
+        screen
+            .spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(18.0),
+                margin: UiRect::bottom(Val::Px(28.0)),
                 ..default()
             })
-            .with_children(|well| {
-                well.spawn(cine::error_well()).with_children(|w| {
-                    ui::paragraph(w, NO_GAME, theme::TEXT_SMALL, theme::DANGER_INK)
-                });
+            .with_children(|brand| {
+                if let Some(logo) = logo {
+                    brand.spawn((
+                        ImageNode::new(logo.0.clone()),
+                        Node {
+                            width: Val::Px(64.0),
+                            height: Val::Px(64.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ));
+                }
+                brand.spawn((
+                    Text::new("Tesserae"),
+                    TextFont {
+                        font: bevy::text::FontSource::family(theme::BRAND_FAMILY),
+                        ..theme::weighted(64.0, theme::SEMIBOLD)
+                    },
+                    bevy::text::LetterSpacing::Px(0.04 * 64.0),
+                    TextColor(theme::INK),
+                    shadowed(),
+                    Pickable::IGNORE,
+                ));
             });
-            if let Some(error) = &installed.error {
-                ui::paragraph(
-                    hero,
-                    format!("Installed Mods could not be read: {error}"),
-                    theme::TEXT_SMALL,
-                    theme::HERO_INK,
-                );
-            }
-        }
-    });
-    if let Some(entry) = l.last_played() {
-        let unmet = entry
-            .details()
+        let last = l.last_played();
+        let unmet = last
+            .and_then(Entry::details)
             .map(|d| installed.unmet(d))
             .unwrap_or_default();
-        main.spawn((
-            cine::surface(theme::panel()),
-            cine::framed(Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(theme::SCREEN_PAD_X),
-                bottom: Val::Px(22.0 + 10.0),
-                width: Val::Px(275.0),
-                padding: UiRect::all(Val::Px(17.0)),
+        screen
+            .spawn(Node {
+                width: Val::Px(340.0),
+                max_width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                align_items: AlignItems::FlexStart,
-                ..default()
-            }),
-        ))
-        .with_children(|card| {
-            card.spawn(Node {
-                margin: UiRect::bottom(Val::Px(12.0)),
+                row_gap: Val::Px(4.0),
                 ..default()
             })
-            .with_children(|e| buttons::eyebrow(e, "CONTINUE", Eyebrow::Cinematic));
-            ui::weighted_text(
-                card,
-                entry.name().unwrap_or(UNNAMED),
-                theme::TEXT_SMALL,
-                theme::BOLD,
-                theme::INK,
-            );
-            if let Some(d) = entry.details() {
-                card.spawn(Node {
-                    margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(6.0), Val::Px(15.0)),
+            .with_children(|menu| {
+                if let Some(entry) = last {
+                    let name = entry.name().unwrap_or(UNNAMED);
+                    let item = frame::list_item(menu, "Continue", Some(name), Act::Continue);
+                    let mut commands = menu.commands();
+                    if unmet.is_empty() {
+                        commands.entity(item).insert(frame::Autofocus);
+                    } else {
+                        commands.entity(item).insert(bevy::ui::InteractionDisabled);
+                    }
+                }
+                frame::list_item(menu, "Worlds", None, Act::Worlds);
+                let create = frame::list_item(menu, "Create World", None, Act::New);
+                if installed.game.is_none() {
+                    menu.commands()
+                        .entity(create)
+                        .insert(bevy::ui::InteractionDisabled);
+                } else if l.entries.is_empty() {
+                    menu.commands().entity(create).insert(frame::Autofocus);
+                }
+                frame::list_item(menu, "Mods", None, Act::Library);
+                frame::list_item(menu, "Settings", None, Act::Settings);
+                frame::list_item(menu, "Quit", None, Act::Quit);
+            });
+        let mut warnings = unmet;
+        if installed.game.is_none() {
+            warnings.push(NO_GAME.into());
+        }
+        if let Some(error) = &installed.error {
+            warnings.push(format!("Installed Mods could not be read: {error}"));
+        }
+        for line in warnings {
+            screen
+                .spawn(Node {
+                    max_width: Val::Px(340.0),
+                    padding: UiRect::horizontal(Val::Px(16.0)),
                     ..default()
                 })
-                .with_children(|line| {
-                    ui::paragraph(
-                        line,
-                        format!(
-                            "{} \u{00b7} Played {}",
-                            game_title(d.game.as_ref()),
-                            relative(d.last_played_unix_s)
-                        ),
-                        theme::TEXT_SMALL,
-                        theme::muted(),
-                    )
-                });
-            }
-            for line in &unmet {
-                ui::paragraph(card, line, theme::TEXT_SMALL, theme::WARNING);
-            }
-            let button = buttons::button(
-                card,
-                "Continue \u{2192}",
-                Act::Continue,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Primary,
-                    align: Align::Centre,
-                },
-            );
-            if unmet.is_empty() {
-                focus = Some(button);
-            } else {
-                card.commands()
-                    .entity(button)
-                    .insert(bevy::ui::InteractionDisabled);
-            }
-        });
-    }
-    focus
+                .with_children(|w| ui::paragraph(w, line, theme::TEXT_SMALL, theme::WARNING));
+        }
+    });
+    main.spawn((
+        Text::new(format!("v{}", env!("CARGO_PKG_VERSION"))),
+        theme::font(theme::TEXT_SMALL),
+        TextColor(theme::muted()),
+        Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(theme::SCREEN_PAD_X),
+            bottom: Val::Px(16.0),
+            ..default()
+        },
+        Pickable::IGNORE,
+    ));
 }
 
 fn opening(main: &mut ChildSpawnerCommands, name: &str) {
