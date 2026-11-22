@@ -18,8 +18,8 @@ const DETAIL_CHUNK_M: f32 = 32.0;
 pub(crate) const MAX_DETAIL_CHUNKS: u32 = 12;
 pub(crate) const MIN_REACH_KM: u32 = 2;
 const MAX_REACH_KM: u32 = 8;
-/// Step 6's 86 MB for levels 1 to 5 at 4 km, less packed quads' 70%, over its ~502 Cell
-/// columns of seven Chunks, as the mockup estimates it.
+/// 86 MB measured for levels 1 to 5 at 4 km, less packed quads' 70%, over the ~502 Cell columns
+/// of seven Chunks, as the mockup estimates it.
 const KB_PER_CHUNK: f32 = 52.0 / 7.0;
 
 pub(super) fn plugin(app: &mut App) {
@@ -265,7 +265,7 @@ mod tests {
         }
     }
 
-    /// A Game whose ceiling is its own reach, as Terra's was before step 22.
+    /// A Game whose ceiling is its own reach.
     fn near() -> DeclaredStreaming {
         DeclaredStreaming::own(StreamingSettings {
             lod_distance_m: 3000.0,

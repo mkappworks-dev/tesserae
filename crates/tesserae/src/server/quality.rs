@@ -34,7 +34,7 @@ impl Default for DeclaredStreaming {
 }
 
 impl DeclaredStreaming {
-    /// A Game whose Low reaches its ceiling, as every Game's did before the Quality curve.
+    /// A Game whose Low reaches its ceiling.
     pub fn own(ceiling: StreamingSettings) -> Self {
         DeclaredStreaming {
             ceiling,
@@ -77,8 +77,8 @@ pub struct QualityCurve {
 }
 
 impl QualityCurve {
-    /// The default: 6 Chunks to 6 km. Ticket 09 measured 8 Chunks filling Terra's field in
-    /// 13.5 s against the 10 s budget, and 6 in 9.5.
+    /// The default: 6 Chunks to 6 km, as 8 filled Terra's field in 13.5 s against a 10 s budget
+    /// and 6 in 9.5.
     pub const MEDIUM: Self = QualityCurve {
         unit_m: 192.0,
         reach_m: 6000.0,

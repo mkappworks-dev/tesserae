@@ -73,10 +73,9 @@ pub(in crate::server) struct LodBudget {
     pub in_flight: LodCounts,
     pub landed_per_tick: LodCounts,
     /// Every cap is this many times larger in a tick that starts with no level-0 job in
-    /// flight, when no level-0 work queues behind a coarse job. Ticket 09 measured the busy
-    /// caps, not the CPU, setting how soon the field filled: 16 jobs a 64 Hz tick, against
-    /// coarse jobs of 0.4 to 5 ms on three workers. At 8 Low's field filled in 5.8 s against
-    /// 10.2, level 0 unmoved; 16 took the worst tick from 6 to 10.5 ms.
+    /// flight, when no level-0 work queues behind a coarse job: the busy caps, not the CPU, set
+    /// how soon the field fills. At 8 Low's field filled in 5.8 s against 10.2, level 0
+    /// unmoved; 16 took the worst tick from 6 to 10.5 ms.
     pub idle_scale: usize,
 }
 

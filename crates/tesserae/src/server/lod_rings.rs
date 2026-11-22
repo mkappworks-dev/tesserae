@@ -351,7 +351,7 @@ mod tests {
         QualityCurve { unit_m, reach_m }.applied_to(StreamingSettings::default())
     }
 
-    /// Terra's rings before step 22: Low still streams them.
+    /// Terra's own rings, which Low streams.
     fn terra_own() -> StreamingSettings {
         StreamingSettings {
             view_distance_m: 160.0,
