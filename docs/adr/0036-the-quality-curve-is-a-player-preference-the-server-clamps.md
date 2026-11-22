@@ -14,19 +14,23 @@ machine can afford.
 
 ## Decision
 
-**A Player chooses the Quality curve** from Display settings: a unit `u`, so
-coarse level k ends at `u * 2^k`, and a reach, with presets. The Client sends it
-as a request; the Server clamps it to the Game's values, which become the
-default and the ceiling, and streams that Player's rings from it. The Client
-never sets a ring itself ([ADR-0002](0002-client-server-from-day-one.md)). Level
-0 stays the Game's `view_distance_m`: the Server simulates and lights it, so it
-is not a preference.
+**A Player chooses the Quality curve** from a Distance settings tab: a unit `u`,
+so coarse level k ends at `u * 2^k`, and a reach, with presets Low (the Game's
+own rings), Medium and High. `u` is a whole number of Chunks, so every level
+ends on its own Cells, and the UI shows it as that count. The Client sends it as
+a request; the Server clamps it to the Game's values, which become the default
+and the ceiling, and streams that Player's rings from it. The Client never sets
+a ring itself ([ADR-0002](0002-client-server-from-day-one.md)). Level 0 stays
+the Game's `view_distance_m`: the Server simulates and lights it, so it is not a
+preference.
 
 The curve is a fixed table in metres, not a screen-space error: the Server
 streams it, and a Server has no screen.
 
-The default is about `384 * 2^k` m to 8192 m, once its memory, fill time and GPU
-frame are measured; the doubling stays as the lower preset.
+The default is Medium, `u` 256 m to 6 km, once its memory, fill time and GPU
+frame are measured; High, `384 * 2^k` m to 8192 m, is the look of other engines
+with distant terrain, chosen by a Player who can afford it; the doubling stays
+as Low.
 
 ## Consequences
 

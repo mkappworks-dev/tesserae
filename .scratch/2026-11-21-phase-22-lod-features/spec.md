@@ -1,7 +1,7 @@
 # LOD features: coarse levels that agree with level 0, and a longer reach
 
 Status: ready-for-agent. Decisions Q1 to Q23 were settled in a grilling round on
-2026-11-21.
+2026-11-21, and Q24 (the presets) and Q25 (Terra's level 0) on 2026-11-22.
 
 Source: branch `feat/phase-22-lod-features`, cut from `main` at `65037cdd`.
 DESIGN.md step 22. Depends on steps 6, 18 and 20. Builds on
@@ -68,7 +68,7 @@ captures are reviewed in two batches, after 05 and at 09.
    clamped to the Game's values; holes and overlaps derived per pair.
 8. **A Distance settings tab** for it: the mockup page (built during the grilling,
    approved before this ticket), then the Client page.
-9. **The default curve**, about `384 * 2^k` m to 8192 m, with lighter fog, only
+9. **The default curve**, Medium (`u` 256 m to 6 km), with lighter fog, only
    once the budgets pass and you approve the captures.
 10. **Ground tint** from the plants a column would hold: lands only if it
     improves the look and stays in budget.
@@ -153,16 +153,23 @@ captures are reviewed in two batches, after 05 and at 09.
   and the reach to the Game's `lod_distance_m`, and streams from it. Level 0
   stays the Game's `view_distance_m`. The level count, holes and overlaps are
   derived from each pair of widths by `lod_rings`' existing rules, checked for
-  all four parities. Presets: **Balanced** (`u` 192 m, today's doubling) and
-  **Detailed** (`u` 384 m), each with a reach from 2 to 8 km.
-- **Default (Q15, Q20).** `u` 384 m and 8192 m. Terra's ceiling rises from
+  all four parities. Presets (Q24): **Low**, the Game's own rings (`u` its `view_distance_m`, reach its declared
+  `lod_distance_m` before this step: 160 m to 3 km on Terra, 192 m to 4 km by default); **Medium**
+  (`u` 256 m, 6 km), the default; **High** (`u` 384 m, 8 km); and **Custom**. `u` is a whole number of
+  32 m Chunks, so every level's ring ends on its own Cells: level k reaches `u / 32` of its own Chunks,
+  and the UI shows `u` as that count (5, 8 and 12 Chunks on Terra).
+- **Default (Q15, Q20, Q24).** Medium, `u` 256 m to 6 km. High may exceed the budgets below, as a
+  Player's choice, and its numbers are recorded. Terra's ceiling rises from
   3000 m to 8192 m, and the engine's default `lod_distance_m` from 4096 m.
   It becomes the default only when, on the M5 with Terra at `stationary` and
   `sprint-flight`: coarse vertex memory on the GPU, Impostors included, is at most
   192 MB; the
   whole field is drawn within 10 s of spawn; GPU frame is at most 1 ms over
-  `main`; and level 0's fill time does not regress. If any fails, the default is
+  `main`; and level 0's fill time does not regress. If Medium fails any, the default is
   the widest curve that passes, recorded here.
+- **Terra's level 0 (Q25).** Terra declares 160 m (5 Chunks) with no recorded reason; every other
+  Game uses the engine's 192 m. Ticket 09 measures Terra at 192 m too and keeps it only if level 0's
+  fill time and GPU frame stay within budget, recording the reason either way.
 - **Fill order (Q21).** Coarse jobs are prioritised by distance over their
   level's Cell, so the outermost level fills first and finer ones replace it.
 - **Vertical extent (Q22).** Three of a level's own Cells above and below,
@@ -173,8 +180,9 @@ captures are reviewed in two batches, after 05 and at 09.
   joins match colour better, you approve them, and coarse-Chunk time stays in
   budget; otherwise `wontfix`.
 - **Settings (Q12 to Q14).** Settings gains a Distance tab after Display; the
-  map and compass stay in Display. A Preset dropdown (Balanced, Detailed,
-  Custom); a Reach slider (2 to 8 km) and a Detail slider (`u` 192 to 384 m)
+  map and compass stay in Display. A Preset dropdown (Low, Medium, High,
+  Custom); a Reach slider (2 to 8 km) and a Detail slider (`u` in whole Chunks, from the World's view
+  distance to 12 Chunks)
   that move only under Custom, which remembers its own values; and a table of
   each level's Voxel size, ring, Chunk count and estimated memory, live as the
   sliders move. The table and the sliders' ends use the World's own view

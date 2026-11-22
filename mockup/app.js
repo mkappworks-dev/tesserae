@@ -960,7 +960,7 @@ document.addEventListener("input", (e) => {
       render();
       return;
     }
-    if (key === "reachKm" || key === "detailM") refreshDistance();
+    if (key === "reachKm" || key === "detailChunks") refreshDistance();
     settingsChanged();
     return;
   }

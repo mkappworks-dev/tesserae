@@ -27,11 +27,11 @@ implementation. Keyboard Tab, Enter and Escape work in the browser prototype.
 Settings now shares one category-based screen between the title and in-game
 menus: Behavior, Key bindings, Controller (including touch), Display, Distance,
 Audio and Accessibility. The first four reflect current engine settings;
-Distance (step 22: presets matching today's rings and the curve of Distant
-Horizons' and Voxy's defaults), Audio and Accessibility remain proposed
-additions. Draft values survive category changes. Apply, discard, reset and
-keyboard rebinding are interactive in this prototype. Navigation containers fit
-their contents and scroll if needed.
+Distance (step 22: Low matches today's rings, Medium is the proposed default,
+High approaches Distant Horizons' and Voxy's defaults), Audio and Accessibility
+remain proposed additions. Draft values survive category changes. Apply,
+discard, reset and keyboard rebinding are interactive in this prototype.
+Navigation containers fit their contents and scroll if needed.
 
 Direct URLs include `/worlds`, `/worlds/new`, `/worlds/new/mods`,
 `/worlds/new/biomes`, `/worlds/new/review`, `/worlds/1/edit`, `/mods`, `/menu`,
