@@ -130,8 +130,7 @@ fn a_trees_impostor_occupies_the_coarse_voxels_its_level_zero_trunk_and_canopy_r
                                     if is_tree(v) && g.is_air() {
                                         let global =
                                             std::array::from_fn(|a| c[a] * n + at[a] as i32);
-                                        expected
-                                            .insert(global.map(|g: i32| g.div_euclid(span)));
+                                        expected.insert(global.map(|g: i32| g.div_euclid(span)));
                                     }
                                 }
                             }
@@ -140,7 +139,11 @@ fn a_trees_impostor_occupies_the_coarse_voxels_its_level_zero_trunk_and_canopy_r
                 }
             }
         }
-        assert!(expected.len() > 50, "level {level}: {} tree Voxels", expected.len());
+        assert!(
+            expected.len() > 50,
+            "level {level}: {} tree Voxels",
+            expected.len()
+        );
         let missing = expected.difference(&drawn).count();
         let extra = drawn.difference(&expected).count();
         assert_eq!(
@@ -206,7 +209,10 @@ fn a_felled_tree_whose_chunk_is_evicted_is_absent_at_level_one_in_a_persistent_w
     h.settle();
     h.lod_settle();
     let chunk = wooded_chunk(&h);
-    assert!(trees_in_octant(&h, chunk) > 0, "level 1 stands no tree there");
+    assert!(
+        trees_in_octant(&h, chunk) > 0,
+        "level 1 stands no tree there"
+    );
     let n = CHUNK_SIZE as i32;
     let felled: Vec<[i32; 3]> = voxels(h.store().get(chunk).unwrap())
         .filter(|(_, v)| is_tree(*v))
@@ -220,7 +226,36 @@ fn a_felled_tree_whose_chunk_is_evicted_is_absent_at_level_one_in_a_persistent_w
 
     h.anchor_at(Vec3::new(160.0, 0.0, 0.0));
     h.settle();
+    saved_for_eviction(&mut h);
+    h.settle();
     h.lod_settle();
-    assert!(!h.store().contains(chunk), "the felled Chunk was not evicted");
+    assert!(
+        !h.store().contains(chunk),
+        "the felled Chunk was not evicted"
+    );
     assert_eq!(trees_in_octant(&h, chunk), 0, "felled once evicted");
+}
+
+/// What a finished save does: every Chunk waiting on one may now leave.
+fn saved_for_eviction(h: &mut Harness) {
+    let mut store = h.app.world_mut().resource_mut::<ChunkStore>();
+    let pending: Vec<ChunkCoord> = store.pending_evictions.iter().copied().collect();
+    for home in pending {
+        let revision = store.revisions.get(&home).copied().unwrap_or(0);
+        if let Some(life) = store.lifetime(home) {
+            store.approved_evictions.insert(home, (life, revision));
+        }
+    }
+}
+
+#[test]
+fn the_placement_generator_and_level_ones_source_share_a_column_cache_level_zero_does_not() {
+    let world = land();
+    let level_zero = Worldgen::new(world.seed, world.voxel_size, forest());
+    let generators = LodGenerators::new(&world, &level_zero, LEVELS);
+    assert!(generators.placement.shares_columns_with(&generators.sources[0]));
+    for (j, source) in generators.sources.iter().enumerate() {
+        assert!(!source.shares_columns_with(&level_zero), "source {j}");
+    }
+    assert!(!generators.placement.shares_columns_with(&level_zero));
 }

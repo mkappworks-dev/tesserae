@@ -20,8 +20,10 @@ use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
+use tesserae_core::climate::SurfacePlantKind;
 use tesserae_core::lod::{
-    Child, Coarse, UnderWater, Waterline, coarse_light_in, downsample_changed,
+    Child, Coarse, TreeMaterials, UnderWater, Waterline, coarse_light_in, coarsen_tree_parts,
+    downsample_changed, stand_tree_parts,
 };
 use tesserae_core::mesh::{POS_Y, Quad, QuadKind};
 use tesserae_core::shape::SUBDIV;
@@ -160,6 +162,18 @@ fn level_scale(level: u32) -> f32 {
     (1u32 << level) as f32
 }
 
+/// Levels up to this one stand tree Impostors; from the next a Voxel is as large as a tree.
+const IMPOSTORS_TO: u32 = 2;
+
+/// The placement generator's column cache, in Cells: level 1's ring at the widest unit a Player
+/// may ask for, and its load margin. About 24 KB a Cell, held only where level 1 streams.
+fn level_one_cells(world: &WorldSettings) -> usize {
+    let cell_m = CHUNK_SIZE as f32 * world.voxel_size;
+    let reach_m = 2.0 * super::quality::QualityCurve::DETAILED_UNIT_M + 2.0 * cell_m;
+    let side = (2.0 * reach_m / cell_m).ceil() as usize;
+    side * side
+}
+
 /// `sources[j]` makes level-j Chunks, so a level-k job clones `sources[k - 1]`. The outermost
 /// level is never anyone's child, so there is one fewer source than levels.
 #[derive(Resource)]
@@ -167,11 +181,16 @@ pub(in crate::server) struct LodGenerators {
     sources: Vec<Worldgen>,
     /// `direct[k - 1]` makes an untouched level-k Chunk itself: from [`COLUMNS_FROM`] up.
     direct: Vec<Option<Worldgen>>,
+    /// Level 0 with its features and Templates, asked for draws only, never a Chunk. It shares
+    /// its column cache with `sources[0]`, so nothing coarse touches level 0's.
+    placement: Worldgen,
+    trees: Arc<TreeMaterials>,
     answers: Arc<Answers>,
 }
 
 impl LodGenerators {
     pub fn new(world: &WorldSettings, level_zero: &Worldgen, levels: u32) -> Self {
+        let placement = level_zero.clone().with_own_caches(level_one_cells(world));
         // Level 1 is the downsample of a level 0 without features, so a pair of them cannot win
         // a coarse Voxel's vote.
         let bare = level_zero.params().without_surface_features();
@@ -188,12 +207,15 @@ impl LodGenerators {
                 } else {
                     Worldgen::new(world.seed, world.voxel_size * level_scale(j), coarse)
                 };
-                source.sharing(level_zero)
+                source.sharing(&placement)
             })
             .collect();
+        let trees = tree_materials(&level_zero.params());
         let mut generators = LodGenerators {
             sources,
             direct: Vec::new(),
+            placement,
+            trees: Arc::new(trees),
             answers: Arc::default(),
         };
         generators.direct = generators.made_directly(world, COLUMNS_FROM, false);
@@ -246,7 +268,17 @@ impl LodGenerators {
             source: &self.sources[Plan::index(level)],
             direct: self.direct(level),
             level_zero: &self.sources[0],
+            placement: (level <= IMPOSTORS_TO).then_some(&self.placement),
+            trees: &self.trees,
             answers: &self.answers,
+        }
+    }
+
+    fn persistent(&self) -> Persistent {
+        Persistent {
+            sources: self.sources.clone(),
+            placement: self.placement.clone(),
+            trees: Arc::clone(&self.trees),
         }
     }
 
@@ -714,6 +746,7 @@ pub(in crate::server) fn generate_coarse(
     tables: &Tables,
     waterline: Option<Waterline>,
     margin: Option<SeamMargin>,
+    trees: Option<&TreeMaterials>,
 ) -> Coarse {
     let made: [Option<Chunk>; 8] = std::array::from_fn(|i| {
         held[i].is_none().then(|| {
@@ -733,6 +766,13 @@ pub(in crate::server) fn generate_coarse(
         ),
     });
     let mut coarse = downsample_changed(children, coord.y, tables, waterline);
+    if let Some(trees) = trees {
+        let changed = std::array::from_fn(|i| matches!(children[i], Child::Changed(..)));
+        let chunks = children.map(|c| match c {
+            Child::Packed(chunk) | Child::Changed(chunk, _) => chunk,
+        });
+        coarsen_tree_parts(&mut coarse.chunk, chunks, changed, trees);
+    }
     if let Some(margin) = margin {
         let chunks = children.map(|c| match c {
             Child::Packed(chunk) | Child::Changed(chunk, _) => chunk,
@@ -769,6 +809,7 @@ pub(in crate::server) fn make_coarse(
                 None
             },
             seam_margin(level),
+            makers.placement.map(|_| makers.trees),
         ),
     };
     agree(
@@ -779,7 +820,51 @@ pub(in crate::server) fn make_coarse(
         &mut coarse.chunk,
         held,
     );
+    if let Some(placement) = makers.placement {
+        stand_impostors(placement, level, coord, &mut coarse.chunk, held);
+    }
     coarse
+}
+
+/// Stands every tree level 0 stands in the Chunk's footprint, but over a changed child, whose
+/// own tree Voxels [`generate_coarse`] kept (ADR-0035).
+fn stand_impostors(
+    placement: &Worldgen,
+    level: u32,
+    coord: ChunkCoord,
+    chunk: &mut Chunk,
+    held: &[Option<Held>; 8],
+) {
+    let span = 1i32 << level;
+    let n = CHUNK_SIZE as i32 * span;
+    let min = [coord.x * n, coord.y * n, coord.z * n];
+    let parts = placement.tree_parts(min, min.map(|m| m + n));
+    if parts.is_empty() {
+        return;
+    }
+    let skip = std::array::from_fn(|i| held[i].as_ref().is_some_and(|h| h.changed.is_some()));
+    stand_tree_parts(chunk, [coord.x, coord.y, coord.z], span, &parts, skip);
+}
+
+/// Every Material a Biome grows a tree of, by part.
+fn tree_materials(params: &WorldgenParams) -> TreeMaterials {
+    let mut trees = TreeMaterials::default();
+    let features = params
+        .biomes
+        .as_slice()
+        .iter()
+        .flat_map(|b| b.surface_features.as_slice());
+    for feature in features {
+        if let Some(SurfacePlantKind::Tree(t)) = feature.plant.map(|p| p.kind) {
+            if !trees.trunks.contains(&t.trunk) {
+                trees.trunks.push(t.trunk);
+            }
+            if !trees.canopies.contains(&t.canopy) {
+                trees.canopies.push(t.canopy);
+            }
+        }
+    }
+    trees
 }
 
 /// The generators a coarse job reads: its level's source, its column generator, and level 0
@@ -789,6 +874,9 @@ pub(in crate::server) struct Makers<'a> {
     pub source: &'a Worldgen,
     pub direct: Option<&'a Worldgen>,
     pub level_zero: &'a Worldgen,
+    /// Set at the levels that stand Impostors.
+    pub placement: Option<&'a Worldgen>,
+    pub trees: &'a TreeMaterials,
     pub answers: &'a Answers,
 }
 
@@ -897,7 +985,7 @@ fn seam_margin(level: u32) -> Option<SeamMargin> {
 fn generate_persistent(
     level: u32,
     coord: ChunkCoord,
-    sources: &[Worldgen],
+    generators: &Persistent,
     saved: &std::collections::BTreeMap<ChunkCoord, Held>,
     finer: &HashMap<LodKey, Held>,
     tables: &Tables,
@@ -917,7 +1005,8 @@ fn generate_persistent(
         });
         relevant.then(|| {
             finer.get(&(level - 1, child)).cloned().unwrap_or_else(|| {
-                let coarse = generate_persistent(level - 1, child, sources, saved, finer, tables);
+                let coarse =
+                    generate_persistent(level - 1, child, generators, saved, finer, tables);
                 Held {
                     chunk: Arc::new(coarse.chunk),
                     changed: Some(Arc::new(coarse.overlay)),
@@ -925,7 +1014,8 @@ fn generate_persistent(
             })
         })
     });
-    let source = &sources[level as usize - 1];
+    let source = &generators.sources[level as usize - 1];
+    let impostors = level <= IMPOSTORS_TO;
     let mut coarse = generate_coarse(
         source,
         coord,
@@ -933,16 +1023,34 @@ fn generate_persistent(
         tables,
         waterline(source),
         seam_margin(level),
+        impostors.then_some(&*generators.trees),
     );
     agree(
-        &sources[0],
+        &generators.sources[0],
         None,
         level,
         coord,
         &mut coarse.chunk,
         &children,
     );
+    if impostors {
+        stand_impostors(
+            &generators.placement,
+            level,
+            coord,
+            &mut coarse.chunk,
+            &children,
+        );
+    }
     coarse
+}
+
+/// What a job over saved changes reads: every source, and the draws.
+#[derive(Clone)]
+pub(in crate::server) struct Persistent {
+    sources: Vec<Worldgen>,
+    placement: Worldgen,
+    trees: Arc<TreeMaterials>,
 }
 
 /// What generation fills with its lake at level 0, for level 1 to recognise.
@@ -1704,8 +1812,11 @@ fn dispatch(
                 .regenerating
                 .insert(coord, cause.unwrap_or(LodCause::First));
         }
+        // Only a changed child: level 1 draws its trees, so a child as generated adds nothing.
         let held_children: [Option<Held>; 8] = if plan.level == 1 {
-            std::array::from_fn(|i| held_child(chunks, meshes, coord.child(i)))
+            std::array::from_fn(|i| {
+                held_child(chunks, meshes, coord.child(i)).filter(|h| h.changed.is_some())
+            })
         } else {
             Default::default()
         };
@@ -1737,7 +1848,7 @@ fn dispatch(
             Default::default()
         };
         let finer = current_finer(store, state, plan.level, persistent.keys());
-        let sources = (!persistent.is_empty()).then(|| generators.sources.clone());
+        let sources = (!persistent.is_empty()).then(|| generators.persistent());
         // An Edit must still show, so a probe yields to any changed child.
         let direct = generators
             .direct(plan.level)
@@ -1762,6 +1873,8 @@ fn dispatch(
         }
         let source = generators.sources[Plan::index(plan.level)].clone();
         let level_zero = generators.sources[0].clone();
+        let placement = (plan.level <= IMPOSTORS_TO).then(|| generators.placement.clone());
+        let trees = Arc::clone(&generators.trees);
         let answers = Arc::clone(&generators.answers);
         let tables = Arc::clone(&tables.0);
         let times = jobs.times.clone();
@@ -1775,6 +1888,8 @@ fn dispatch(
                         source: &source,
                         direct: direct.as_ref(),
                         level_zero: &level_zero,
+                        placement: placement.as_ref(),
+                        trees: &trees,
                         answers: &answers,
                     };
                     make_coarse(level, coord, makers, &held_children, &tables)
@@ -2393,6 +2508,7 @@ mod tests {
                 &tables,
                 waterline(&source),
                 seam_margin(1),
+                None,
             )
             .chunk
         };
@@ -4167,6 +4283,7 @@ mod tests {
                 &tables,
                 None,
                 seam_margin(level),
+                None,
             ))
         };
         let around: Vec<Shown> = face_neighbors(coord).into_iter().map(make).collect();
@@ -4660,7 +4777,7 @@ mod persistence_tests {
                     let made = generate_persistent(
                         below,
                         at,
-                        &generators.sources,
+                        &generators.persistent(),
                         &saved,
                         &HashMap::new(),
                         &tables,
@@ -4676,7 +4793,7 @@ mod persistence_tests {
                     home.z.div_euclid(divisor),
                 );
                 let again = |held: &HashMap<LodKey, Held>| {
-                    generate_persistent(level, at, &generators.sources, &saved, held, &tables)
+                    generate_persistent(level, at, &generators.persistent(), &saved, held, &tables)
                 };
                 assert!(
                     same(&again(&finer), &again(&HashMap::new())),
@@ -4710,7 +4827,7 @@ mod persistence_tests {
             let coarse = generate_persistent(
                 level,
                 covering,
-                &generators.sources,
+                &generators.persistent(),
                 &saved,
                 &HashMap::new(),
                 &tables,
@@ -4722,6 +4839,7 @@ mod persistence_tests {
                 &tables,
                 None,
                 seam_margin(level),
+                None,
             );
             let y = (home.y * 32).div_euclid(divisor).rem_euclid(32) as usize;
             assert!(coarse.chunk.get(0, y, 0).is_air(), "level {level}");
