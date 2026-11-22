@@ -11,7 +11,8 @@ Spec: [Menus that feel like a game](../spec.md).
 The Client gains the shared menu frame (title over the scenery, no header bar or
 breadcrumbs, at most one main button) and the prompt bar (clickable prompts that
 answer their key), focus-first screens with hover moving focus, and the standard
-press feedback with a click sound and controller rumble. The title screen is the
+press feedback. The click sound and rumble are
+[17](./17-click-sound-and-rumble.md). The title screen is the
 first user: a logo beside Tesserae and one menu of Continue (with the last
 World's name), Worlds, Create World, Mods, Settings and Quit, with the version
 in a corner.
@@ -25,7 +26,6 @@ in a corner.
       text field has focus
 - [ ] A press shrinks and darkens the button immediately and the action runs
       without delay
-- [ ] A click sound plays on press; a controller press also rumbles briefly
 - [ ] On a controller, A and B act as Enter and Esc and X and Y fire the
       prompts that name them; the bar shows controller buttons after controller
       input and keys again after a key press or mouse move
