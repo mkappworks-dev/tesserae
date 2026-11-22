@@ -368,6 +368,8 @@ impl LodStore {
 #[derive(Default)]
 struct Level {
     anchor: Option<ChunkCoord>,
+    /// A new Quality curve changes these as an anchor move would.
+    rings: Option<LevelRings>,
     /// Set by an anchor move, a landing, an invalidation, and a scan that ran out of budget.
     pending: bool,
     /// Set when a Chunk or a neighbour of it landed, a mesh slot freed, or the anchor moved.
@@ -1282,8 +1284,10 @@ pub(in crate::server) fn stream_lod(
     player: Query<&Player>,
     (mut orders, time): (ResMut<LodOrders>, Option<Res<Time>>),
 ) {
-    let levels = generators.levels();
+    // Never more than the generators, which the Game's own doubling, the most a curve has, sized.
+    let levels = level_count(&settings).min(generators.levels());
     if levels <= 1 {
+        retire(&[], &mut store, &mut state, &mut jobs, &mut unloaded);
         // Nobody will read the marks, and they would pile up.
         meshes.take_cover_changes();
         return;
@@ -1385,13 +1389,26 @@ fn retire(
     unloaded: &mut MessageWriter<LodUnloaded>,
 ) {
     let mut moved = false;
+    // A curve with fewer levels: the Client keeps drawing what these held until it is covered.
+    for dropped in plans.len() as u32 + 1..=state.levels.len() as u32 {
+        let level = std::mem::take(state.level_mut(dropped));
+        moved |= level.anchor.is_some();
+        for coord in level.delivered {
+            unloaded.write(LodUnloaded {
+                level: dropped,
+                coord,
+            });
+        }
+        store.retain(dropped, |_| false);
+    }
     for plan in plans {
         let level = state.level_mut(plan.level);
-        if level.anchor == Some(plan.anchor) {
+        if level.anchor == Some(plan.anchor) && level.rings == Some(plan.rings) {
             continue;
         }
         moved = true;
         level.anchor = Some(plan.anchor);
+        level.rings = Some(plan.rings);
         level.pending = true;
         level.mesh_pending = true;
 
@@ -1431,14 +1448,17 @@ fn retire(
                 .is_some_and(|p| p.rings.evict.contains(delta(p.anchor, coord)))
         });
         let kept = |(level, coord): LodKey| {
-            let p = &plans[Plan::index(level)];
-            p.rings.keep.contains(delta(p.anchor, coord))
+            plans
+                .get(Plan::index(level))
+                .is_some_and(|p| p.rings.keep.contains(delta(p.anchor, coord)))
         };
         let cancelled: Vec<LodKey> = jobs.mesh.keys().into_iter().filter(|&k| !kept(k)).collect();
         jobs.mesh.retain(kept);
         // Dispatch took these out of `dirty`, and the Chunk is still held.
         for (level, coord) in cancelled {
-            let p = &plans[Plan::index(level)];
+            let Some(p) = plans.get(Plan::index(level)) else {
+                continue;
+            };
             if p.rings.evict.contains(delta(p.anchor, coord)) {
                 state.level_mut(level).dirty.insert(coord, LodCause::Moved);
             }
@@ -2698,6 +2718,47 @@ mod tests {
         panic!("never went quiet");
     }
 
+    /// The tick of each level's first landed mesh, through to quiet.
+    fn first_landings(h: &mut Harness) -> HashMap<u32, usize> {
+        let mut first: HashMap<u32, usize> = HashMap::new();
+        let started = std::time::Instant::now();
+        for tick in 0..SETTLE_TICKS {
+            assert!(started.elapsed() < SETTLE_CEILING, "never went quiet");
+            let (ready, _) = h.lod_tick();
+            for r in ready {
+                first.entry(r.level).or_insert(tick);
+            }
+            if h.lod_quiet() {
+                return first;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        panic!("never went quiet");
+    }
+
+    fn assert_outermost_first(first: &HashMap<u32, usize>) {
+        let coarsest = LEVELS - 1;
+        for level in 1..coarsest {
+            assert!(
+                first[&coarsest] < first[&level],
+                "level {level} landed at tick {}, the outermost at {}",
+                first[&level],
+                first[&coarsest]
+            );
+        }
+    }
+
+    #[test]
+    fn from_a_cold_start_and_after_a_teleport_the_outermost_level_lands_first() {
+        let mut h = harness_with(lod_settings(), LodBudget::default());
+        h.lod_on_private_pool();
+        assert_outermost_first(&first_landings(&mut h));
+
+        // Far past `evict` of the coarsest level, so nothing drawn stays.
+        h.anchor_at(Vec3::new(3000.0, 0.0, 0.0));
+        assert_outermost_first(&first_landings(&mut h));
+    }
+
     #[test]
     fn moving_the_anchor_loads_ahead_and_evicts_behind_on_every_level() {
         let mut h = harness();
@@ -3505,6 +3566,7 @@ mod tests {
             vertical_distance_m: 64.0,
             hysteresis_m: 32.0,
             lod_distance_m: 384.0,
+            lod_unit_m: 0.0,
         }
     }
 
@@ -3832,6 +3894,7 @@ mod tests {
             vertical_distance_m: 32.0,
             hysteresis_m: 32.0,
             lod_distance_m: 256.0,
+            lod_unit_m: 0.0,
         }
     }
 
@@ -4508,6 +4571,7 @@ mod tests {
     }
 
     mod biomes;
+    mod curve;
     mod held;
     mod ores;
     mod saved;
