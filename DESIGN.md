@@ -881,7 +881,8 @@ Notes:
   frame 0.5 ms over `main`'s; 8 Chunks took 13.5 s, as the coarse jobs are
   CPU-bound, so faster coarse jobs are what would widen it. Terra keeps its 160
   m level 0: 192 m filled level 0 0.5 s later and the field past 10 s. Ground
-  tint (ticket 10) is still open. See
+  tint (ticket 10) is `wontfix`: on Terra it moved no join's colour, and its
+  split faces took the field past 10 s. See
   `.scratch/2026-11-21-phase-22-lod-features/spec.md`.
 - **Step 27** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned

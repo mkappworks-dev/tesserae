@@ -220,7 +220,13 @@ captures are reviewed in two batches, after 05 and at 09.
 - **Ground tint (Q16).** A coarse column's top colour takes the plants level 0
   would grow there, from the same density fields. Lands only if captures at the
   joins match colour better, you approve them, and coarse-Chunk time stays in
-  budget; otherwise `wontfix`.
+  budget; otherwise `wontfix`. **Recorded (10):** `wontfix`. A top drawn
+  toward the largest share of the view it leaves out moved no ring join's colour
+  by more than 0.7 of 255 on the captures, as Terra's ground cover is its
+  grass's colour; tinting Canopy cover toward the ground its crowns leave, as
+  level 0 looks from above, browned it, as a distant Eye sees little ground
+  between crowns. Its split top faces took the field from 9.9 s to 10.1 s.
+  Plants stay out of coarse levels, colour included.
 - **Settings (Q12 to Q14).** Settings gains a Distance tab after Display; the
   map and compass stay in Display. A Preset dropdown (Low, Medium, High,
   Custom); a Reach slider (2 to 8 km) and a Detail slider (`u` in whole Chunks, from the World's view
