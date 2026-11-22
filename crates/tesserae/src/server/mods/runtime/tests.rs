@@ -1811,7 +1811,7 @@ pub(in crate::server) fn terra_and_fluids(size: f32) -> LoadedMods {
     let fluids = dir.join("mods/fluids");
     std::fs::create_dir_all(&terra).unwrap();
     std::fs::create_dir_all(&fluids).unwrap();
-    for file in ["mod.toml", "terra.wasm"] {
+    for file in ["mod.toml", "terra.wasm", "thumbnail.png"] {
         std::fs::copy(
             root.join("games/terra/dist/games/terra").join(file),
             terra.join(file),

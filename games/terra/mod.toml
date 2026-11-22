@@ -5,3 +5,4 @@ api = "0.3"
 root = true
 depends = ["strata", "waters", "flora", "crops", "aquatic"]
 wasm = "terra.wasm"
+thumbnail = "thumbnail.png"
