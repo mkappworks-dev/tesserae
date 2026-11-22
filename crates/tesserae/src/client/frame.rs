@@ -314,6 +314,95 @@ fn spawn_prompt<A: Bundle>(row: &mut ChildSpawnerCommands, prompt: Prompt<A>) {
     });
 }
 
+/// A menu screen's sheet: its title over the scenery, an optional one-line
+/// subtitle, and at most one main button. Back and every other action go in
+/// the prompt bar.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the screens that move onto the frame use it")
+)]
+pub(super) struct MenuSheet<'a, A> {
+    pub title: &'a str,
+    pub subtitle: Option<&'a str>,
+    pub primary: Option<(&'a str, A)>,
+}
+
+/// Spawns the sheet with `body` scrolling inside it, and returns the main button.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the screens that move onto the frame use it")
+)]
+pub(super) fn menu_sheet<A: Bundle>(
+    main: &mut ChildSpawnerCommands,
+    sheet: MenuSheet<A>,
+    body: impl FnOnce(&mut ChildSpawnerCommands),
+) -> Option<Entity> {
+    let mut primary = None;
+    main.spawn((
+        BackgroundGradient(vec![
+            LinearGradient::to_right(vec![
+                ColorStop::new(Color::srgba_u8(10, 11, 12, 230), Val::Percent(0.0)),
+                ColorStop::new(Color::srgba_u8(10, 11, 12, 199), Val::Percent(100.0)),
+            ])
+            .into(),
+        ]),
+        Node {
+            flex_grow: 1.0,
+            max_width: Val::Px(1180.0),
+            min_height: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+    ))
+    .with_children(|s| {
+        s.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(28.0), Val::Px(8.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|header| {
+            header.spawn((
+                Text::new(sheet.title),
+                theme::weighted(34.0, theme::STRONG),
+                bevy::text::LetterSpacing::Px(-0.02 * 34.0),
+                TextColor(theme::INK),
+                Pickable::IGNORE,
+            ));
+            if let Some(subtitle) = sheet.subtitle {
+                ui::paragraph(header, subtitle, theme::TEXT_SMALL, theme::muted());
+            }
+        });
+        s.spawn(Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(16.0), Val::Px(24.0)),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        })
+        .with_children(body);
+        if let Some((label, act)) = sheet.primary {
+            s.spawn(Node {
+                justify_content: JustifyContent::FlexEnd,
+                padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(0.0), Val::Px(24.0)),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|actions| {
+                primary = Some(super::buttons::button(
+                    actions,
+                    label,
+                    act,
+                    super::buttons::ButtonStyle::Primary,
+                ));
+            });
+        }
+    });
+    primary
+}
+
 /// A plain menu list's item: the label, and an optional detail at the right
 /// such as the World that Continue opens.
 pub(super) fn list_item(
@@ -363,20 +452,20 @@ pub(super) fn list_item(
         .id()
 }
 
-const ITEM_LIT: Color = Color::srgba_u8(10, 11, 12, 184);
+/// Darker than the prototype's 0.72 alpha because the UI blends in linear light.
+const ITEM_LIT: Color = Color::srgba_u8(10, 11, 12, 230);
+
+type ItemPaint = (
+    Entity,
+    Has<InteractionDisabled>,
+    &'static mut BackgroundColor,
+    &'static mut Outline,
+    &'static Children,
+);
 
 /// One highlight: the focused item is lit, and hover moves focus to it.
 fn paint_items(
-    mut items: Query<
-        (
-            Entity,
-            Has<InteractionDisabled>,
-            &mut BackgroundColor,
-            &mut Outline,
-            &Children,
-        ),
-        With<ListItem>,
-    >,
+    mut items: Query<ItemPaint, With<ListItem>>,
     mut texts: Query<&mut TextColor>,
     focus: Res<InputFocus>,
     visible: Res<InputFocusVisible>,
@@ -568,20 +657,21 @@ fn press(
     });
 }
 
+type Squeezable = (
+    Entity,
+    Has<Pressed>,
+    Option<&'static PressedUntil>,
+    Option<&'static mut BackgroundColor>,
+    &'static mut UiTransform,
+);
+
+type BeingPressed = (Or<(With<Pressed>, With<PressedUntil>)>, With<Button>);
+
 /// Shrinks and darkens a pressed control after every system has painted it;
 /// [`unsqueeze`] undoes it first thing next frame, so painters never see it.
 fn squeeze(
     mut commands: Commands,
-    mut pressed: Query<
-        (
-            Entity,
-            Has<Pressed>,
-            Option<&PressedUntil>,
-            Option<&mut BackgroundColor>,
-            &mut UiTransform,
-        ),
-        (Or<(With<Pressed>, With<PressedUntil>)>, With<Button>),
-    >,
+    mut pressed: Query<Squeezable, BeingPressed>,
     (parents, frames): (Query<&ChildOf>, Query<(), With<Frame>>),
     time: Res<Time>,
 ) {
@@ -737,7 +827,7 @@ mod tests {
             .commands()
             .spawn((Frame, Node::default()))
             .with_children(|root| {
-                ids.0 = root.spawn((Button, Act::Other, TextInput::default())).id();
+                ids.0 = root.spawn((Button, Act::Other, TextInput)).id();
                 ids.1 = list_item(root, "Play", None, Act::Play);
                 ids.2 = list_item(root, "Other", Some("detail"), Act::Other);
                 if autofocus_second {
@@ -928,5 +1018,43 @@ mod tests {
         app.world_mut().trigger(Activate { entity: play });
         app.update();
         assert!(app.world().resource::<Presses>().0[0].pad);
+    }
+
+    #[test]
+    fn a_menu_sheet_shows_its_title_and_subtitle_and_at_most_one_main_button() {
+        let mut app = app();
+        let mut main = Entity::PLACEHOLDER;
+        app.world_mut()
+            .commands()
+            .spawn((Frame, Node::default()))
+            .with_children(|root| {
+                main = menu_sheet(
+                    root,
+                    MenuSheet {
+                        title: "Choose a Game",
+                        subtitle: Some("It shapes the land."),
+                        primary: Some(("Next", Act::Play)),
+                    },
+                    |body| {
+                        list_item(body, "Terra", None, Act::Other);
+                    },
+                )
+                .unwrap();
+            });
+        app.update();
+        let texts: Vec<String> = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .collect();
+        for wanted in ["Choose a Game", "It shapes the land.", "Next", "Terra"] {
+            assert!(texts.iter().any(|t| t == wanted), "{wanted} in {texts:?}");
+        }
+        assert_eq!(app.world().get::<Act>(main), Some(&Act::Play));
+        assert_eq!(
+            focused(&app).and_then(|f| app.world().get::<Act>(f)),
+            Some(&Act::Other)
+        );
     }
 }
