@@ -62,7 +62,8 @@ captures are reviewed in two batches, after 05 and at 09.
    answers draws only, and none over saved changes.
 4. **Structure Impostors** at every coarse level, Settlements and their paths
    included.
-5. **Canopy cover** from level 3 up.
+5. **Canopy cover** from level 2 up (03 measured level 2's Impostors past
+   the budget).
 6. **Coarsest level first** in the fill order.
 7. **The Quality curve** as a table the Server streams from, per Player,
    clamped to the Game's values; holes and overlaps derived per pair.
@@ -134,13 +135,13 @@ captures are reviewed in two batches, after 05 and at 09.
   stands is sampled at the coarse Voxel size, any solid beating air, at every
   coarse level. Settlement paths are ground Material.
 - **Plants (Q4).** Ground cover, crops and flowers stay out of coarse levels.
-- **Canopy cover (Q18).** From level 3 up a coarse column's top Voxel becomes
+- **Canopy cover (Q18).** From level 2 up (03's measurement) a coarse column's top Voxel becomes
   the dominant species' leaf Material where the expected cover is over half:
   the Biome's tree chance times the species' canopy area times its clump noise,
   zero under water, on Structure footprints and on fields. It is raised one
   coarse Voxel above the ground where the species' mean canopy top reaches at
-  least half that Voxel, so forests have a silhouette at 8 m and are a tint at
-  16 and 32 m.
+  least half that Voxel, so forests keep a silhouette until their Voxel outgrows
+  the trees.
 - **The join stays a hard cut (Q5,
   [ADR-0019](../../docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md)).**
 - **Shadows (Q7).** Impostors and Canopy cover cast no sun shadow: the three

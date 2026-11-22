@@ -10,11 +10,11 @@ use tesserae_core::{
 
 const LEVELS: u32 = 4;
 
-fn trunk() -> MaterialId {
+pub(super) fn trunk() -> MaterialId {
     fixtures().content.hall
 }
 
-fn canopy() -> MaterialId {
+pub(super) fn canopy() -> MaterialId {
     fixtures().leaves
 }
 
@@ -23,9 +23,13 @@ fn is_tree(v: Voxel) -> bool {
 }
 
 fn forest() -> WorldgenParams {
+    forest_spaced(8.0, None)
+}
+
+pub(super) fn forest_spaced(spacing_m: f32, crowding_m: Option<f32>) -> WorldgenParams {
     let oak = SurfaceFeature {
         material: trunk(),
-        spacing_m: 8.0,
+        spacing_m,
         plant: Some(SurfacePlant {
             shape: 0,
             kind: SurfacePlantKind::Tree(SurfaceTree {
@@ -36,7 +40,7 @@ fn forest() -> WorldgenParams {
                 fruit: None,
                 vines: None,
                 branching: None,
-                crowding_m: None,
+                crowding_m,
             }),
         }),
         clump: None,
@@ -64,13 +68,13 @@ fn forest_harness() -> Harness {
 }
 
 /// The Chunk rows of `level` the ground and its trees can reach.
-fn rows(level_zero: &Worldgen, level: u32) -> std::ops::RangeInclusive<i32> {
+pub(super) fn rows(level_zero: &Worldgen, level: u32) -> std::ops::RangeInclusive<i32> {
     let cell_m = CHUNK_SIZE as f32 * level_zero.voxel_size() * level_scale(level);
     let (lowest, highest) = level_zero.surface_bounds_m();
     (lowest / cell_m).floor() as i32 - 1..=(highest / cell_m).floor() as i32 + 1
 }
 
-fn voxels(chunk: &Chunk) -> impl Iterator<Item = ([usize; 3], Voxel)> + '_ {
+pub(super) fn voxels(chunk: &Chunk) -> impl Iterator<Item = ([usize; 3], Voxel)> + '_ {
     (0..CHUNK_SIZE.pow(3)).map(|i| {
         let at = [
             i % CHUNK_SIZE,

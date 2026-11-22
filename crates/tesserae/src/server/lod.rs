@@ -22,15 +22,15 @@ use bevy::prelude::*;
 use crate::session::SessionApp;
 use tesserae_core::climate::SurfacePlantKind;
 use tesserae_core::lod::{
-    Child, Coarse, TreeMaterials, UnderWater, Waterline, coarse_light_in, coarsen_tree_parts,
-    downsample_changed, stand_tree_parts,
+    Child, Coarse, TreeMaterials, UnderWater, Waterline, canopy_candidates, coarse_light_in,
+    coarsen_tree_parts, downsample_changed, stand_canopy_cover, stand_tree_parts,
 };
 use tesserae_core::mesh::{POS_Y, Quad, QuadKind};
 use tesserae_core::shape::SUBDIV;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, ColumnTop, LitChunk, MeshLayer, OreTable,
-    SeamMargin, SeamOpenings, Surface, Tables, Voxel, Worldgen, WorldgenParams,
+    CHUNK_SIZE, CanopyShapes, Chunk, ChunkMesh, ChunkOverlay, ColumnTop, LitChunk, MeshLayer,
+    OreTable, SeamMargin, SeamOpenings, Surface, Tables, Voxel, Worldgen, WorldgenParams,
     agree_with_level_zero, emits_no_faces, mesh_chunk_with_seams, seam_openings,
 };
 
@@ -162,8 +162,9 @@ fn level_scale(level: u32) -> f32 {
     (1u32 << level) as f32
 }
 
-/// Levels up to this one stand tree Impostors. Level 2's draws cost some 28 ms more a
-/// terrain Chunk than level 1's 6, with no warm 1 m columns under them, so it takes Canopy cover.
+/// Levels up to this one stand tree Impostors, and the levels above draw Canopy cover. Level 2's
+/// draws cost some 28 ms more a terrain Chunk than level 1's 6, with no warm 1 m columns under
+/// them, so it takes Canopy cover.
 pub(in crate::server) const IMPOSTORS_TO: u32 = 1;
 
 /// The placement generator's column cache, in Cells: level 1's ring at the widest unit a Player
@@ -186,6 +187,7 @@ pub(in crate::server) struct LodGenerators {
     /// its column cache with `sources[0]`, so nothing coarse touches level 0's.
     placement: Arc<Worldgen>,
     trees: Arc<TreeMaterials>,
+    canopies: Arc<CanopyShapes>,
     answers: Arc<Answers>,
 }
 
@@ -215,6 +217,7 @@ impl LodGenerators {
         let mut generators = LodGenerators {
             sources,
             direct: Vec::new(),
+            canopies: Arc::new(placement.canopy_shapes()),
             placement,
             trees: Arc::new(trees),
             answers: Arc::default(),
@@ -269,8 +272,9 @@ impl LodGenerators {
             source: &self.sources[Plan::index(level)],
             direct: self.direct(level),
             level_zero: &self.sources[0],
-            placement: (level <= IMPOSTORS_TO).then_some(&self.placement),
+            placement: Some(&self.placement),
             trees: &self.trees,
+            canopies: &self.canopies,
             answers: &self.answers,
         }
     }
@@ -280,6 +284,7 @@ impl LodGenerators {
             sources: self.sources.clone(),
             placement: Arc::clone(&self.placement),
             trees: Arc::clone(&self.trees),
+            canopies: Arc::clone(&self.canopies),
         }
     }
 
@@ -813,7 +818,7 @@ pub(in crate::server) fn make_coarse(
             makers.placement.map(|_| makers.trees),
         ),
     };
-    agree(
+    let agreed = agree(
         makers.level_zero,
         Some(makers.answers),
         level,
@@ -822,7 +827,18 @@ pub(in crate::server) fn make_coarse(
         held,
     );
     if let Some(placement) = makers.placement {
-        stand_impostors(placement, level, coord, &mut coarse.chunk, held);
+        if level <= IMPOSTORS_TO {
+            stand_impostors(placement, level, coord, &mut coarse.chunk, held);
+        } else if let Some(agreed) = agreed {
+            cover_canopies(
+                placement,
+                makers.canopies,
+                level,
+                coord,
+                &mut coarse.chunk,
+                &agreed,
+            );
+        }
     }
     coarse
 }
@@ -845,6 +861,39 @@ fn stand_impostors(
     }
     let skip = std::array::from_fn(|i| held[i].as_ref().is_some_and(|h| h.changed.is_some()));
     stand_tree_parts(chunk, [coord.x, coord.y, coord.z], span, &parts, skip);
+}
+
+/// Draws Canopy cover on the columns `agreed` answers, which leaves out every column a changed
+/// child reaches, whose own tree Voxels [`generate_coarse`] kept (ADR-0035).
+fn cover_canopies(
+    placement: &Worldgen,
+    shapes: &CanopyShapes,
+    level: u32,
+    coord: ChunkCoord,
+    chunk: &mut Chunk,
+    agreed: &[Option<ColumnTop>],
+) {
+    let voxel_m = placement.voxel_size() * level_scale(level);
+    let candidates = canopy_candidates(coord.y, voxel_m, agreed);
+    if candidates.is_empty() {
+        return;
+    }
+    let n = CHUNK_SIZE;
+    let columns: Vec<[i32; 2]> = candidates
+        .iter()
+        .map(|&i| {
+            [
+                Answers::centre(level, coord.x, i % n),
+                Answers::centre(level, coord.z, i / n),
+            ]
+        })
+        .collect();
+    let canopies: Vec<_> = candidates
+        .into_iter()
+        .zip(placement.canopy_cover(shapes, &columns))
+        .filter_map(|(i, canopy)| Some((i, canopy?)))
+        .collect();
+    stand_canopy_cover(chunk, coord.y, voxel_m, agreed, &canopies);
 }
 
 /// Every Material a Biome grows a tree of, by part.
@@ -875,15 +924,17 @@ pub(in crate::server) struct Makers<'a> {
     pub source: &'a Worldgen,
     pub direct: Option<&'a Worldgen>,
     pub level_zero: &'a Worldgen,
-    /// Set at the levels that stand Impostors.
+    /// Draws trees: Impostors up to [`IMPOSTORS_TO`], Canopy cover above it.
     pub placement: Option<&'a Worldgen>,
     pub trees: &'a TreeMaterials,
+    pub canopies: &'a CanopyShapes,
     pub answers: &'a Answers,
 }
 
 /// Makes every column of a level-`level` Chunk that no changed child reaches show level 0's water
 /// or land and top Material at its centre (ADR-0035). A changed child's columns keep the
-/// downsample's answer, so a drained lake or a built pier shows as it does at level 1.
+/// downsample's answer, so a drained lake or a built pier shows as it does at level 1. Returns the
+/// answers it applied, `None` for a kept column, unless no column's ground reaches the Chunk.
 fn agree(
     level_zero: &Worldgen,
     answers: Option<&Answers>,
@@ -891,7 +942,7 @@ fn agree(
     coord: ChunkCoord,
     chunk: &mut Chunk,
     held: &[Option<Held>; 8],
-) {
+) -> Option<Answered> {
     let n = CHUNK_SIZE as i32;
     let voxel_m = level_zero.voxel_size() * level_scale(level);
     let floor_m = (coord.y * n) as f32 * voxel_m;
@@ -901,7 +952,7 @@ fn agree(
     if (floor_m > highest_m + voxel_m && chunk.uniform() == Some(Voxel::AIR))
         || ceiling_m < lowest_m - voxel_m
     {
-        return;
+        return None;
     }
     let column = [coord.x, coord.z];
     let answered = match answers {
@@ -917,17 +968,16 @@ fn agree(
                 && held[c].as_ref().is_some_and(|h| h.changed.is_some())
         })
     };
-    let kept: Vec<Option<ColumnTop>>;
-    let answered: &[Option<ColumnTop>] = if held.iter().flatten().any(|h| h.changed.is_some()) {
-        kept = (0..answered.len())
+    let answered: Answered = if held.iter().flatten().any(|h| h.changed.is_some()) {
+        (0..answered.len())
             .map(|i| answered[i].filter(|_| !changed(i)))
-            .collect();
-        &kept
+            .collect()
     } else {
-        &answered
+        answered
     };
     let water = level_zero.water().map_or(0, |w| w.material);
-    agree_with_level_zero(chunk, coord.y, voxel_m, water, answered);
+    agree_with_level_zero(chunk, coord.y, voxel_m, water, &answered);
+    Some(answered)
 }
 
 /// How many coarse Chunk columns [`Answers`] keeps: 16 KB each.
@@ -957,12 +1007,20 @@ impl Answers {
     }
 
     fn ask(level_zero: &Worldgen, level: u32, [cx, cz]: [i32; 2]) -> Answered {
-        let n = CHUNK_SIZE as i32;
-        let span = 1i32 << level;
-        let centre = |c: i32, local: i32| (c * n + local) * span + span / 2;
-        (0..n * n)
-            .map(|i| level_zero.column_top(centre(cx, i % n), centre(cz, i / n)))
+        (0..CHUNK_SIZE * CHUNK_SIZE)
+            .map(|i| {
+                level_zero.column_top(
+                    Self::centre(level, cx, i % CHUNK_SIZE),
+                    Self::centre(level, cz, i / CHUNK_SIZE),
+                )
+            })
             .collect()
+    }
+
+    /// The level-0 column under the centre of column `local` of coarse Chunk column `c`.
+    fn centre(level: u32, c: i32, local: usize) -> i32 {
+        let span = 1i32 << level;
+        (c * CHUNK_SIZE as i32 + local as i32) * span + span / 2
     }
 }
 
@@ -1016,7 +1074,6 @@ fn generate_persistent(
         })
     });
     let source = &generators.sources[level as usize - 1];
-    let impostors = level <= IMPOSTORS_TO;
     let mut coarse = generate_coarse(
         source,
         coord,
@@ -1024,9 +1081,9 @@ fn generate_persistent(
         tables,
         waterline(source),
         seam_margin(level),
-        impostors.then_some(&*generators.trees),
+        Some(&generators.trees),
     );
-    agree(
+    let agreed = agree(
         &generators.sources[0],
         None,
         level,
@@ -1034,13 +1091,22 @@ fn generate_persistent(
         &mut coarse.chunk,
         &children,
     );
-    if impostors {
+    if level <= IMPOSTORS_TO {
         stand_impostors(
             &generators.placement,
             level,
             coord,
             &mut coarse.chunk,
             &children,
+        );
+    } else if let Some(agreed) = agreed {
+        cover_canopies(
+            &generators.placement,
+            &generators.canopies,
+            level,
+            coord,
+            &mut coarse.chunk,
+            &agreed,
         );
     }
     coarse
@@ -1052,6 +1118,7 @@ pub(in crate::server) struct Persistent {
     sources: Vec<Worldgen>,
     placement: Arc<Worldgen>,
     trees: Arc<TreeMaterials>,
+    canopies: Arc<CanopyShapes>,
 }
 
 /// What generation fills with its lake at level 0, for level 1 to recognise.
@@ -1874,8 +1941,9 @@ fn dispatch(
         }
         let source = generators.sources[Plan::index(plan.level)].clone();
         let level_zero = generators.sources[0].clone();
-        let placement = (plan.level <= IMPOSTORS_TO).then(|| Arc::clone(&generators.placement));
+        let placement = Arc::clone(&generators.placement);
         let trees = Arc::clone(&generators.trees);
+        let canopies = Arc::clone(&generators.canopies);
         let answers = Arc::clone(&generators.answers);
         let tables = Arc::clone(&tables.0);
         let times = jobs.times.clone();
@@ -1889,8 +1957,9 @@ fn dispatch(
                         source: &source,
                         direct: direct.as_ref(),
                         level_zero: &level_zero,
-                        placement: placement.as_deref(),
+                        placement: Some(&placement),
                         trees: &trees,
+                        canopies: &canopies,
                         answers: &answers,
                     };
                     make_coarse(level, coord, makers, &held_children, &tables)
@@ -4689,6 +4758,7 @@ mod tests {
     }
 
     mod biomes;
+    mod canopy;
     mod curve;
     mod held;
     mod ores;

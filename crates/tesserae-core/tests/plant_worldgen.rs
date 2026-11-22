@@ -1678,3 +1678,39 @@ fn the_tree_parts_drawn_in_a_box_are_the_trunk_and_canopy_voxels_level_zero_stan
     );
     assert_eq!(drawn.len(), level_zero.len());
 }
+
+/// A dense forest's columns draw its leaves, lifted by its trees' height; a sparse one's none.
+#[test]
+fn canopy_cover_takes_a_dense_forests_leaves_and_leaves_sparse_trees_out() {
+    let columns: Vec<[i32; 2]> = (0..32)
+        .flat_map(|x| (0..32).map(move |z| [x * 4 - 64, z * 4 - 64]))
+        .collect();
+    let cover = |spacing_m: f32| {
+        let mut f = tree_feature(spacing_m, false);
+        if let Some(SurfacePlant {
+            kind: SurfacePlantKind::Tree(tree),
+            ..
+        }) = &mut f.plant
+        {
+            // Crowns kept 1.5 radii apart never close over half the ground.
+            tree.crowding_m = Some(1.0);
+        }
+        let g = Worldgen::new(SEED, 1.0, flat(&[f]));
+        g.canopy_cover(&g.canopy_shapes(), &columns)
+    };
+    let dense = cover(3.0);
+    for canopy in dense.iter().flatten() {
+        assert_eq!(canopy.material, CANOPY);
+        assert!(canopy.cover > 0.5 && canopy.cover <= 1.0, "{canopy:?}");
+        // A 3 to 5 m trunk under a 2.5 m crown.
+        assert!((4.0..=9.0).contains(&canopy.top_m), "{canopy:?}");
+    }
+    assert!(
+        dense.iter().all(Option::is_some),
+        "a dense forest left bare"
+    );
+    assert!(
+        cover(16.0).iter().all(Option::is_none),
+        "sparse trees covered"
+    );
+}
