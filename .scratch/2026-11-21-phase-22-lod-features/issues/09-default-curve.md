@@ -1,7 +1,7 @@
 # 09: The default curve, fog and Terra's ceiling
 
 Status: ready-for-agent
-Blocked by: 03, 04, 05, 06, 07
+Blocked by: 03, 04, 05, 06, 07, 11
 
 Spec: [LOD features](../spec.md).
 
