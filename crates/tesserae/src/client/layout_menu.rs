@@ -119,6 +119,10 @@ type Blockers<'w> = (
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
     Option<Res<'w, super::structure_menu::StructureList>>,
+    (
+        Option<Res<'w, super::edit::Hotbar>>,
+        Option<Res<'w, super::edit::Catalogue>>,
+    ),
 );
 
 /// The Layout key opens the menu, turning the mode on, and closes it again into
@@ -128,11 +132,7 @@ pub(super) fn toggle(
     mut menu: ResMut<LayoutMenu>,
     mut mode: ResMut<LayoutMode>,
     preferences: Res<Preferences>,
-    (catalogue, settings, ui, save, inventory, map, list): Blockers,
-    held: (
-        Option<Res<super::edit::Hotbar>>,
-        Option<Res<super::edit::Catalogue>>,
-    ),
+    (catalogue, settings, ui, save, inventory, map, list, held): Blockers,
     window: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
