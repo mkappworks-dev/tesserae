@@ -2046,6 +2046,7 @@ const prototypeScreens = [
   { value: "plants", label: "Plants (step 18)" },
   { value: "vegetation", label: "Vegetation (step 18b)" },
   { value: "map", label: "Map (step 19)" },
+  { value: "structures", label: "Structures" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",

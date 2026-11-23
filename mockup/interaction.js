@@ -320,3 +320,45 @@ document.addEventListener("input", (e) => {
         : "× " + v.toFixed(1)
       : v.toFixed(2);
 });
+
+/* One rule for every menu popup: a press outside it closes it and does nothing
+   else, so it cannot also press whatever lies beneath. Its own button still
+   toggles it, and Esc still closes it. */
+let swallowClick = false;
+function openPopups() {
+  return [
+    ...document.querySelectorAll(".pop-wrap.open, .kebab.open, #map-pop"),
+    ...(openSelect ? [$("#select-layer"), openSelect.trigger] : []),
+  ].filter(Boolean);
+}
+function closePopups() {
+  if (state.pop) closePop();
+  closeCardMenus(null);
+  closeSelect();
+  if (state.map?.pop) mapPopCancel();
+}
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    swallowClick = false;
+    if (e.target.closest?.("#dialog-root")) return;
+    const open = openPopups();
+    if (!open.length || open.some((p) => p.contains(e.target))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    swallowClick = true;
+    closePopups();
+  },
+  true,
+);
+for (const type of ["pointerup", "mouseup", "click"])
+  document.addEventListener(
+    type,
+    (e) => {
+      if (!swallowClick) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (type === "click") swallowClick = false;
+    },
+    true,
+  );
