@@ -52,6 +52,22 @@ impl Tab {
             Self::Accessibility => "Accessibility",
         }
     }
+    /// What the Settings help strip says while no row holds focus or the pointer.
+    pub fn help(self) -> &'static str {
+        match self {
+            Self::Behavior => "How moving, building and the mouse feel.",
+            Self::Bindings => {
+                "The keys and buttons for every action. Select a key cap, then press the new key. \
+                 Esc cancels; Delete clears it."
+            }
+            Self::Controller => "Sticks, touch controls and controller buttons.",
+            Self::Display => "The window, frame presentation and image quality.",
+            Self::Distance => "How far and how sharply distant terrain is drawn.",
+            Self::Audio => "The volume of each kind of sound.",
+            Self::Accessibility => "Motion, contrast and text size.",
+            Self::Catalogue | Self::Recipes => "",
+        }
+    }
     fn icon(self) -> IconKind {
         match self {
             Self::Catalogue | Self::Recipes | Self::Behavior => IconKind::Behavior,

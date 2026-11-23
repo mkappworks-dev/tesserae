@@ -2,7 +2,6 @@
 //! On/Off toggles, sliders, key caps, the help strip and the dialogs.
 
 use super::*;
-use crate::client::menu_ui::Tab;
 use crate::client::theme;
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::picking::hover::Hovered;
@@ -398,23 +397,6 @@ pub(super) struct HelpText;
 #[derive(Component)]
 pub(super) struct HelpNote;
 
-/// What the strip says while no row holds focus or the pointer.
-pub(super) fn category_help(tab: Tab) -> &'static str {
-    match tab {
-        Tab::Behavior => "How moving, building and the mouse feel.",
-        Tab::Bindings => {
-            "The keys and buttons for every action. Select a key cap, then press the new key. \
-             Esc cancels; Delete clears it."
-        }
-        Tab::Controller => "Sticks, touch controls and controller buttons.",
-        Tab::Display => "The window, frame presentation and image quality.",
-        Tab::Distance => "How far and how sharply distant terrain is drawn.",
-        Tab::Audio => "The volume of each kind of sound.",
-        Tab::Accessibility => "Motion, contrast and text size.",
-        Tab::Catalogue | Tab::Recipes => "",
-    }
-}
-
 const STRIP_TEXT: f32 = 13.0;
 const STRIP_LINE: bevy::text::LineHeight = bevy::text::LineHeight::RelativeToFont(1.45);
 
@@ -531,7 +513,7 @@ pub(super) fn show_help(
     (*last_hovered, *last_focused) = (hovered, focused);
     let (title, text, note) = match row.and_then(|row| rows.get(row).ok()) {
         Some((_, help, _)) => (help.title.as_str(), help.text.as_str(), help.note.as_ref()),
-        None => (settings.tab.label(), category_help(settings.tab), None),
+        None => (settings.tab.label(), settings.tab.help(), None),
     };
     for mut shown in &mut titles {
         shown.set_if_neq(Text::new(title));
