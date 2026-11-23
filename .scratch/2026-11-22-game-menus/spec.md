@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Menus that feel like a game
 
@@ -253,3 +253,16 @@ the Client.
   the place a Player learns the keys.
 
 ## Comments
+
+Implemented on `feat/app-icon-and-game-menus` (tickets 02–17; 17 split from 02
+for the click sound and rumble). After code review, the Trust page went back to
+Back focused, per "Trust is never on Enter alone". A side-by-side comparison
+with the mockup fixed ten visual differences. Left open for a decision:
+
+- The Map opens with the last-added Waypoint selected; the mockup opens with
+  nothing selected.
+- The Layout-ready HUD card lists every key in a sentence; the mockup shows only
+  "L Edit · ⌫ Exit" as caps.
+- The Worlds and Trust sheets fill the screen; the mockup's fit their content.
+- The Save-first dialog focuses Save and continue, where the mockup focuses
+  Don't save, so Enter never discards edits.
