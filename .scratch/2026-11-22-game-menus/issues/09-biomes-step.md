@@ -1,6 +1,6 @@
 # 09: Biomes step
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [06: Live terrain preview](./06-live-terrain-preview.md)
 
@@ -18,10 +18,20 @@ The panel scrolls on its own.
 
 ## Acceptance criteria
 
-- [ ] Dragging or arrow-keying the biome on the climate map changes its
+- [x] Dragging or arrow-keying the biome on the climate map changes its
       temperature and humidity
-- [ ] An edited biome is marked customised and its preview redraws
-- [ ] Reset restores one biome; Reset all restores every biome
-- [ ] Next with no biome enabled says why and stays
+- [x] An edited biome is marked customised and its preview redraws
+- [x] Reset restores one biome; Reset all restores every biome
+- [x] Next with no biome enabled says why and stays
 
 ## Comments
+
+Done on `feat/game-menus-09-biomes-step`. A Biome's preview is a cut through it
+(sky fading to fog over surface, soil and rock bands, the rock holed by its cave
+scale), drawn from Material colours once the Game is read. The ground selectors
+cycle to the next Material on click or Enter, as before; the mockup's dropdowns
+are not built. Sky and fog stay `#rrggbb` fields, without the mockup's colour
+swatches. Arrow keys on the climate map's handle move the Biome (Shift ×10);
+the D-pad still navigates past it so a controller is never trapped, and pad
+players use the sliders. Reset all still resets the Climate sizes on the World
+step too, as its dialog says.
