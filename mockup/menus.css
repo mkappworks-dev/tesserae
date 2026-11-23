@@ -523,3 +523,15 @@
     padding-right: 32px;
   }
 }
+
+/* World details reads as the pause screen's own sheet: the same fill, no frame. */
+.game .dialog:has(.details-dialog) {
+  background: linear-gradient(90deg, rgb(10 11 12 / 0.9), rgb(10 11 12 / 0.78));
+  backdrop-filter: blur(6px);
+  border: 0;
+  box-shadow: none;
+}
+/* World details sits over the already-dimmed pause screen, so its own dim stays light. */
+.game .overlay:has(.details-dialog) {
+  background: rgb(9 10 12 / 0.3);
+}

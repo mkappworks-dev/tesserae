@@ -706,36 +706,6 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.color-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 40px;
-  font-size: 13px;
-  font-weight: 550;
-  cursor: pointer;
-}
-.color-swatch {
-  width: 40px;
-  height: 28px;
-  padding: 2px;
-  background: var(--panel);
-  border: 1px solid var(--edge);
-  border-radius: 6px;
-  cursor: pointer;
-}
-.color-swatch::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-.color-swatch::-webkit-color-swatch {
-  border: 0;
-  border-radius: 4px;
-}
-.color-swatch::-moz-color-swatch {
-  border: 0;
-  border-radius: 4px;
-}
 .review-section + .review-section {
   border-top: 1px solid var(--edge);
   padding-top: 20px;
@@ -894,13 +864,6 @@
 .pick-row .custom-select {
   min-height: 32px;
   margin: 0;
-}
-.color-stack {
-  display: grid;
-  gap: 4px;
-}
-.biome-panel.compact .color-row {
-  min-height: 32px;
 }
 
 .game .biome-card.selected {

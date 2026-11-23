@@ -203,6 +203,10 @@ function handleMenuPad(pad, time) {
   if (padHeld && (!direction || time - padLast < 220)) return;
   padLast = time;
   padHeld = true;
+  if (openColour) {
+    colourPad(direction, pressed);
+    return;
+  }
   if (openSelect) {
     if (direction === "down") focusSelectOption(openSelect.index + 1);
     else if (direction === "up") focusSelectOption(openSelect.index - 1);
@@ -330,12 +334,14 @@ function openPopups() {
   return [
     ...document.querySelectorAll(".pop-wrap.open, .kebab.open"),
     ...(openSelect ? [$("#select-layer"), openSelect.trigger] : []),
+    ...(openColour ? [$("#colour-layer"), openColour.trigger] : []),
   ].filter(Boolean);
 }
 function closePopups() {
   if (state.pop) closePop();
   closeCardMenus(null);
   closeSelect();
+  closeColourPicker();
 }
 document.addEventListener(
   "pointerdown",
