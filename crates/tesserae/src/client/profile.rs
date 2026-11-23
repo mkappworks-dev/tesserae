@@ -29,6 +29,8 @@ pub(crate) struct Preferences {
     pub invert_y: bool,
     pub reverse_scroll: bool,
     pub scroll_sensitivity: f32,
+    /// Absent from a profile saved before it, which reads as Windowed.
+    pub window_mode: super::presentation::WindowMode,
     pub display_sync: bool,
     pub fps_cap: Option<u32>,
     pub anti_aliasing: super::anti_alias::AntiAliasing,
@@ -125,6 +127,7 @@ impl Default for Preferences {
             invert_y: false,
             reverse_scroll: false,
             scroll_sensitivity: 1.0,
+            window_mode: default(),
             display_sync: true,
             fps_cap: None,
             anti_aliasing: default(),

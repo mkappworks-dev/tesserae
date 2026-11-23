@@ -100,6 +100,8 @@ enum Screen {
     Edit(PathBuf),
     /// Leaving Edit World for a new World with unsaved changes, which asks first.
     SaveFirst(PathBuf),
+    /// Cancelling Edit World with unsaved changes, which asks first.
+    DiscardEdits(PathBuf),
     Delete(PathBuf),
     Trust(Next),
     /// Trust asked in a dialog over step `on`, which moves on to `to` once granted.
@@ -424,6 +426,8 @@ struct Launcher {
     /// The control the last act came from, focused again when its page is rebuilt.
     refocus: Option<Act>,
     problem: Option<String>,
+    /// The Trust page or dialog shows its permissions and limits.
+    trust_details: bool,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
     /// The terrain preview's source and the Game and Mods it was read for.
@@ -469,6 +473,7 @@ impl Launcher {
         self.biome_view.pop = None;
         self.biome_view.ground = None;
         self.refocus = None;
+        self.trust_details = false;
         self.version += 1;
     }
 
@@ -517,6 +522,7 @@ pub(super) enum Act {
     Step(Step),
     KeepEditing,
     DiscardSetup,
+    DiscardEdits,
     /// Edit World's one Game mode: the World's default and the Player's own, while the Player is
     /// its only Player.
     EditMode(GameMode),
@@ -544,6 +550,8 @@ pub(super) enum Act {
     Trust,
     /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
     TrustStep,
+    /// Shows or hides the permissions and limits on a Trust page or dialog.
+    TrustDetails,
     Dismiss,
     /// Opens or closes a popup beside the Mods search.
     ModPop(Pop),
@@ -719,6 +727,8 @@ fn review_capture(
                 "create" => Act::Create,
                 "next" => Act::Next,
                 "back" => Act::Back,
+                "details" => Act::TrustDetails,
+                "trust-step" => Act::TrustStep,
                 "randomize" => Act::Randomize,
                 "reset" => Act::ResetBiomes,
                 "filter" => Act::ModPop(Pop::Filter),
@@ -951,6 +961,7 @@ fn start(
         biome_view: BiomeView::default(),
         ground_search: String::new(),
         refocus: None,
+        trust_details: false,
         problem: None,
         clashes: Default::default(),
         version: 0,
@@ -1271,6 +1282,11 @@ fn handle(
         }
         match act {
             Act::Continue | Act::Play(..) | Act::Trust => on_open(l, &mut cx, act),
+            Act::TrustDetails => {
+                l.trust_details = !l.trust_details;
+                l.refocus = Some(act);
+                l.version += 1;
+            }
             Act::Edit(..)
             | Act::Delete
             | Act::DeleteWorld(..)
@@ -1282,6 +1298,7 @@ fn handle(
             | Act::SaveName
             | Act::DontSave
             | Act::SaveAndContinue
+            | Act::DiscardEdits
             | Act::ConfirmDelete => on_edit_world(l, &mut cx, act),
             Act::New
             | Act::ReCreate
@@ -1381,7 +1398,10 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             Screen::Discard(step) | Screen::StepTrust { on: step, .. } => {
                 l.show(Screen::Create(step))
             }
-            Screen::Delete(path) | Screen::SaveFirst(path) => l.show(Screen::Edit(path)),
+            Screen::Delete(path) | Screen::SaveFirst(path) | Screen::DiscardEdits(path) => {
+                l.show(Screen::Edit(path))
+            }
+            Screen::Edit(path) if unsaved(l) => l.show(Screen::DiscardEdits(path)),
             Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
             Screen::Worlds | Screen::Library => l.show(Screen::Title),
             Screen::Opening(_) | Screen::Title => {}

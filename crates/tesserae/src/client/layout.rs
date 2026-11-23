@@ -6,7 +6,7 @@
 //! sees them. It never reads World storage: the preview is drawn from the
 //! Server's [`LayoutAnswer`].
 use super::{
-    actions::{Action, Actions, Bindings, Labels},
+    actions::{Action, Actions},
     camera::FlyCamera,
     edit::{Holding, Hotbar},
     input::Ownership,
@@ -920,38 +920,29 @@ fn tally(answer: &LayoutAnswer) -> [usize; 3] {
     ]
 }
 
-/// What the menu and the status card say, in three parts that are set apart:
-/// the shape, the next step with what the aim would lay, and the keys.
+/// What the status card says, in two parts that are set apart: the shape, and
+/// the next step with what the aim would lay.
 pub(super) struct Summary {
     /// The span's size in Voxels and in metres.
     pub(super) size: String,
     pub(super) body: String,
-    pub(super) hint: String,
 }
 
 #[cfg(test)]
 impl Summary {
     pub(super) fn joined(&self) -> String {
-        format!("{}\n{}\n{}", self.size, self.body, self.hint)
+        format!("{}\n{}", self.size, self.body)
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn summary(
     mode: &LayoutMode,
     layout: &LayoutPreferences,
     hotbar: &Hotbar,
     camera: &GlobalTransform,
     preview: &Preview,
-    bindings: &Bindings,
-    labels: &Labels,
     (now, voxel_size): (f64, f32),
 ) -> Summary {
-    // The first binding only: a card has no room for every alternative.
-    let keys = |action| {
-        let all = bindings.label(action, labels);
-        all.split(" / ").next().unwrap_or_default().to_owned()
-    };
     let between = layout.kind == Kind::Between;
     let step = match mode.points.len() {
         _ if !between => None,
@@ -1004,28 +995,7 @@ pub(super) fn summary(
     if mode.refused {
         body.push_str(&format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels"));
     }
-    let leave = format!(
-        " · {} edit · {} exit",
-        keys(Action::Layout),
-        keys(Action::ClearTool)
-    );
-    let hint = if between {
-        let (place, remove) = (keys(Action::Place), keys(Action::Remove));
-        match mode.points.len() {
-            0 => format!("{place} set A, hold and drag to B · {remove} cancel{leave}"),
-            1 => format!("{place} set B, or let go on B · {remove} step back{leave}"),
-            _ => format!("{place} set C and lay it · {remove} step back{leave}"),
-        }
-    } else {
-        format!(
-            "{} place · {} cancel · {} / {} count{leave}",
-            keys(Action::Place),
-            keys(Action::Remove),
-            keys(Action::LayoutMore),
-            keys(Action::LayoutLess),
-        )
-    };
-    Summary { size, body, hint }
+    Summary { size, body }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -1881,8 +1851,6 @@ mod tests {
             app.world().resource::<Hotbar>(),
             &camera,
             app.world().resource::<Preview>(),
-            app.world().resource::<Bindings>(),
-            &Labels::default(),
             (0.0, 1.0),
         )
         .joined()
@@ -1907,7 +1875,6 @@ mod tests {
             said.contains("2 will be placed, 1 out of reach, 1 blocked"),
             "{said}"
         );
-        assert!(said.contains("count"), "the keys for the counts");
         saved_mut(&mut app).layout.kind = Kind::Between;
         // The aim is asked again in the new way.
         answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
@@ -2054,30 +2021,6 @@ mod tests {
         assert!(corners_of(&mode, &directions, 1.0).is_empty());
         mode.on = false;
         assert!(corners_of(&mode, &layout, 1.0).is_empty());
-    }
-
-    #[test]
-    fn the_prompts_name_the_keys_for_the_current_step() {
-        let mut app = ghost_app();
-        saved_mut(&mut app).layout.kind = Kind::Between;
-        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
-        assert!(say(&mut app).contains("set A, hold and drag to B"));
-        app.world_mut()
-            .resource_mut::<LayoutMode>()
-            .points
-            .push([0; 3]);
-        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
-        assert!(say(&mut app).contains("set B, or let go on B"));
-        app.world_mut()
-            .resource_mut::<LayoutMode>()
-            .points
-            .push([1; 3]);
-        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
-        let said = say(&mut app);
-        assert!(
-            said.contains("set C and lay it") && said.contains("step back"),
-            "{said}"
-        );
     }
 
     #[test]

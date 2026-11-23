@@ -1,6 +1,6 @@
 # 21: Window mode in Display settings
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [02: Approve the mockup](./02-mockup-approval.md)
 
@@ -17,9 +17,14 @@ on Windows and Linux.
 
 ## Acceptance criteria
 
-- [ ] The selector changes the window mode at once and the keep-or-revert
+- [x] The selector changes the window mode at once and the keep-or-revert
       prompt reverts it on timeout
-- [ ] The mode is saved and restored at startup
-- [ ] Left and Right change it like the other selectors
+- [x] The mode is saved and restored at startup
+- [x] Left and Right change it like the other selectors
 
 ## Comments
+
+The macOS title bar fields need no re-assert on the way back to Windowed:
+winit enters both fullscreens through AppKit's own toggle, which keeps the
+window's style mask. Window mode, like the other display settings, is not
+applied under `TESSERAE_SCREENSHOT`.

@@ -44,7 +44,9 @@ pub(super) fn spawn(
     // A dialog draws over the page it asks about.
     let page = match &l.screen {
         Screen::Delete(_) if l.from_list => Screen::Worlds,
-        Screen::Delete(path) | Screen::SaveFirst(path) => Screen::Edit(path.clone()),
+        Screen::Delete(path) | Screen::SaveFirst(path) | Screen::DiscardEdits(path) => {
+            Screen::Edit(path.clone())
+        }
         Screen::Discard(step) | Screen::StepTrust { on: step, .. } => Screen::Create(*step),
         screen => screen.clone(),
     };
@@ -76,8 +78,8 @@ pub(super) fn spawn(
             padding: UiRect::new(
                 Val::Px(theme::SCREEN_PAD_X),
                 Val::Px(theme::SCREEN_PAD_X),
-                Val::Px(28.0),
-                Val::Px(22.0),
+                Val::Px(theme::SCREEN_PAD_TOP),
+                Val::Px(theme::SCREEN_PAD_BOTTOM),
             ),
             justify_content: JustifyContent::Center,
             ..default()
@@ -97,6 +99,7 @@ pub(super) fn spawn(
                 Screen::Create(Step::Review) => review(main, l, installed, thumbnails, scroll),
                 Screen::Delete(_)
                 | Screen::SaveFirst(_)
+                | Screen::DiscardEdits(_)
                 | Screen::Discard(_)
                 | Screen::StepTrust { .. } => None,
                 Screen::Edit(path) => edit(main, l, installed, thumbnails, path, scroll),
@@ -116,7 +119,8 @@ pub(super) fn spawn(
             Screen::Delete(path) => focus = delete(root, l, path),
             Screen::Discard(_) => focus = discard(root),
             Screen::SaveFirst(_) => focus = save_first(root),
-            Screen::StepTrust { on, .. } => focus = step_trust(root, installed, *on),
+            Screen::DiscardEdits(_) => focus = discard_edits(root),
+            Screen::StepTrust { on, .. } => focus = step_trust(root, l, installed, *on),
             _ if resetting => focus = reset(root),
             _ => {}
         }
@@ -184,6 +188,12 @@ fn prompts(page: &Screen, l: &Launcher, installed: &Installed) -> Vec<frame::Pro
         Screen::Trust(_) => vec![
             Prompt::new(Cap::Tab, "Navigate"),
             Prompt::new(Cap::Esc, "Back").act(Act::Back),
+        ],
+        Screen::Title => vec![
+            Prompt::new(Cap::Tab, "Navigate"),
+            Prompt::new(Cap::Enter, "Select"),
+            Prompt::new(Cap::Esc, "Back"),
+            Prompt::new(Cap::Letter('Q'), "Quit").act(Act::Quit),
         ],
         _ => vec![
             Prompt::new(Cap::Tab, "Navigate"),
@@ -2489,12 +2499,31 @@ fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
     )
 }
 
-/// One card per item: what it is and whether it runs code.
-fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrusted]) {
+/// One card per item: what it is, its build and whether it runs code. A dialog's are `compact`.
+fn trust_rows(
+    parent: &mut ChildSpawnerCommands,
+    items: &[crate::launch::Untrusted],
+    compact: bool,
+) {
+    let (gap, pad, name, build) = if compact {
+        (
+            8.0,
+            UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
+            theme::TEXT_CAPTION,
+            theme::TEXT_TAG,
+        )
+    } else {
+        (
+            10.0,
+            UiRect::all(Val::Px(17.0)),
+            theme::TEXT_BODY,
+            theme::TEXT_CAPTION,
+        )
+    };
     parent
         .spawn(Node {
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
+            row_gap: Val::Px(gap),
             flex_shrink: 0.0,
             ..default()
         })
@@ -2502,21 +2531,12 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
             for item in items {
                 let manifest = &item.found.manifest;
                 let data = manifest.declaration.is_some();
-                // A component's requested limits are worth reading; a data Mod has none to show.
-                let detail = if data {
-                    format!("Build {}", &item.sha256[..12.min(item.sha256.len())])
-                } else {
-                    item.prompt
-                        .trim_end()
-                        .trim_end_matches("Trust this exact build? [y/N]")
-                        .trim_end()
-                        .to_owned()
-                };
+                let detail = format!("Build {}", &item.sha256[..12.min(item.sha256.len())]);
                 col.spawn((
                     BackgroundColor(theme::CARD),
                     BorderColor::all(theme::edge()),
                     Node {
-                        padding: UiRect::all(Val::Px(17.0)),
+                        padding: pad,
                         border: UiRect::all(Val::Px(theme::RULE)),
                         border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
                         align_items: AlignItems::Center,
@@ -2528,24 +2548,22 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
                 .with_children(|card| {
                     card.spawn(Node {
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(5.0),
+                        row_gap: Val::Px(if compact { 2.0 } else { 5.0 }),
                         flex_grow: 1.0,
                         min_width: Val::Px(0.0),
-                        // The SHA-256 cannot wrap; in a narrow dialog its tail is cut, not spilled.
-                        overflow: Overflow::clip_x(),
                         ..default()
                     })
                     .with_children(|info| {
                         ui::weighted_text(
                             info,
                             format!("{} {}", ui::title(&manifest.id), manifest.version),
-                            theme::TEXT_BODY,
+                            name,
                             theme::LABEL,
                             theme::INK,
                         );
                         info.spawn((
                             Text::new(detail),
-                            theme::font(theme::TEXT_CAPTION),
+                            theme::font(build),
                             bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
                             TextColor(theme::muted()),
                             Pickable::IGNORE,
@@ -2555,6 +2573,251 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
                 });
             }
         });
+}
+
+/// The Details disclosure under the trust rows and, when `open`, each code item's permissions
+/// and limits in a panel that scrolls on its own.
+fn trust_details(
+    parent: &mut ChildSpawnerCommands,
+    items: &[crate::launch::Untrusted],
+    open: bool,
+) {
+    parent
+        .spawn((
+            bevy::ui_widgets::Button,
+            TabIndex(0),
+            Act::TrustDetails,
+            Pick {
+                fill: Color::NONE,
+                edge: Color::NONE,
+                hover: Some((theme::CARD_HOVER, Color::NONE)),
+            },
+            Node {
+                align_self: AlignSelf::FlexStart,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                margin: UiRect::top(Val::Px(14.0)),
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(6.0)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|b| {
+            let marker = if open {
+                IconKind::Expanded
+            } else {
+                IconKind::Collapsed
+            };
+            ui::icon(b, marker, theme::muted(), 14.0);
+            ui::weighted_text(
+                b,
+                "Details",
+                theme::TEXT_CAPTION,
+                theme::SEMIBOLD,
+                theme::INK,
+            );
+            caption(b, "Permissions and limits");
+        });
+    if !open {
+        return;
+    }
+    let (data, code): (Vec<_>, Vec<_>) = items
+        .iter()
+        .partition(|u| u.found.manifest.declaration.is_some());
+    parent
+        .spawn((
+            BackgroundColor(theme::CARD),
+            BorderColor::all(theme::edge()),
+            Node {
+                flex_direction: FlexDirection::Column,
+                min_height: Val::Px(120.0),
+                flex_shrink: 1.0,
+                overflow: Overflow::scroll_y(),
+                margin: UiRect::top(Val::Px(6.0)),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(4.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                ..default()
+            },
+        ))
+        .with_children(|panel| {
+            for (i, item) in code.iter().enumerate() {
+                let manifest = &item.found.manifest;
+                panel
+                    .spawn((
+                        BorderColor::all(theme::edge()),
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(6.0),
+                            padding: UiRect::vertical(Val::Px(10.0)),
+                            border: UiRect::top(Val::Px(if i == 0 { 0.0 } else { theme::RULE })),
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|section| {
+                        section
+                            .spawn(Node {
+                                align_items: AlignItems::Baseline,
+                                column_gap: Val::Px(6.0),
+                                margin: UiRect::bottom(Val::Px(2.0)),
+                                ..default()
+                            })
+                            .with_children(|head| {
+                                ui::weighted_text(
+                                    head,
+                                    format!("{} {}", ui::title(&manifest.id), manifest.version),
+                                    theme::TEXT_CAPTION,
+                                    theme::SEMIBOLD,
+                                    theme::INK,
+                                );
+                                caption(head, "runs code");
+                            });
+                        for (term, value) in trust_terms(&item.prompt) {
+                            section
+                                .spawn(Node {
+                                    column_gap: Val::Px(12.0),
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    row.spawn((
+                                        Text::new(term),
+                                        theme::font(theme::TEXT_EYEBROW),
+                                        TextColor(theme::muted()),
+                                        Node {
+                                            width: Val::Px(76.0),
+                                            flex_shrink: 0.0,
+                                            ..default()
+                                        },
+                                        Pickable::IGNORE,
+                                    ));
+                                    row.spawn((
+                                        Text::new(value),
+                                        theme::font(theme::TEXT_EYEBROW),
+                                        bevy::text::LineHeight::RelativeToFont(1.45),
+                                        TextColor(theme::INK),
+                                        Node {
+                                            flex_grow: 1.0,
+                                            flex_shrink: 1.0,
+                                            min_width: Val::Px(0.0),
+                                            ..default()
+                                        },
+                                        Pickable::IGNORE,
+                                    ));
+                                });
+                        }
+                    });
+            }
+            if !data.is_empty() {
+                let names: Vec<String> = data
+                    .iter()
+                    .map(|u| ui::title(&u.found.manifest.id))
+                    .collect();
+                let runs = if data.len() == 1 {
+                    "It runs"
+                } else {
+                    "They run"
+                };
+                panel
+                    .spawn((
+                        BorderColor::all(theme::edge()),
+                        Node {
+                            padding: UiRect::vertical(Val::Px(10.0)),
+                            border: UiRect::top(Val::Px(if code.is_empty() {
+                                0.0
+                            } else {
+                                theme::RULE
+                            })),
+                            flex_shrink: 0.0,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|note| {
+                        caption(
+                            note,
+                            format!(
+                                "{}: data only. {runs} no code, so no limits apply.",
+                                names.join(", ")
+                            ),
+                        )
+                    });
+            }
+        });
+}
+
+fn caption(parent: &mut ChildSpawnerCommands, text: impl Into<String>) {
+    parent.spawn((
+        Text::new(text),
+        theme::font(theme::TEXT_EYEBROW),
+        TextColor(theme::muted()),
+        Pickable::IGNORE,
+    ));
+}
+
+/// A Trust prompt's permissions and limits as `(term, value)` rows: what an item can and cannot
+/// do, then one row per kind of limit. The header and the closing question are left out.
+pub(super) fn trust_terms(prompt: &str) -> Vec<(String, String)> {
+    let mut can = Vec::new();
+    let mut rows = Vec::new();
+    for line in prompt.split("\n\n").skip(1).flat_map(str::lines) {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("Trust this exact build") {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("Cannot ") {
+            rows.push(("Cannot".to_owned(), sentence(rest)));
+        } else if let Some((term, value)) = line.split_once(": ") {
+            let term = if term == "Limits" { "Time" } else { term };
+            rows.push((
+                term.to_owned(),
+                grouped(&value.trim_end_matches('.').replace("; ", " \u{b7} ")),
+            ));
+        } else {
+            can.push(sentence(line.strip_prefix("Can ").unwrap_or(line)));
+        }
+    }
+    if !can.is_empty() {
+        rows.insert(0, ("Can".to_owned(), can.join(" ")));
+    }
+    rows
+}
+
+/// `200000000` as `200,000,000`; runs of up to three digits are left alone.
+fn grouped(s: &str) -> String {
+    let mut out = String::new();
+    let mut digits = String::new();
+    let flush = |digits: &mut String, out: &mut String| {
+        if digits.len() > 3 {
+            for (i, c) in digits.chars().enumerate() {
+                if i > 0 && (digits.len() - i).is_multiple_of(3) {
+                    out.push(',');
+                }
+                out.push(c);
+            }
+        } else {
+            out.push_str(digits);
+        }
+        digits.clear();
+    };
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+        } else {
+            flush(&mut digits, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut digits, &mut out);
+    out
+}
+
+fn sentence(s: &str) -> String {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
 }
 
 /// A Mod's summary as one line, such as `2 Materials · 2 Shapes · 1 Fluid`; kinds it adds none
@@ -2621,7 +2884,8 @@ fn trust(
         page_scroll(scroll),
         |col| {
             problem(col, l.problem.as_ref());
-            trust_rows(col, items);
+            trust_rows(col, items, false);
+            trust_details(col, items, l.trust_details);
         },
         Some(|row: &mut ChildSpawnerCommands| {
             row.spawn(Node {
@@ -4370,6 +4634,36 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
     )
 }
 
+/// Keep editing is focused, so Enter never discards.
+fn discard_edits(root: &mut ChildSpawnerCommands) -> Option<Entity> {
+    dialog(
+        root,
+        "Discard changes?",
+        |d| {
+            cine::dialog_text(
+                d,
+                "You changed this World\u{2019}s name or mode. Leaving now throws those changes away.",
+                theme::muted(),
+            )
+        },
+        |row| {
+            let keep = buttons::button(
+                row,
+                "Keep editing",
+                Act::KeepEditing,
+                ButtonStyle::Cinematic { kind: Kind::Ghost },
+            );
+            buttons::button(
+                row,
+                "Discard",
+                Act::DiscardEdits,
+                ButtonStyle::Cinematic { kind: Kind::Danger },
+            );
+            keep
+        },
+    )
+}
+
 fn save_first(root: &mut ChildSpawnerCommands) -> Option<Entity> {
     dialog(
         root,
@@ -4401,7 +4695,12 @@ fn save_first(root: &mut ChildSpawnerCommands) -> Option<Entity> {
 }
 
 /// Trust before a step that runs the chosen items; Cancel is focused, so Enter alone never grants.
-fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed, on: Step) -> Option<Entity> {
+fn step_trust(
+    root: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    on: Step,
+) -> Option<Entity> {
     let items = &installed.untrusted;
     let title = if items.len() == 1 {
         "Trust this item to continue?".to_owned()
@@ -4421,15 +4720,16 @@ fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed, on: Step) 
                 },
                 theme::muted(),
             );
-            // A Game's requested limits run long; the list scrolls so the buttons stay on screen.
+            // A long set of items scrolls so the buttons stay on screen.
             d.spawn(Node {
                 flex_direction: FlexDirection::Column,
-                min_height: Val::Px(0.0),
+                min_height: Val::Px(64.0),
                 flex_shrink: 1.0,
                 overflow: Overflow::scroll_y(),
                 ..default()
             })
-            .with_children(|list| trust_rows(list, items));
+            .with_children(|list| trust_rows(list, items, true));
+            trust_details(d, items, l.trust_details);
         },
         |row| {
             let cancel = buttons::button(

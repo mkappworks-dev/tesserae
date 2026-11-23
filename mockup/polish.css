@@ -266,7 +266,7 @@
 .game.strong-contrast :focus-visible {
   outline-width: 5px;
 }
-.game.strong-contrast #notice-card,
+.game.strong-contrast .toast-card,
 .game.strong-contrast .notice {
   background: #0b0b0d;
 }

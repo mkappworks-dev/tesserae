@@ -99,6 +99,8 @@ pub(super) enum Choice {
     /// The prompt bar's Esc: closes World details, else resumes.
     Back,
     CopySeed,
+    /// The prompt bar's Q; `save` handles it as it does the Save & Quit item.
+    SaveQuit,
 }
 
 #[derive(Component)]
@@ -231,7 +233,7 @@ fn choose(
                 window.open = true;
             }
         }
-        Choice::Settings => {}
+        Choice::Settings | Choice::SaveQuit => {}
         Choice::Details => menu.details = true,
         Choice::CloseDetails => menu.details = false,
         Choice::Back if menu.details => menu.details = false,
@@ -376,6 +378,11 @@ fn render(
         .spawn((
             MenuRoot,
             super::frame::Frame,
+            // On the root, not the list, so the prompt bar's Q is inside it and fires.
+            TabGroup {
+                modal: !details,
+                ..default()
+            },
             GlobalZIndex(8),
             BackgroundColor(if solid {
                 theme::SOLID_BACKGROUND
@@ -432,6 +439,7 @@ fn render(
                     Prompt::new(Cap::Tab, "Navigate"),
                     Prompt::new(Cap::Enter, "Select"),
                     Prompt::new(Cap::Esc, "Back").act(Choice::Back),
+                    Prompt::new(Cap::Letter('Q'), "Save & Quit").act(Choice::SaveQuit),
                 ],
             );
             if details {
@@ -472,19 +480,13 @@ fn list(
         color: Color::BLACK.with_alpha(0.5),
     };
     pause
-        .spawn((
-            TabGroup {
-                modal: !details,
-                ..default()
-            },
-            Node {
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::left(Val::Vw(4.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            padding: UiRect::left(Val::Vw(4.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },))
         .with_children(|column| {
             column.spawn((
                 Text::new("Paused"),
@@ -1004,9 +1006,46 @@ mod tests {
             [
                 ("Tab".into(), "Navigate".into()),
                 ("Enter".into(), "Select".into()),
-                ("Esc".into(), "Back".into())
+                ("Esc".into(), "Back".into()),
+                ("Q".into(), "Save & Quit".into())
             ]
         );
+    }
+
+    #[test]
+    fn q_saves_and_quits_as_the_save_and_quit_item_does() {
+        let mut app = app();
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        app.world_mut().resource_mut::<crate::launch::Switch>().0 =
+            Some(crate::launch::Target::List);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyQ);
+        app.update();
+        let saves: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SaveAction>>()
+            .drain()
+            .collect();
+        assert_eq!(saves, [SaveAction::SaveQuit]);
+        assert_eq!(app.world().resource::<crate::launch::Switch>().0, None);
+    }
+
+    #[test]
+    fn clicking_the_q_prompt_saves_and_quits() {
+        let mut app = app();
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        let q = find(&mut app, Choice::SaveQuit);
+        app.world_mut().trigger(Activate { entity: q });
+        app.update();
+        let saves: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SaveAction>>()
+            .drain()
+            .collect();
+        assert_eq!(saves, [SaveAction::SaveQuit]);
     }
 
     #[test]
