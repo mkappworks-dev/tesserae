@@ -1,6 +1,6 @@
 # 13: Map
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [02: Menu frame and prompt bar, on the title
 screen](./02-menu-frame-and-prompt-bar.md)
@@ -17,9 +17,11 @@ marker cannot be removed.
 
 ## Acceptance criteria
 
-- [ ] Q and E switch the legend
-- [ ] Selecting a Waypoint in the legend adds its prompts
-- [ ] A death marker offers no Remove
-- [ ] Zoom works on the wheel and on + and −
+- [x] Q and E switch the legend
+- [x] Selecting a Waypoint in the legend adds its prompts
+- [x] A death marker offers no Remove
+- [x] Zoom works on the wheel and on + and −
 
 ## Comments
+
+The toolbar and its tooltips are gone; Close is Esc (not the Map key, whose prompt would fire before the toggle and reopen the window). Zoom is a named-only `+ −` cap answered by Equal, Minus and the keypad. Moving onto a legend row (arrows or hover) selects it without opening it; the list rebuild keeps focus on the same Waypoint. The legend's tabs are pointer-only, as Q and E reach them. `frame::Cap::Text` is added with the same hunk as ticket 12's so the two merge cleanly. The `tooltip` capture state is removed.

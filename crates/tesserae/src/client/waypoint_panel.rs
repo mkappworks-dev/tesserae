@@ -28,7 +28,8 @@ const ROW_ICON_SCALE: u32 = 2;
 const ROW_ICON_PX: f32 = 10.0;
 const ICON_DISC: Color = Color::srgb_u8(0x0b, 0x0f, 0x0c);
 pub(super) const KIND_ON: Color = Color::srgb_u8(0x26, 0x33, 0x2a);
-const ROW_SELECTED: Color = Color::srgba(1.0, 1.0, 1.0, 0.08);
+/// Fainter than the prototype's 0.08 because the UI blends in linear light.
+const ROW_SELECTED: Color = Color::srgba(1.0, 1.0, 1.0, 0.04);
 
 /// What the side panel shows; kept while the window is closed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
