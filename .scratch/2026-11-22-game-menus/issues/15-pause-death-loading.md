@@ -1,6 +1,6 @@
 # 15: Pause, World details, death and loading
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [02: Menu frame and prompt bar, on the title
 screen](./02-menu-frame-and-prompt-bar.md), [07: Saved World
@@ -19,9 +19,17 @@ is full screen with the Game and World name, a tip and a slim bar.
 
 ## Acceptance criteria
 
-- [ ] The pause menu opens with Resume focused
-- [ ] World details opens with Close focused and closes on Esc
-- [ ] Esc does not leave the death screen
-- [ ] The loading screen fades out when the ground around the Player is drawn
+- [x] The pause menu opens with Resume focused
+- [x] World details opens with Close focused and closes on Esc
+- [x] Esc does not leave the death screen
+- [x] The loading screen fades out when the ground around the Player is drawn
 
 ## Comments
+
+- World details shows no Mods or Created rows: `WorldFacts` carries neither,
+  and the biome chips have no swatch colour for the same reason. Adding them
+  means widening the Server's `WorldFacts` message.
+- Loading tips name no keys, unlike the mockup's, so a rebound key or a
+  controller never makes one wrong.
+- The death screen drops Save & Quit, as the mockup does: Respawn and Return to
+  Worlds only.

@@ -417,7 +417,11 @@ fn render(
                                 .entity(respawn)
                                 .insert(super::frame::Autofocus)
                                 .with_children(|button| {
-                                    super::frame::key_cap(button, "Enter");
+                                    super::frame::key_cap(
+                                        button,
+                                        "Enter",
+                                        theme::SAGE_INK.with_alpha(0.75),
+                                    );
                                 });
                             let leave = super::save::to_list_button(actions, Kind::Ghost);
                             for button in [respawn, leave] {

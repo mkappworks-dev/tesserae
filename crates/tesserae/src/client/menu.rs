@@ -6,7 +6,6 @@
 //! nothing: both already wait on a grabbed cursor.
 
 use crate::client::buttons::{self, Align, ButtonStyle};
-use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
@@ -522,7 +521,7 @@ fn list(
                         let item = super::frame::list_item(list, label, None, choice);
                         let key = key(action);
                         list.commands().entity(item).with_children(|item| {
-                            super::frame::key_cap(item, &key);
+                            super::frame::key_cap(item, &key, theme::chrome_ink());
                         });
                         item
                     };
@@ -631,7 +630,7 @@ fn world_details(
             cine::dialog_box(),
         ));
         dialog.entry::<Node>().and_modify(|mut node| {
-            node.width = Val::Px(600.0);
+            node.width = Val::Px(660.0);
         });
         dialog.with_children(|dialog| {
             cine::dialog_title(
@@ -719,7 +718,8 @@ fn settings(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts, own: Option<G
                 GridTrack::auto(),
                 GridTrack::flex(1.0),
                 GridTrack::auto(),
-                GridTrack::flex(1.0),
+                // As wide as the longest seed and its Copy, which a shared share would clip.
+                GridTrack::auto(),
             ],
             column_gap: Val::Px(14.0),
             row_gap: Val::Px(8.0),
@@ -820,6 +820,7 @@ mod tests {
     use super::*;
     use crate::server::persistence::SaveAction;
     use bevy::ecs::message::Messages;
+    use bevy::input_focus::InputFocus;
 
     /// A Player in play with the cursor grabbed, the Inventory window and
     /// Settings beside the Menu.
