@@ -13,7 +13,7 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::actions::{Action, Actions};
 use super::cinematic::{self as cine, Kind};
-use super::menu_ui as ui;
+use super::menu_ui::{self as ui, IconKind};
 use super::theme;
 use crate::content::{HereBiome, HereCave, MaterialPalette, WorldFacts};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
@@ -429,6 +429,7 @@ fn render(
                 root,
                 &place(facts),
                 vec![
+                    Prompt::new(Cap::Tab, "Navigate"),
                     Prompt::new(Cap::Enter, "Select"),
                     Prompt::new(Cap::Esc, "Back").act(Choice::Back),
                 ],
@@ -717,7 +718,7 @@ fn settings(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts, own: Option<G
                 GridTrack::auto(),
                 GridTrack::flex(1.0),
                 GridTrack::auto(),
-                // As wide as the longest seed and its Copy, which a shared share would clip.
+                // As wide as the longest seed and its copy icon, which a shared share would clip.
                 GridTrack::auto(),
             ],
             column_gap: Val::Px(14.0),
@@ -736,12 +737,15 @@ fn settings(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts, own: Option<G
                     })
                     .with_children(|seed| {
                         ui::text(seed, value, theme::TEXT_SMALL, theme::INK);
-                        buttons::button(
+                        let copy = buttons::button(
                             seed,
-                            "Copy",
+                            "",
                             Choice::CopySeed,
-                            ButtonStyle::Small { kind: Kind::Ghost },
+                            ButtonStyle::Quiet { text_px: 12.0 },
                         );
+                        seed.commands().entity(copy).with_children(|b| {
+                            ui::icon(b, IconKind::Copy, theme::muted(), 16.0);
+                        });
                     });
                 } else {
                     ui::text(grid, value, theme::TEXT_SMALL, theme::INK);
@@ -998,6 +1002,7 @@ mod tests {
         assert_eq!(
             super::super::frame::testing::prompts(&mut app),
             [
+                ("Tab".into(), "Navigate".into()),
                 ("Enter".into(), "Select".into()),
                 ("Esc".into(), "Back".into())
             ]

@@ -252,20 +252,25 @@ pub(super) fn tabs(head: &mut ChildSpawnerCommands, active: Pane) {
                     Node {
                         padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
                         border: UiRect::bottom(Val::Px(theme::FRAME)),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
                         ..default()
                     },
                     BorderColor::all(if on { theme::SAGE } else { Color::NONE }),
                 ))
-                .with_child(look::label(
-                    label,
-                    theme::TEXT_SMALL,
-                    theme::MEDIUM,
-                    if on {
+                .with_children(|tab| {
+                    let ink = if on {
                         theme::CHIP_ON
                     } else {
                         theme::CATALOGUE_SUBTITLE
-                    },
-                ));
+                    };
+                    let icon = match pane {
+                        Pane::Catalogue => ui::IconKind::Grid,
+                        Pane::Crafting => ui::IconKind::Pencil,
+                    };
+                    ui::icon(tab, icon, ink, 16.0);
+                    tab.spawn(look::label(label, theme::TEXT_SMALL, theme::MEDIUM, ink));
+                });
         }
     });
 }

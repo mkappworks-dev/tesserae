@@ -602,7 +602,7 @@ pub(super) fn bindings_page(
         };
         cap(tabs, "Q");
         for category in Category::ALL {
-            buttons::button(
+            let tab = buttons::button(
                 tabs,
                 category.label(),
                 Operation::Category(category),
@@ -610,6 +610,11 @@ pub(super) fn bindings_page(
                     selected: settings.category == category,
                 },
             );
+            tabs.commands()
+                .entity(tab)
+                .entry::<Node>()
+                .and_modify(|mut node| node.padding.left = Val::Px(8.0))
+                .and_modify(|mut node| node.padding.right = Val::Px(8.0));
         }
         cap(tabs, "E");
     });
