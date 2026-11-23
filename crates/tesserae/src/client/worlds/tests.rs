@@ -3640,3 +3640,19 @@ fn the_world_step_says_only_what_the_chosen_mode_means() {
     assert!(shown(&mut app, "Gather what you place"));
     assert!(!shown(&mut app, "Take any Material from the Catalogue"));
 }
+
+#[test]
+fn left_and_right_change_edit_worlds_game_mode() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Old", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path));
+    act(&mut app, Act::EditMode(GameMode::Creative));
+    step(&mut app, Act::EditMode(GameMode::Creative), 1);
+    assert_eq!(launcher(&app).modes.own, GameMode::Survival);
+    assert_eq!(focused_act(&app), Some(Act::EditMode(GameMode::Survival)));
+    step(&mut app, Act::EditMode(GameMode::Survival), -1);
+    assert_eq!(launcher(&app).modes.own, GameMode::Creative);
+}

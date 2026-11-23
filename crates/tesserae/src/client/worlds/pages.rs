@@ -1280,7 +1280,18 @@ fn form(
                     ..default()
                 })
                 .with_children(|fields| focus = Some(world_fields(fields, f)));
-            terrain_aside(split);
+            split
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|aside| {
+                    terrain_aside(aside);
+                    if let Some(climate) = &f.climate {
+                        climate_fields(aside, climate);
+                    }
+                });
         });
     });
     focus
@@ -1299,20 +1310,21 @@ fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
     label(col, "Voxel size \u{00b7} fixed at creation");
     gap(col, 8.0);
     voxel_selector(col, f.voxel_size_m);
-    if let Some(climate) = &f.climate {
-        gap(col, 24.0);
-        label(col, "Climate scale \u{00b7} fixed at creation");
-        gap(col, 8.0);
-        columns(col, 16.0, |cols| {
-            for (field_id, title, at) in [
-                (Field::TemperatureSize, "Temperature (m)", 0),
-                (Field::HumiditySize, "Humidity (m)", 1),
-            ] {
-                field(cols, title, field_id, &climate.sizes[at], "", "");
-            }
-        });
-    }
     name
+}
+
+/// Climate scale under the terrain preview it shapes: the fields' column has no room left at
+/// 1280×720.
+fn climate_fields(aside: &mut ChildSpawnerCommands, climate: &ClimateDraft) {
+    gap(aside, 24.0);
+    label(aside, "Climate scale \u{00b7} fixed at creation");
+    for (field_id, title, at) in [
+        (Field::TemperatureSize, "Temperature (m)", 0),
+        (Field::HumiditySize, "Humidity (m)", 1),
+    ] {
+        gap(aside, 12.0);
+        field(aside, title, field_id, &climate.sizes[at], "", "");
+    }
 }
 
 /// The Voxel size and what it costs, as one ◀ value ▶ selector in a field's frame.
