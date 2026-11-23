@@ -48,6 +48,7 @@ fn launcher_on(app: &mut App, worlds: &Directory, installed: Installed) {
         }));
     logic(app);
     app.insert_resource(Previewer(fake_preview));
+    app.world_mut().resource_mut::<reads::Reads>().wait = true;
 }
 
 fn launcher(app: &App) -> &Launcher {
@@ -4344,3 +4345,4 @@ fn trust_terms_list_what_an_item_can_do_and_each_kind_of_limit() {
 }
 
 mod colour_picker;
+mod next_instant;

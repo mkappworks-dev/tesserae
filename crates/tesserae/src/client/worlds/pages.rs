@@ -1346,8 +1346,15 @@ fn form(
                     })
                     .with_children(|aside| {
                         terrain_aside(aside);
-                        if let Some(climate) = &f.climate {
-                            climate_fields(aside, climate);
+                        match &f.climate {
+                            Some(climate) => climate_fields(aside, climate),
+                            None if f.game.is_some() => {
+                                gap(aside, 24.0);
+                                label(aside, "Climate scale \u{00b7} fixed at creation");
+                                gap(aside, 8.0);
+                                reading_note(aside, "Reading the Game\u{2026}");
+                            }
+                            None => {}
                         }
                     });
             });
@@ -1370,6 +1377,16 @@ fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
     gap(col, 8.0);
     voxel_picks(col, f.voxel_size_m);
     name
+}
+
+/// Marks the part of a step still waiting on a read of the Game and Mods.
+#[derive(Component)]
+pub(super) struct Reading;
+
+fn reading_note(parent: &mut ChildSpawnerCommands, words: &str) {
+    parent
+        .spawn((Reading, Node::default()))
+        .with_children(|r| ui::paragraph(r, words, theme::TEXT_SMALL, theme::muted()));
 }
 
 /// Climate scale under the terrain preview it shapes: the fields' column has no room left at
@@ -3201,12 +3218,7 @@ fn review_sections(
     });
     let Some(draft) = &f.biomes else {
         review_section(col, "Biomes", None, Step::Biomes, |s| {
-            ui::paragraph(
-                s,
-                "As the Game and Mods declare them.",
-                theme::TEXT_SMALL,
-                theme::muted(),
-            );
+            reading_note(s, "Reading the Biomes the Game and Mods declare\u{2026}");
         });
         return;
     };
@@ -3373,6 +3385,7 @@ fn biomes_page(
     step_frame(main, l, installed, Step::Biomes, (), |col| {
         problem(col, f.problem.as_ref());
         let Some(draft) = &f.biomes else {
+            reading_note(col, "Reading the Biomes the Game and Mods declare\u{2026}");
             return;
         };
         if draft.choices.is_empty() {
