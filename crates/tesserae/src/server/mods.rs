@@ -423,6 +423,10 @@ pub(crate) fn preview(
 ) -> Result<crate::launch::BiomePreview, String> {
     use tesserae_core::biome_edits::{BiomeChoice, GroundNames};
     let plan = plan(found).map_err(|e| e.to_string())?;
+    let game = plan
+        .iter()
+        .find(|f| f.manifest.root)
+        .map(|f| f.manifest.id.clone());
     let mut trust = Trust::load(trust_file);
     if !check_trust {
         for found in &plan {
@@ -463,7 +467,8 @@ pub(crate) fn preview(
         climate: params.climate,
         ground: params.ground.map(ground),
         materials: {
-            let ground = ground_materials(&params, &loaded.tables);
+            let ground =
+                ground_materials(&params, &loaded.tables, &loaded.registry, game.as_deref());
             loaded
                 .registry
                 .names(Kind::Material)
@@ -489,11 +494,14 @@ pub(crate) fn preview(
 
 /// What a Biome's ground may be made of: every Biome's and the World's declared ground, as is,
 /// and the full plain blocks the terrain is otherwise made of, its strata and cave Biomes'
-/// rock and floor. Ores are veins, not ground, and the data names no Material family, so
-/// planks, plants and lamps stay out.
+/// rock and floor, plus every other full plain block of the Mods those come from. Ores are
+/// veins, not ground, and the data names no Material family, so plants and lamps stay out;
+/// the Game's own Mod is left out of the widening because it holds planks, bricks and glass.
 fn ground_materials(
     params: &tesserae_core::WorldgenParams,
     tables: &tesserae_core::Tables,
+    registry: &Registry,
+    game: Option<&str>,
 ) -> HashSet<MaterialId> {
     use tesserae_core::{Occlusion, RenderClass};
     let layers = |g: tesserae_core::GroundParams| [g.surface, g.soil, g.rock];
@@ -523,7 +531,24 @@ fn ground_materials(
             && tables.uses.of(id).is_none()
             && tables.plants.of(id).is_none()
     };
-    declared.chain(strata.chain(caves).filter(plain)).collect()
+    let offered: HashSet<MaterialId> = declared.chain(strata.chain(caves).filter(plain)).collect();
+    let mod_of = |name: &str| name.split_once(':').map(|(m, _)| m.to_owned());
+    let names = || {
+        registry
+            .names(Kind::Material)
+            .map(|(id, name)| (id as MaterialId, name))
+    };
+    let sources: HashSet<String> = names()
+        .filter(|(id, _)| offered.contains(id))
+        .filter_map(|(_, name)| mod_of(name))
+        .filter(|m| Some(m.as_str()) != game)
+        .collect();
+    let widened: Vec<MaterialId> = names()
+        .filter(|(_, name)| mod_of(name).is_some_and(|m| sources.contains(&m)))
+        .map(|(id, _)| id)
+        .filter(plain)
+        .collect();
+    offered.into_iter().chain(widened).collect()
 }
 
 /// Saves `loaded` as a first commit at `path`, as a World created from it would be.
@@ -1226,14 +1251,21 @@ mod tests {
             .map(|(id, _)| id as MaterialId)
             .unwrap();
         let mut params = super::super::worldgen_params(loaded.world);
-        assert!(!ground_materials(&params, &loaded.tables).contains(&lamp));
+        assert!(
+            !ground_materials(&params, &loaded.tables, &loaded.registry, Some("terra"))
+                .contains(&lamp)
+        );
         let ground = params.ground.as_mut().unwrap();
         ground.surface = lamp;
-        assert!(ground_materials(&params, &loaded.tables).contains(&lamp));
+        assert!(
+            ground_materials(&params, &loaded.tables, &loaded.registry, Some("terra"))
+                .contains(&lamp)
+        );
     }
 
     #[test]
-    fn terras_ground_can_be_made_only_of_what_its_terrain_is_made_of() {
+    fn terras_ground_can_be_made_of_its_terrain_and_the_plain_blocks_of_mods_it_takes_ground_from()
+    {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/terra/dist/mods");
         let scan = tesserae_mods::scan(&path).unwrap();
         let terra = scan.games.into_iter().filter(|g| g.manifest.id == "terra");
@@ -1245,6 +1277,9 @@ mod tests {
                 "strata:stone",
                 "strata:basalt",
                 "strata:clay",
+                "strata:sand",
+                "strata:soil",
+                "strata:turf",
                 "terra:ash",
                 "terra:stone",
                 "terra:dirt",
