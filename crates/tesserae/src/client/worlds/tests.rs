@@ -2636,6 +2636,26 @@ fn settings_open_from_the_title_and_take_its_keys_until_closed() {
 }
 
 #[test]
+fn settings_hide_the_title_under_them_until_closed() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    let shown = |app: &mut App| -> Vec<Visibility> {
+        let mut roots = app.world_mut().query_filtered::<&Visibility, With<Root>>();
+        roots.iter(app.world()).copied().collect()
+    };
+    act(&mut app, Act::Settings);
+    app.update();
+    assert_eq!(shown(&mut app), [Visibility::Hidden]);
+    app.world_mut()
+        .resource_mut::<super::super::settings::Settings>()
+        .open = false;
+    app.update();
+    app.update();
+    assert_eq!(shown(&mut app), [Visibility::Inherited]);
+}
+
+#[test]
 fn search_filters_the_worlds_by_name_or_game() {
     let worlds = Directory::new();
     let river = library::create(&worlds.0, &played("River bend", "terra", 30)).unwrap();

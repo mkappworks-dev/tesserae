@@ -802,6 +802,7 @@ fn logic(app: &mut App) {
                 render,
                 terrain::show,
                 show_filter,
+                cover,
                 filter,
                 pages::paint_bulk,
                 pages::paint_biomes,
@@ -880,6 +881,21 @@ fn show_filter(
         } else {
             Visibility::Hidden
         };
+        visibility.set_if_neq(wanted);
+    }
+}
+
+/// Settings hide the page under them, as the in-game Menu hides under Settings.
+fn cover(
+    settings: Option<Res<super::settings::Settings>>,
+    mut roots: Query<&mut Visibility, With<Root>>,
+) {
+    let wanted = if settings.is_some_and(|s| s.open) {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    for mut visibility in &mut roots {
         visibility.set_if_neq(wanted);
     }
 }
