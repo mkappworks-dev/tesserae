@@ -2341,3 +2341,91 @@ fn leaving_the_game_step_asks_to_trust_the_game_and_cancel_stays() {
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
     assert!(app.world().resource::<Installed>().untrusted.is_empty());
 }
+
+/// `code` pressed while `modifier` is held.
+fn chord(app: &mut App, modifier: KeyCode, code: KeyCode) {
+    use bevy::input::ButtonState;
+    use bevy::input::keyboard::{Key, KeyboardInput};
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>()
+        .single(app.world())
+        .unwrap();
+    let send = |app: &mut App, key_code, state| {
+        app.world_mut().write_message(KeyboardInput {
+            key_code,
+            logical_key: Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
+            state,
+            text: None,
+            repeat: false,
+            window,
+        });
+        app.update();
+    };
+    send(app, modifier, ButtonState::Pressed);
+    key(app, code);
+    send(app, modifier, ButtonState::Released);
+}
+
+fn focus_on(app: &mut App, wanted: Act) {
+    let entity = app
+        .world_mut()
+        .query::<(Entity, &Act)>()
+        .iter(app.world())
+        .find_map(|(e, a)| (*a == wanted).then_some(e))
+        .unwrap();
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(entity, FocusCause::Auto);
+}
+
+#[test]
+fn ctrl_or_cmd_enter_and_start_move_on_from_anywhere_and_create_on_review() {
+    let worlds = Directory::new();
+    let (mut app, pad) = pad_app(&worlds, two_games());
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    let prompts: Vec<(String, String)> = [
+        ("Enter", "Select"),
+        ("Ctrl+Enter", "Next"),
+        ("Esc", "Cancel"),
+    ]
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .to_vec();
+    assert_eq!(frame::testing::prompts(&mut app), prompts);
+    focus_on(&mut app, Act::PickGame(0));
+    chord(&mut app, KeyCode::ControlLeft, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+    assert_eq!(
+        launcher(&app).form.game.as_deref(),
+        Some("terra"),
+        "the focused Game is not picked"
+    );
+    assert!(
+        app.world()
+            .get::<Field>(app.world().resource::<InputFocus>().get().unwrap())
+            .is_some(),
+        "the name field has focus"
+    );
+    chord(&mut app, KeyCode::SuperLeft, KeyCode::Enter);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Create(Step::Mods),
+        "one step, from a text field too"
+    );
+    tap(&mut app, pad, GamepadButton::Start);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    chord(&mut app, KeyCode::ControlRight, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    let labels: Vec<String> = frame::testing::prompts(&mut app)
+        .into_iter()
+        .map(|(_, label)| label)
+        .collect();
+    assert_eq!(labels, ["Select", "Create", "Back"]);
+    chord(&mut app, KeyCode::ControlLeft, KeyCode::Enter);
+    assert_eq!(created(&app).game.unwrap().id, "terra");
+}

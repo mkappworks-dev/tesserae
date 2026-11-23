@@ -13,6 +13,7 @@ use open::*;
 
 use std::path::{Path, PathBuf};
 
+use bevy::input::gamepad::GamepadButton;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 
@@ -885,11 +886,32 @@ fn keys(
     if settings.is_some_and(|s| s.open) {
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) || pad.is_some_and(|pad| pad.cancel) {
+    if keys.just_pressed(KeyCode::Escape) || pad.as_ref().is_some_and(|pad| pad.cancel) {
         queue.0.push(match launcher.screen {
             Screen::Title | Screen::Worlds if launcher.card.is_some() => Act::Dismiss,
             _ => Act::Back,
         });
+    }
+    let chord = keys.just_pressed(KeyCode::Enter)
+        && keys.any_pressed([
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::SuperLeft,
+            KeyCode::SuperRight,
+        ]);
+    let start = pad.is_some_and(|pad| pad.navigation.just_pressed(GamepadButton::Start));
+    if let Screen::Create(step) = launcher.screen
+        && (chord || start)
+        && !launcher.form.biomes.as_ref().is_some_and(|d| d.resetting)
+    {
+        // The focused button took the same Enter; moving on wins, as it would from a text field.
+        queue.0.clear();
+        queue.0.push(if step.next().is_some() {
+            Act::Next
+        } else {
+            Act::Create
+        });
+        return;
     }
     // Enter in a text field submits its form; on buttons it activates them.
     if keys.just_pressed(KeyCode::Enter)
