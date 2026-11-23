@@ -1017,15 +1017,34 @@ function modsLibrary() {
   });
 }
 
+/* The engine's host limits and allowances, as `tesserae_mods::trust_prompt` states them. */
+const TRUST_TERMS = [
+  [
+    "Can",
+    "Add Materials and Shapes. A Game can change World generation and view distance. Place and remove Voxels in loaded Chunks, in batches.",
+  ],
+  ["Cannot", "Access files, the network or the environment."],
+  ["Time", "200,000,000 fuel per call · yields every 10,000,000 · 250 ms"],
+  ["Memory", "64 MiB per memory · 10,000 table elements · 4 instances, memories and tables"],
+  ["Commands", "1,024 per batch · 65,536 Voxels per call · 32,768 per fill"],
+  ["Content", "248 Materials and 252 Shapes in all · 128 of either per Mod · 32-byte names"],
+];
+/* Closed by default so the modal fits the window; the terms scroll inside it when open. */
+function trustDetails(items) {
+  const code = items.filter((m) => m.code),
+    data = items.filter((m) => !m.code);
+  return `<button type="button" class="trust-toggle" data-action="trust-details" aria-expanded="false" aria-controls="trust-details">${icon("chevron", 14)}<span>Details</span><small>Permissions and limits</small></button><div class="trust-details" id="trust-details" tabindex="0" aria-label="Permissions and limits" hidden>${code.map((m) => `<section><h4>${esc(m.name)} 0.1.0 <small>runs code</small></h4><dl>${TRUST_TERMS.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></section>`).join("")}${data.length ? `<p class="muted">${data.map((m) => esc(m.name)).join(", ")}: data only. ${data.length > 1 ? "They run" : "It runs"} no code, so no limits apply.</p>` : ""}</div>`;
+}
 function trustDialog() {
   const items = trustItems();
   const n = items.length;
   dialog(
     n > 1 ? `Trust ${n} items to continue?` : "Trust this item to continue?",
-    `<p>The next step reads what these items declare, which runs them. Only trust ones you know.</p><ul class="trust-list">${items.map((m) => `<li><span><b>${esc(m.name)} 0.1.0</b><small>Build ${m.build}</small></span><span class="pill">${m.code ? "Runs code" : "Data only"}</span></li>`).join("")}</ul>`,
+    `<p>The next step reads what these items declare, which runs them. Only trust ones you know.</p><ul class="trust-list">${items.map((m) => `<li><span><b>${esc(m.name)} 0.1.0</b><small>Build ${m.build}</small></span><span class="pill">${m.code ? "Runs code" : "Data only"}</span></li>`).join("")}</ul>${trustDetails(items)}`,
     button("Cancel", "close-dialog", { ghost: true }) +
       button(`Trust all ${n} and continue`, "trust-mods", { primary: true }),
   );
+  $('#dialog-root [data-action="close-dialog"]').focus();
 }
 function goStep(next) {
   if (next > state.step && !validateStep(state.step)) return;
@@ -1393,6 +1412,13 @@ function action(name, value) {
     closeDialog();
     navigate("worlds");
     toast("World removed from the prototype.");
+    return;
+  }
+  if (name === "trust-details") {
+    const toggle = $('[data-action="trust-details"]'),
+      open = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", open);
+    $("#trust-details").hidden = !open;
     return;
   }
   if (name === "trust-mods") {

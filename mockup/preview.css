@@ -289,6 +289,88 @@
 }
 .dialog:has(.trust-list) {
   width: 520px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dialog:has(.trust-list) > :not(.trust-details, .trust-list) {
+  flex-shrink: 0;
+}
+.dialog:has(.trust-list) .trust-list {
+  flex: 0 1 auto;
+  min-height: 64px;
+  overflow-y: auto;
+}
+.trust-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 6px 0;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.trust-toggle small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.trust-toggle svg {
+  transition: transform 0.15s;
+}
+.trust-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+.trust-details {
+  flex: 0 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: 6px;
+  padding: 4px 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+}
+.trust-details[hidden] {
+  display: none;
+}
+.trust-details section + section,
+.trust-details section + p {
+  border-top: 1px solid var(--edge);
+}
+.trust-details h4 {
+  margin: 10px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.trust-details h4 small {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.trust-details dl {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 6px 12px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.trust-details dt {
+  color: var(--muted);
+}
+.trust-details dd {
+  margin: 0;
+}
+.trust-details p {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 12px;
 }
 .trust-list {
   list-style: none;
