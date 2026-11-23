@@ -224,6 +224,8 @@ pub(super) fn show(
                     Val::ZERO,
                     Val::Px(30.0),
                 ),
+                // The Catalogue and Recipe grids scroll, and their clip would cut it.
+                bevy::ui::OverrideClip,
                 Pickable::IGNORE,
             ))
             .with_children(|tip| lines(tip));
@@ -478,6 +480,9 @@ pub(super) fn prompts(
                         .act(sort)
                         .pad(GamepadButton::West),
                 );
+                if !wanted.chest {
+                    slot.push(search());
+                }
                 slot
             }
         };
