@@ -462,12 +462,15 @@ pub(crate) fn preview(
             .collect(),
         climate: params.climate,
         ground: params.ground.map(ground),
-        materials: loaded
-            .registry
-            .names(Kind::Material)
-            .filter(|(id, _)| loaded.tables.materials.def(*id as MaterialId).solid)
-            .map(|(_, name)| name.to_owned())
-            .collect(),
+        materials: {
+            let ground = ground_materials(&params, &loaded.tables);
+            loaded
+                .registry
+                .names(Kind::Material)
+                .filter(|(id, _)| ground.contains(&(*id as MaterialId)))
+                .map(|(_, name)| name.to_owned())
+                .collect()
+        },
         source: Some(std::sync::Arc::new(
             tesserae_core::terrain_preview::Source {
                 params,
@@ -482,6 +485,45 @@ pub(crate) fn preview(
             },
         )),
     })
+}
+
+/// What a Biome's ground may be made of: every Biome's and the World's declared ground, as is,
+/// and the full plain blocks the terrain is otherwise made of, its strata and cave Biomes'
+/// rock and floor. Ores are veins, not ground, and the data names no Material family, so
+/// planks, plants and lamps stay out.
+fn ground_materials(
+    params: &tesserae_core::WorldgenParams,
+    tables: &tesserae_core::Tables,
+) -> HashSet<MaterialId> {
+    use tesserae_core::{Occlusion, RenderClass};
+    let layers = |g: tesserae_core::GroundParams| [g.surface, g.soil, g.rock];
+    let declared = params
+        .biomes
+        .as_slice()
+        .iter()
+        .filter_map(|b| b.ground)
+        .chain(params.ground)
+        .flat_map(layers);
+    let strata = params
+        .biomes
+        .strata()
+        .iter()
+        .flat_map(|s| s.as_slice().iter().map(|l| l.material));
+    let caves = params
+        .cave_biomes
+        .as_slice()
+        .iter()
+        .flat_map(|c| c.rock.into_iter().chain(c.floor));
+    let plain = |&id: &MaterialId| {
+        let def = tables.materials.def(id);
+        def.solid
+            && def.emission == 0
+            && def.occlusion == Occlusion::Opaque
+            && def.render == RenderClass::Opaque
+            && tables.uses.of(id).is_none()
+            && tables.plants.of(id).is_none()
+    };
+    declared.chain(strata.chain(caves).filter(plain)).collect()
 }
 
 /// Saves `loaded` as a first commit at `path`, as a World created from it would be.
@@ -1169,6 +1211,48 @@ mod tests {
         assert_eq!(image.centre_m, server.spawn_m());
         let colours: std::collections::BTreeSet<_> = image.rgba.chunks(4).collect();
         assert!(colours.len() > 16, "Terra's ground and water show");
+    }
+
+    #[test]
+    fn a_declared_ground_stays_offered_though_it_is_no_plain_block() {
+        let loaded = terra_for_save(
+            &super::super::persistence::Opening::ephemeral(),
+            &WorldSettings::default(),
+        );
+        let lamp = loaded
+            .registry
+            .names(Kind::Material)
+            .find(|(_, name)| *name == "terra:lamp")
+            .map(|(id, _)| id as MaterialId)
+            .unwrap();
+        let mut params = super::super::worldgen_params(loaded.world);
+        assert!(!ground_materials(&params, &loaded.tables).contains(&lamp));
+        let ground = params.ground.as_mut().unwrap();
+        ground.surface = lamp;
+        assert!(ground_materials(&params, &loaded.tables).contains(&lamp));
+    }
+
+    #[test]
+    fn terras_ground_can_be_made_only_of_what_its_terrain_is_made_of() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/terra/dist/mods");
+        let scan = tesserae_mods::scan(&path).unwrap();
+        let terra = scan.games.into_iter().filter(|g| g.manifest.id == "terra");
+        let found = terra.chain(scan.mods).collect();
+        let declared = preview(found, &path.join("unused-trust.json"), false).unwrap();
+        assert_eq!(
+            declared.materials,
+            [
+                "strata:stone",
+                "strata:basalt",
+                "strata:clay",
+                "terra:ash",
+                "terra:stone",
+                "terra:dirt",
+                "terra:grass",
+                "terra:sand",
+                "terra:snow",
+            ]
+        );
     }
     use crate::render::chunk_material::ChunkMaterialExtension;
     use std::fs;
