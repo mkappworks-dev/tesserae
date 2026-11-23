@@ -809,6 +809,24 @@ mod waypoints {
     }
 
     #[test]
+    fn a_click_outside_the_popover_closes_it_as_cancel_does() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        crate::client::frame::testing::click_outside(&mut app);
+        assert_eq!(window(&app).pop, None);
+        assert!(window(&app).adding && is_open(&app));
+        assert!(intents(&mut app).is_empty());
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(1));
+        crate::client::frame::testing::click_outside(&mut app);
+        assert_eq!(window(&app).pop, None);
+        assert!(is_open(&app));
+        assert!(intents(&mut app).is_empty());
+    }
+
+    #[test]
     fn at_my_position_adds_at_the_player_with_the_default_name_then_opens_its_edit_popover() {
         let mut app = app();
         declare(&mut app, kinds());
