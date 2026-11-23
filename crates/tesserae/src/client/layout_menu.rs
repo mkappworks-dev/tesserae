@@ -736,7 +736,7 @@ fn total(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size
         .map(|count| metres(extent_m(count, layout.gap, voxel_size)));
     body.spawn(Node {
         justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Baseline,
+        align_items: AlignItems::Center,
         margin: UiRect::top(Val::Auto),
         padding: UiRect::top(Val::Px(14.0)),
         flex_shrink: 0.0,
@@ -747,7 +747,7 @@ fn total(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size
             format!("{} m", extent.join(" × ")),
             theme::TEXT_EYEBROW,
             theme::REGULAR,
-            theme::muted(),
+            theme::TOTALS_TERM,
         ));
         row.spawn((
             Text::new(layout.total(layout.lengths).to_string()),
@@ -1047,6 +1047,7 @@ fn render(
         .spawn((
             Panel,
             frame::Frame,
+            GlobalZIndex(20),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -1083,7 +1084,7 @@ fn render(
                             overflow: Overflow::scroll_y(),
                             ..default()
                         },
-                        BackgroundColor(theme::LAYOUT_SIDE),
+                        BackgroundColor(theme::LAYOUT_SURFACE),
                     ))
                     .with_children(|body| {
                         body.spawn((

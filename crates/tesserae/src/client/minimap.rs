@@ -251,6 +251,7 @@ struct Shown<'w, 's> {
     roots: Query<'w, 's, Entity, With<MinimapRoot>>,
     hotbar: Option<Res<'w, super::edit::Hotbar>>,
     catalogue: Option<Res<'w, super::edit::Catalogue>>,
+    layout: Option<Res<'w, super::layout_menu::LayoutMenu>>,
 }
 
 type Sources<'w> = (
@@ -277,6 +278,7 @@ fn sync(
         roots,
         hotbar,
         catalogue,
+        layout,
     } = shown;
     // The place Tool's card stands where the minimap would.
     let placing = hotbar
@@ -285,6 +287,8 @@ fn sync(
     let hidden = !allowed.0
         || !preferences.minimap
         || placing
+        // Quick layout's side panel stands where the minimap would.
+        || layout.is_some_and(|layout| layout.open)
         || super::menu::covered(&covers)
         || !super::death::alive(dead);
     let Some((eye, bearing)) = spot.0.filter(|_| !hidden) else {
@@ -800,6 +804,20 @@ mod tests {
         app.update();
         assert!(pixels(&mut app).is_some());
         app.insert_resource(super::super::death::Dead::after_a_fall());
+        app.update();
+        assert!(pixels(&mut app).is_none());
+    }
+
+    #[test]
+    fn it_gives_way_to_quick_layout_s_side_panel() {
+        let mut app = app();
+        app.init_resource::<super::super::layout_menu::LayoutMenu>();
+        show(&mut app);
+        pose(&mut app, Vec3::ZERO, 0.0);
+        assert!(pixels(&mut app).is_some());
+        app.world_mut()
+            .resource_mut::<super::super::layout_menu::LayoutMenu>()
+            .open = true;
         app.update();
         assert!(pixels(&mut app).is_none());
     }

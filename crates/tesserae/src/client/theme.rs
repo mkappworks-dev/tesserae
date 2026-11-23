@@ -434,7 +434,6 @@ pub(super) const POINT_DONE: Color = Color::srgb_u8(0xc0, 0xcf, 0xb2);
 pub(super) const POINT_DONE_INK: Color = Color::srgb_u8(0x1d, 0x23, 0x1a);
 pub(super) const LAYOUT_NOTE: Color = Color::srgb_u8(0xc2, 0xc8, 0xd1);
 pub(super) const LAYOUT_STATUS_INK: Color = Color::srgb_u8(0xc3, 0xcc, 0xb9);
-pub(super) const LAYOUT_SIDE: Color = Color::srgba_u8(0x0a, 0x0b, 0x0c, 0xe6);
 pub(super) const LAYOUT_ROW_ON: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x0f);
 pub(super) const ITEM_TEXT_TITLE: f32 = 23.0;
 pub(super) const ITEM_TEXT_EYEBROW: f32 = 11.0;
