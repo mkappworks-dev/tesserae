@@ -507,7 +507,6 @@ pub(super) const DEATH_SCRIM: [Color; 2] = [
 ];
 pub(super) const DEATH_TITLE: Color = Color::srgb_u8(0xf4, 0xec, 0xe8);
 pub(super) const DEATH_CAUSE: Color = Color::srgb_u8(0xd4, 0xcf, 0xcc);
-pub(super) const DEATH_EYEBROW: Color = Color::srgb_u8(0xd8, 0xa5, 0x9c);
 pub(super) const TEXT_DEATH_TITLE: f32 = 46.0;
 /// −0.01 em of the death title.
 pub(super) const DEATH_TITLE_TRACKING: f32 = -0.46;
