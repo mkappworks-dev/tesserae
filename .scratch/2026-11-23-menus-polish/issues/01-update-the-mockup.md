@@ -52,3 +52,8 @@ states set from the browser console where there is no route):
   it and Esc still closes it.
 - The screen picker also lists Structures (`/structures`) and shows it there.
 
+- Biomes panel, after review: the climate map comes first and the
+  Temperature, Humidity and Caves sliders sit below it; Sky and Fog are one
+  line each; the panel's body scrolls at 1280×720 while Reset and Done stay
+  fixed. The selected Biome row takes the selected background and border, not
+  only its left edge.
