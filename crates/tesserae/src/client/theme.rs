@@ -76,9 +76,10 @@ const KEY_EDGE: Color = Color::srgb_u8(0x62, 0x65, 0x6a);
 /// Over the World while the Inventory is open: it dims without the menus'
 /// shade so the World stays readable while sorting.
 pub(super) const INVENTORY_SCRIM: Color = Color::srgba_u8(3, 4, 5, 0xdb);
-/// Under a dialog: the prototype's 0.70 alpha as [`css_dim`] gives it.
-const OVERLAY: Color = Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe2);
 const OVERLAY_RGB: [u8; 3] = [0x09, 0x0a, 0x0c];
+/// Under a dialog: the prototype's 0.70 alpha as [`css_dim`] gives it, baked because `by_contrast!`
+/// needs a const; `a_dialogs_overlay_dims_as_much_as_the_prototypes` holds it to `css_dim`.
+const OVERLAY: Color = Color::srgba_u8(OVERLAY_RGB[0], OVERLAY_RGB[1], OVERLAY_RGB[2], 0xe2);
 /// The prototype has no stronger dim; this CSS alpha makes it plainly darker than its 0.70.
 const STRONGER_OVERLAY_ALPHA: f32 = 0.85;
 /// The shade over the scenery or the World, darkest at the left and the bottom.
@@ -122,9 +123,9 @@ pub(super) const THUMBNAIL: [Color; 4] = [
 ];
 pub(super) const THUMBNAIL_TREE: Color = Color::srgb_u8(0x26, 0x3e, 0x2f);
 
-/// A focused menu list item's fill.
-pub(super) const LIT_ITEM: Color = Color::srgba_u8(10, 11, 12, 230);
 const SHEET_RGB: [u8; 3] = [10, 11, 12];
+/// A focused menu list item's fill.
+pub(super) const LIT_ITEM: Color = Color::srgba_u8(SHEET_RGB[0], SHEET_RGB[1], SHEET_RGB[2], 230);
 
 /// A menu sheet's shade, and its rail's.
 pub(super) fn sheet_shade() -> Color {
@@ -349,10 +350,13 @@ pub(super) fn focus_ring() -> Outline {
     )
 }
 
+fn linear(srgb: f32) -> f32 {
+    Color::srgb(srgb, srgb, srgb).to_linear().red
+}
+
 /// `rgb` at the alpha that darkens a mid-grey backdrop as much as CSS's `css_alpha` does: Bevy UI
 /// blends in linear light, a browser in sRGB, so the prototype's alpha alone dims too little.
 pub(super) fn css_dim(rgb: [u8; 3], css_alpha: f32) -> Color {
-    let linear = |srgb: f32| Color::srgb(srgb, srgb, srgb).to_linear().red;
     let grey = linear(0.5);
     let alpha = rgb
         .iter()
@@ -374,7 +378,6 @@ const SHEET_SEEN: f32 = 0.1;
 /// linear light, the prototype's alpha alone lifts a near-black three times too far; matched
 /// over the sheet rather than mid-grey because these tints only ever sit on one.
 pub(super) fn css_tint(css_alpha: f32) -> Color {
-    let linear = |srgb: f32| Color::srgb(srgb, srgb, srgb).to_linear().red;
     let under = linear(SHEET_SEEN);
     let lifted = linear(css_alpha + (1.0 - css_alpha) * SHEET_SEEN);
     Color::WHITE.with_alpha((lifted - under) / (1.0 - under))
@@ -415,7 +418,6 @@ pub(super) fn shade() -> BackgroundGradient {
     ])
 }
 
-// Pass C: the in-game Menu and Settings.
 /// The space around a launcher or Settings screen, above the prompt bar.
 #[cfg(not(target_os = "macos"))]
 pub(super) const SCREEN_PAD_TOP: f32 = 28.0;

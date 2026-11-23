@@ -2,38 +2,114 @@ use std::io::{self, BufRead};
 
 use crate::{Manifest, ModLimits};
 
+/// What an untrusted Mod may do, as a subject (`None` for the Mod itself) and what it can do.
+pub const ABILITIES: [(Option<&str>, &str); 3] = [
+    (None, "add Materials and Shapes"),
+    (Some("A Game"), "change World generation and view distance"),
+    (None, "place and remove Voxels in loaded Chunks in batches"),
+];
+
+/// What no Mod can do.
+pub const INABILITY: &str = "access files, network or environment";
+
+/// One kind of limit: its name in the terminal prompt and in a menu, and its parts, each a phrase
+/// whose `{}` take its numbers in order.
+pub struct LimitRow {
+    pub prompt_name: &'static str,
+    pub name: &'static str,
+    pub parts: Vec<(&'static str, Vec<u64>)>,
+}
+
+impl LimitRow {
+    /// Each part with its numbers written by `number`.
+    pub fn parts(&self, number: impl Fn(u64) -> String) -> Vec<String> {
+        self.parts
+            .iter()
+            .map(|(phrase, values)| {
+                let mut values = values.iter();
+                let mut pieces = phrase.split("{}");
+                let mut text = pieces.next().unwrap_or_default().to_owned();
+                for piece in pieces {
+                    text += &values.next().map_or_else(String::new, |v| number(*v));
+                    text += piece;
+                }
+                text
+            })
+            .collect()
+    }
+}
+
+/// The limits a Mod runs under, `limits` being the effective host limits.
+pub fn limit_rows(limits: ModLimits) -> [LimitRow; 4] {
+    let n = |v: usize| v as u64;
+    [
+        LimitRow {
+            prompt_name: "Limits",
+            name: "Time",
+            parts: vec![
+                ("{} fuel per call", vec![limits.call_fuel]),
+                ("yield every {} fuel", vec![limits.yield_fuel]),
+                (
+                    "{} ms per call",
+                    vec![limits.max_call_wall.as_millis() as u64],
+                ),
+            ],
+        },
+        LimitRow {
+            prompt_name: "Memory",
+            name: "Memory",
+            parts: vec![
+                ("{} bytes per memory", vec![n(limits.memory_bytes)]),
+                ("{} table elements", vec![n(limits.table_elements)]),
+                ("{} instances", vec![n(limits.instances)]),
+                ("{} memories", vec![n(limits.memories)]),
+                ("{} tables", vec![n(limits.tables)]),
+            ],
+        },
+        LimitRow {
+            prompt_name: "Commands",
+            name: "Commands",
+            parts: vec![
+                ("at most {} per batch", vec![n(crate::MAX_COMMANDS)]),
+                ("{} Voxels per call", vec![crate::MAX_VOXELS_PER_CALL]),
+                ("{} Voxels per fill", vec![crate::MAX_FILL_VOXELS]),
+            ],
+        },
+        LimitRow {
+            prompt_name: "Content",
+            name: "Content",
+            parts: vec![
+                (
+                    "{} Materials and {} Shapes total",
+                    vec![n(crate::MAX_MATERIALS), n(crate::MAX_SHAPES)],
+                ),
+                ("{} of either per Mod", vec![n(crate::MAX_PER_MOD)]),
+                ("{} bytes per name", vec![n(crate::MAX_NAME_BYTES)]),
+            ],
+        },
+    ]
+}
+
 /// Shared by terminal and future window prompts; limits are the effective host limits.
 pub fn trust_prompt(manifest: &Manifest, limits: ModLimits, sha256: &str) -> String {
-    format!(
-        "Mod: {}\nVersion: {}\nSHA-256: {sha256}\nGame (root): {}\n\n\
-Can add Materials and Shapes.\n\
-A Game can change World generation and view distance.\n\
-Can place and remove Voxels in loaded Chunks in batches.\n\
-Cannot access files, network or environment.\n\n\
-Limits: {} fuel per call; yield every {} fuel; {} ms per call.\n\
-Memory: {} bytes per memory; {} table elements; {} instances; {} memories; {} tables.\n\
-Commands: at most {} per batch; {} Voxels per call; {} Voxels per fill.\n\
-Content: {} Materials and {} Shapes total; {} of either per Mod; {} bytes per name.\n\n\
-Trust this exact build? [y/N] ",
+    let mut out = format!(
+        "Mod: {}\nVersion: {}\nSHA-256: {sha256}\nGame (root): {}\n\n",
         manifest.id,
         manifest.version,
         if manifest.root { "yes" } else { "no" },
-        limits.call_fuel,
-        limits.yield_fuel,
-        limits.max_call_wall.as_millis(),
-        limits.memory_bytes,
-        limits.table_elements,
-        limits.instances,
-        limits.memories,
-        limits.tables,
-        crate::MAX_COMMANDS,
-        crate::MAX_VOXELS_PER_CALL,
-        crate::MAX_FILL_VOXELS,
-        crate::MAX_MATERIALS,
-        crate::MAX_SHAPES,
-        crate::MAX_PER_MOD,
-        crate::MAX_NAME_BYTES,
-    )
+    );
+    for (subject, ability) in ABILITIES {
+        match subject {
+            Some(subject) => out += &format!("{subject} can {ability}.\n"),
+            None => out += &format!("Can {ability}.\n"),
+        }
+    }
+    out += &format!("Cannot {INABILITY}.\n\n");
+    for row in limit_rows(limits) {
+        let parts = row.parts(|v| v.to_string()).join("; ");
+        out += &format!("{}: {parts}.\n", row.prompt_name);
+    }
+    out + "\nTrust this exact build? [y/N] "
 }
 
 /// Only a single y or Y grants Trust; empty input and EOF decline.

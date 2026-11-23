@@ -100,7 +100,8 @@ pub struct Clash {
 
 /// A Mod that would run without a recorded Trust grant for its exact bytes.
 pub struct Untrusted {
-    pub prompt: String,
+    /// The effective limits it would run under.
+    pub limits: tesserae_mods::ModLimits,
     pub found: tesserae_mods::Found,
     pub sha256: String,
 }
@@ -198,11 +199,7 @@ impl Installed {
             untrusted: untrusted
                 .iter()
                 .map(|id| Untrusted {
-                    prompt: tesserae_mods::trust_prompt(
-                        &test_manifest(id),
-                        tesserae_mods::ModLimits::HOST,
-                        "",
-                    ),
+                    limits: tesserae_mods::ModLimits::HOST,
                     found: tesserae_mods::Found {
                         manifest: test_manifest(id),
                         dir: PathBuf::new(),
@@ -265,12 +262,9 @@ impl Installed {
                 tesserae_mods::Verdict::Trusted(_) => {}
                 _ => {
                     let sha256 = tesserae_mods::Trust::hash_of(f).map_err(|e| e.to_string())?;
+                    let limits = tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits);
                     self.untrusted.push(Untrusted {
-                        prompt: tesserae_mods::trust_prompt(
-                            &f.manifest,
-                            tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits),
-                            &sha256,
-                        ),
+                        limits,
                         found: f.clone(),
                         sha256,
                     });

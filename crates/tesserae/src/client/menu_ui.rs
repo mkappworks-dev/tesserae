@@ -52,6 +52,22 @@ impl Tab {
             Self::Accessibility => "Accessibility",
         }
     }
+    /// What the Settings help strip says while no row holds focus or the pointer.
+    pub fn help(self) -> &'static str {
+        match self {
+            Self::Behavior => "How moving, building and the mouse feel.",
+            Self::Bindings => {
+                "The keys and buttons for every action. Select a key cap, then press the new key. \
+                 Esc cancels; Delete clears it."
+            }
+            Self::Controller => "Sticks, touch controls and controller buttons.",
+            Self::Display => "The window, frame presentation and image quality.",
+            Self::Distance => "How far and how sharply distant terrain is drawn.",
+            Self::Audio => "The volume of each kind of sound.",
+            Self::Accessibility => "Motion, contrast and text size.",
+            Self::Catalogue | Self::Recipes => "",
+        }
+    }
     fn icon(self) -> IconKind {
         match self {
             Self::Catalogue | Self::Recipes | Self::Behavior => IconKind::Behavior,
@@ -79,6 +95,19 @@ pub(super) fn title(name: &str) -> String {
 /// A declared name as a player reads it: `terra:ash_flats` is "Ash flats".
 pub(super) fn declared_title(name: &str) -> String {
     title(&name.rsplit(':').next().unwrap_or(name).replace('_', " "))
+}
+
+/// A count with its thousands set apart, as the prototype writes them.
+pub(super) fn grouped(count: u64) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 pub(super) fn matches(query: &str, text: &str) -> bool {
@@ -484,9 +513,11 @@ fn shell(
                     rail(workspace, tab);
                     frame::sheet_with_foot(
                         workspace,
-                        tab.label(),
-                        None,
-                        frame::SheetHeight::Steps,
+                        frame::MenuSheet {
+                            title: tab.label(),
+                            subtitle: None,
+                            height: frame::SheetHeight::Steps,
+                        },
                         (),
                         |body| {
                             body.spawn((
@@ -1464,6 +1495,19 @@ fn dashed_border_colors(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn counts_set_their_thousands_apart() {
+        for (n, text) in [
+            (0, "0"),
+            (999, "999"),
+            (1000, "1,000"),
+            (1234567, "1,234,567"),
+        ] {
+            assert_eq!(grouped(n), text);
+        }
+    }
+
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)

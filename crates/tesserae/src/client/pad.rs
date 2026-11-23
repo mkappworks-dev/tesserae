@@ -34,6 +34,7 @@ const LOOK_EXPONENT: f32 = 1.5;
 const SONY_VENDOR: u16 = 0x054C;
 const REPEAT_DELAY_S: f32 = 0.4;
 const REPEAT_INTERVAL_S: f32 = 0.12;
+const READ_STEP_PX: f32 = 40.0;
 
 /// Menus own these buttons, so they never drive gameplay actions there.
 const NAVIGATION: [GamepadButton; 9] = [
@@ -310,12 +311,14 @@ type Focusables<'w, 's> = Query<
         &'static InheritedVisibility,
     ),
     (
-        Or<(With<Button>, With<Slider>)>,
+        Or<(With<Button>, With<Slider>, With<Reader>)>,
         Without<super::menu_ui::SearchField>,
         Without<super::frame::PromptKey>,
         Without<super::frame::PointerOnly>,
     ),
 >;
+type Readers<'w, 's> =
+    Query<'w, 's, (&'static ComputedNode, &'static mut ScrollPosition), With<Reader>>;
 type Sliders<'w, 's> = Query<
     'w,
     's,
@@ -357,6 +360,11 @@ pub(super) struct Stepper;
 #[derive(Component)]
 pub(super) struct Plane;
 
+/// A scrolling panel of text that takes focus so keys and the controller can read it: Up and Down
+/// scroll it while it has more to show that way, and move focus on at its ends.
+#[derive(Component)]
+pub(super) struct Reader;
+
 /// Left (`by` -1) or Right (+1) on a focused [`Stepper`].
 #[derive(EntityEvent, Clone, Copy, Debug)]
 pub(super) struct Step {
@@ -378,7 +386,7 @@ fn navigate(
     (input, ownership, labels, settings, keys): Context,
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
-    focusables: Focusables,
+    (focusables, mut readers): (Focusables, Readers),
     (groups, parents, disabled, sliders, tabs, typing, steppers, planes): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
@@ -518,6 +526,11 @@ fn navigate(
                 entity,
                 by: sign as i32,
             });
+        } else if !sideways
+            && let Ok((node, mut scroll)) = readers.get_mut(entity)
+            && let Some(to) = read_on(node, scroll.y, direction == CompassOctant::South)
+        {
+            scroll.y = to;
         } else if sideways && let Ok((value, range, slider_step)) = sliders.get(entity) {
             commands.trigger(ValueChange {
                 source: entity,
@@ -553,6 +566,15 @@ fn navigate(
             commands.trigger(Activate { entity: button });
         }
     }
+}
+
+/// Where a [`Reader`] scrolled to `y` lands one step down or up, or `None` at that end.
+fn read_on(node: &ComputedNode, y: f32, down: bool) -> Option<f32> {
+    let by = if down { 1.0 } else { -1.0 };
+    let scale = node.inverse_scale_factor();
+    let end = ((node.content_size.y - node.size.y + node.scrollbar_size.y) * scale).max(0.0);
+    let to = (y + by * READ_STEP_PX).clamp(0.0, end);
+    (to != y.clamp(0.0, end)).then_some(to)
 }
 
 /// Where focus lands when a menu opens or its focused entity is rebuilt: near

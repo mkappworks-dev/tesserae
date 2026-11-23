@@ -2,7 +2,6 @@
 //! On/Off toggles, sliders, key caps, the help strip and the dialogs.
 
 use super::*;
-use crate::client::menu_ui::Tab;
 use crate::client::theme;
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::picking::hover::Hovered;
@@ -13,8 +12,8 @@ use bevy::picking::hover::Hovered;
 pub(super) struct RowHelp {
     pub title: String,
     pub text: String,
-    /// On the current value, as "Value: what it does.", or empty.
-    pub note: &'static str,
+    /// On the current value: its label, and what it does.
+    pub note: Option<(String, &'static str)>,
 }
 
 pub(super) fn setting_row(
@@ -31,7 +30,7 @@ pub(super) fn noted_row(
     parent: &mut ChildSpawnerCommands,
     title: &str,
     help: &str,
-    note: Option<&'static str>,
+    note: Option<(String, &'static str)>,
     control: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     parent
@@ -39,7 +38,7 @@ pub(super) fn noted_row(
             RowHelp {
                 title: title.into(),
                 text: help.into(),
-                note: note.unwrap_or_default(),
+                note,
             },
             Node {
                 align_items: AlignItems::Center,
@@ -398,23 +397,6 @@ pub(super) struct HelpText;
 #[derive(Component)]
 pub(super) struct HelpNote;
 
-/// What the strip says while no row holds focus or the pointer.
-pub(super) fn category_help(tab: Tab) -> &'static str {
-    match tab {
-        Tab::Behavior => "How moving, building and the mouse feel.",
-        Tab::Bindings => {
-            "The keys and buttons for every action. Select a key cap, then press the new key. \
-             Esc cancels; Delete clears it."
-        }
-        Tab::Controller => "Sticks, touch controls and controller buttons.",
-        Tab::Display => "The window, frame presentation and image quality.",
-        Tab::Distance => "How far and how sharply distant terrain is drawn.",
-        Tab::Audio => "The volume of each kind of sound.",
-        Tab::Accessibility => "Motion, contrast and text size.",
-        Tab::Catalogue | Tab::Recipes => "",
-    }
-}
-
 const STRIP_TEXT: f32 = 13.0;
 const STRIP_LINE: bevy::text::LineHeight = bevy::text::LineHeight::RelativeToFont(1.45);
 
@@ -530,8 +512,8 @@ pub(super) fn show_help(
     }
     (*last_hovered, *last_focused) = (hovered, focused);
     let (title, text, note) = match row.and_then(|row| rows.get(row).ok()) {
-        Some((_, help, _)) => (help.title.as_str(), help.text.as_str(), help.note),
-        None => (settings.tab.label(), category_help(settings.tab), ""),
+        Some((_, help, _)) => (help.title.as_str(), help.text.as_str(), help.note.as_ref()),
+        None => (settings.tab.label(), settings.tab.help(), None),
     };
     for mut shown in &mut titles {
         shown.set_if_neq(Text::new(title));
@@ -539,11 +521,12 @@ pub(super) fn show_help(
     for mut shown in &mut texts {
         shown.set_if_neq(Text::new(text));
     }
-    // "Walk: no sprint." shows "Walk" bold, then ": no sprint.".
-    let (value, rest) = note.find(": ").map_or((note, ""), |at| note.split_at(at));
+    let (value, rest) = note.map_or((String::new(), String::new()), |(value, rest)| {
+        (value.clone(), format!(": {rest}"))
+    });
     for (mut shown, mut node, children) in &mut notes {
-        shown.set_if_neq(Text::new(value));
-        let display = if note.is_empty() {
+        shown.set_if_neq(Text::new(value.clone()));
+        let display = if note.is_none() {
             bevy::ui::Display::None
         } else {
             bevy::ui::Display::Flex
@@ -554,7 +537,7 @@ pub(super) fn show_help(
         if let Some(mut span) = children.first().and_then(|c| spans.get_mut(*c).ok())
             && span.0 != rest
         {
-            span.0 = rest.into();
+            span.0.clone_from(&rest);
         }
     }
 }

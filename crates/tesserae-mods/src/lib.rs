@@ -67,7 +67,7 @@ pub use manifest::{
 pub use marker::{MAX_MARKER_KINDS_PER_MOD, resolve_markers};
 pub use package::{Staged, stage};
 pub use plant::{DeclaredPlants, MAX_PLANTS, MAX_PLANTS_PER_MOD};
-pub use prompt::{confirm_trust, trust_prompt};
+pub use prompt::{ABILITIES, INABILITY, LimitRow, confirm_trust, limit_rows, trust_prompt};
 pub use recipe::{DeclaredRecipes, MAX_RECIPES, MAX_RECIPES_PER_MOD};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};

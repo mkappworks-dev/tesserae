@@ -17,7 +17,8 @@ use super::edit::{Catalogue, Hotbar};
 use super::inventory_window::look::{self, Flat, Flavour};
 use super::layout_menu::{eyebrow, term, total_row, totals, value_with};
 use super::menu_ui::IconKind;
-use super::structure::{Ghost, Outcome, PlaceTool, Tint, grouped, holding_place, turned_size_m};
+use super::menu_ui::grouped;
+use super::structure::{Ghost, Outcome, PlaceTool, Tint, holding_place, turned_size_m};
 use super::theme;
 use crate::content::ContentCatalogue;
 use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseWith};
@@ -942,13 +943,13 @@ fn update_info(
                 let size = chosen.map(|t| size_text(turned_size_m(t, tool.turn)));
                 match (size, ghost.outcome) {
                     (Some(size), Some(Outcome::Whole(n))) => {
-                        format!("{size} · {} Voxels", grouped(n))
+                        format!("{size} · {} Voxels", grouped(n as u64))
                     }
                     (Some(size), _) => size,
                     (None, _) => String::new(),
                 }
             }
-            Info::Count(slot) => grouped(ghost.tally[slot]),
+            Info::Count(slot) => grouped(ghost.tally[slot] as u64),
             Info::Outcome => ghost
                 .outcome
                 .map_or("Aim at a surface to place it.".to_owned(), Outcome::text),

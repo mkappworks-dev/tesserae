@@ -367,23 +367,33 @@ impl ClimateField {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
             dt.hypot(dh)
         };
-        let nearest = coloured().map(|(b, _)| distance(b)).reduce(f32::min)?;
-        let (mut sky, mut fog, mut total) = ([0.0; 3], [0.0; 3], 0.0);
-        for (b, colours) in coloured() {
-            // Relative to the nearest so nothing underflows.
-            let weight = (-(distance(b) - nearest) / SKY_BLEND_WIDTH).exp();
-            total += weight;
-            for i in 0..3 {
-                sky[i] += weight * f32::from(colours.sky[i]);
-                fog[i] += weight * f32::from(colours.fog[i]);
-            }
-        }
-        let unit = |sum: [f32; 3]| sum.map(|v| v / total / 255.0);
-        Some(SkyFogBlend {
-            sky: unit(sky),
-            fog: unit(fog),
-        })
+        blend_sky_fog(coloured().map(|(b, colours)| (distance(b), colours)))
     }
+}
+
+/// The sky and fog of Biomes at these climate distances from a point, the nearest weighing most;
+/// `None` for no Biomes.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "display only: the sky and fog blend is not generation"
+)]
+pub fn blend_sky_fog(coloured: impl Iterator<Item = (f32, SkyFog)> + Clone) -> Option<SkyFogBlend> {
+    let nearest = coloured.clone().map(|(d, _)| d).reduce(f32::min)?;
+    let (mut sky, mut fog, mut total) = ([0.0; 3], [0.0; 3], 0.0);
+    for (distance, colours) in coloured {
+        // Relative to the nearest so nothing underflows.
+        let weight = (-(distance - nearest) / SKY_BLEND_WIDTH).exp();
+        total += weight;
+        for i in 0..3 {
+            sky[i] += weight * f32::from(colours.sky[i]);
+            fog[i] += weight * f32::from(colours.fog[i]);
+        }
+    }
+    let unit = |sum: [f32; 3]| sum.map(|v| v / total / 255.0);
+    Some(SkyFogBlend {
+        sky: unit(sky),
+        fog: unit(fog),
+    })
 }
 
 /// An index, not a name: only meaningful beside the [`BiomeTable`] that made it.
@@ -1246,6 +1256,16 @@ impl SkyFog {
 pub struct SkyFogBlend {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
+}
+
+impl From<SkyFogBlend> for SkyFog {
+    fn from(c: SkyFogBlend) -> Self {
+        let bytes = |unit: [f32; 3]| unit.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8);
+        SkyFog {
+            sky: bytes(c.sky),
+            fog: bytes(c.fog),
+        }
+    }
 }
 
 impl From<SkyFog> for SkyFogBlend {

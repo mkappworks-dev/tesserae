@@ -2058,6 +2058,44 @@ fn a_biome_without_colours_shows_and_resets_to_sky_blue_and_white() {
     assert_eq!(edited(&app, 1).sky_fog, None);
 }
 
+const ASH: SkyFog = SkyFog {
+    sky: [0x30, 0x20, 0x10],
+    fog: [0x60, 0x50, 0x40],
+};
+
+fn coloured_ash_preview(installed: &Installed, ids: &[String]) -> Result<BiomePreview, String> {
+    let mut preview = fake_preview(installed, ids)?;
+    preview.biomes[0].sky_fog = Some(ASH);
+    Ok(preview)
+}
+
+#[test]
+fn beside_coloured_biomes_a_colourless_one_shows_the_land_around_it() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.insert_resource(Previewer(coloured_ash_preview));
+    app.update();
+    new_world(&mut app);
+    act(&mut app, Act::Next);
+    act(&mut app, Act::Next);
+    let colours = |app: &App| launcher(app).form.biomes.as_ref().unwrap().colours.clone();
+    let look = biome_look(&mut app, 1);
+    assert_eq!((look.sky, look.fog), (ASH.sky, ASH.fog), "the diorama");
+
+    act(&mut app, Act::SelectBiome(1));
+    assert_eq!(colours(&app), ["", ""]);
+    assert!(shown(&mut app, "Same as the land around it"));
+    type_into(&mut app, Field::Sky, "#0a141e");
+    assert_eq!(
+        edited(&app, 1).sky_fog.map(|s| s.fog),
+        Some(ASH.fog),
+        "the untyped half keeps the land's"
+    );
+    act(&mut app, Act::ResetBiome);
+    assert_eq!(colours(&app), ["", ""]);
+    assert_eq!(edited(&app, 1).sky_fog, None);
+}
+
 /// The Materials a Ground dropdown lists, top to bottom, leaving out those its search hides.
 fn ground_options(app: &mut App) -> Vec<String> {
     app.world_mut()
@@ -4174,6 +4212,67 @@ fn the_step_trust_dialog_shows_limits_only_under_details_and_enter_does_not_trus
 }
 
 #[test]
+fn the_trust_details_panel_takes_focus_and_scrolls_by_arrow_and_d_pad_without_trusting() {
+    let worlds = Directory::new();
+    let (mut app, pad) = pad_app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    act(&mut app, Act::TrustDetails);
+    let panel = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::client::pad::Reader>>()
+        .single(app.world())
+        .expect("the open Details panel is focusable");
+    assert!(
+        app.world()
+            .get::<bevy::input_focus::tab_navigation::TabIndex>(panel)
+            .is_some()
+    );
+    app.world_mut().entity_mut(panel).insert((
+        ComputedNode {
+            size: Vec2::new(400.0, 120.0),
+            content_size: Vec2::new(400.0, 600.0),
+            ..default()
+        },
+        UiGlobalTransform::from_translation(Vec2::new(200.0, 300.0)),
+        InheritedVisibility::VISIBLE,
+    ));
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(panel, bevy::input_focus::FocusCause::Navigated);
+    let scrolled = |app: &App| app.world().get::<ScrollPosition>(panel).unwrap().y;
+
+    key(&mut app, KeyCode::ArrowDown);
+    app.update();
+    let by_key = scrolled(&app);
+    assert!(by_key > 0.0, "Down scrolls the panel");
+    assert_eq!(app.world().resource::<InputFocus>().get(), Some(panel));
+    tap(&mut app, pad, GamepadButton::DPadDown);
+    let by_pad = scrolled(&app);
+    assert!(by_pad > by_key, "the D-pad scrolls it too");
+    key(&mut app, KeyCode::ArrowUp);
+    app.update();
+    assert!(scrolled(&app) < by_pad, "Up scrolls back");
+    assert_eq!(app.world().resource::<InputFocus>().get(), Some(panel));
+
+    key(&mut app, KeyCode::Enter);
+    app.update();
+    tap(&mut app, pad, GamepadButton::South);
+    assert!(
+        !app.world().resource::<Installed>().untrusted.is_empty(),
+        "neither Enter nor A on the panel trusts"
+    );
+    assert!(shown(&mut app, "fuel per call"), "the dialog stays open");
+}
+
+#[test]
 fn the_trust_page_shows_limits_only_under_details() {
     let worlds = Directory::new();
     let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
@@ -4194,9 +4293,8 @@ fn the_trust_page_shows_limits_only_under_details() {
 }
 
 #[test]
-fn trust_terms_read_what_an_item_can_do_and_each_kind_of_limit_from_its_prompt() {
-    let prompt = &Installed::fake(None, &["terra"]).untrusted[0].prompt;
-    let terms = pages::trust_terms(prompt);
+fn trust_terms_list_what_an_item_can_do_and_each_kind_of_limit() {
+    let terms = pages::trust_terms(tesserae_mods::ModLimits::HOST);
     let names: Vec<&str> = terms.iter().map(|(t, _)| t.as_str()).collect();
     assert_eq!(
         names,

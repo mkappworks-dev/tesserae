@@ -282,9 +282,39 @@ impl BiomesDraft {
 
     fn select(&mut self, at: usize) {
         self.selected = at.min(self.choices.len().saturating_sub(1));
-        let sky_fog = self.choices.get(self.selected).and_then(|c| c.sky_fog);
-        let sky_fog = sky_fog.unwrap_or(SkyFog::DEFAULT);
-        self.colours = [hex(sky_fog.sky), hex(sky_fog.fog)];
+        let own = self.choices.get(self.selected).and_then(|c| c.sky_fog);
+        self.colours = match (own, self.land_around(self.selected)) {
+            (None, Some(_)) => Default::default(),
+            (own, _) => {
+                let sky_fog = own.unwrap_or(SkyFog::DEFAULT);
+                [hex(sky_fog.sky), hex(sky_fog.fog)]
+            }
+        };
+    }
+
+    /// The sky and fog the World gives Biome `at` where it declares none: the blend of the other
+    /// coloured Biomes turned on, at its climate point, as `sky_fog_at` blends them.
+    pub(super) fn land_around(&self, at: usize) -> Option<SkyFog> {
+        let here = self.choices.get(at)?;
+        let coloured = self
+            .choices
+            .iter()
+            .enumerate()
+            .filter(|&(i, c)| i != at && c.enabled)
+            .filter_map(|(_, c)| {
+                let distance = (c.temperature - here.temperature).hypot(c.humidity - here.humidity);
+                Some((distance, c.sky_fog?))
+            });
+        tesserae_core::climate::blend_sky_fog(coloured).map(SkyFog::from)
+    }
+
+    /// What Biome `at`'s sky and fog look like: its own, else the land's around it, else the default.
+    pub(super) fn shown_sky_fog(&self, at: usize) -> SkyFog {
+        self.choices
+            .get(at)
+            .and_then(|c| c.sky_fog)
+            .or_else(|| self.land_around(at))
+            .unwrap_or(SkyFog::DEFAULT)
     }
 
     /// Whether the player changed Biome `at` beyond turning it on or off.
@@ -1223,8 +1253,8 @@ fn typed(draft: &mut BiomesDraft, field: Field, value: String) {
     let parsed = colour(&value);
     draft.colours[at] = value;
     let selected = draft.selected;
+    let mut pair = draft.shown_sky_fog(selected);
     if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
-        let mut pair = choice.sky_fog.unwrap_or(SkyFog::DEFAULT);
         if at == 0 {
             pair.sky = rgb;
         } else {
