@@ -44,7 +44,7 @@ pub(super) fn spawn(
     // A dialog draws over the page it asks about.
     let page = match &l.screen {
         Screen::Delete(_) if l.from_list => Screen::Worlds,
-        Screen::Delete(path) => Screen::Edit(path.clone()),
+        Screen::Delete(path) | Screen::SaveFirst(path) => Screen::Edit(path.clone()),
         Screen::Discard(step) | Screen::StepTrust { on: step, .. } => Screen::Create(*step),
         screen => screen.clone(),
     };
@@ -101,7 +101,10 @@ pub(super) fn spawn(
                 Screen::Create(Step::Mods) => mods_page(main, l, installed, thumbnails, scroll),
                 Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
                 Screen::Create(Step::Review) => review(main, l, installed, thumbnails, scroll),
-                Screen::Delete(_) | Screen::Discard(_) | Screen::StepTrust { .. } => None,
+                Screen::Delete(_)
+                | Screen::SaveFirst(_)
+                | Screen::Discard(_)
+                | Screen::StepTrust { .. } => None,
                 Screen::Edit(path) => edit(main, l, installed, thumbnails, path, scroll),
                 Screen::Trust(next) => trust(main, l, installed, next, scroll),
                 Screen::Opening(name) => {
@@ -120,6 +123,7 @@ pub(super) fn spawn(
         match &l.screen {
             Screen::Delete(path) => focus = delete(root, l, path),
             Screen::Discard(_) => focus = discard(root),
+            Screen::SaveFirst(_) => focus = save_first(root),
             Screen::StepTrust { on, .. } => focus = step_trust(root, installed, *on),
             _ if resetting => focus = reset(root),
             _ => {}
@@ -4415,6 +4419,40 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 },
             );
             keep
+        },
+    )
+}
+
+fn save_first(root: &mut ChildSpawnerCommands) -> Option<Entity> {
+    dialog(
+        root,
+        "Save changes first?",
+        |d| {
+            cine::dialog_text(
+                d,
+                "You changed this World\u{2019}s name or mode.",
+                theme::muted(),
+            )
+        },
+        |row| {
+            buttons::button(
+                row,
+                "Don\u{2019}t save",
+                Act::DontSave,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
+            );
+            buttons::button(
+                row,
+                "Save and continue",
+                Act::SaveAndContinue,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Primary,
+                    align: Align::Centre,
+                },
+            )
         },
     )
 }

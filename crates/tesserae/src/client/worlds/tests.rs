@@ -3487,3 +3487,44 @@ fn new_world_with_these_settings_opens_review_filled_in_with_a_fresh_name_and_cr
         "nothing built carries over"
     );
 }
+
+#[test]
+fn new_world_with_these_settings_asks_to_save_an_unsaved_name_or_mode_first() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Old", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path.clone()));
+    type_into(&mut app, Field::Rename, "Renamed");
+    act(&mut app, Act::ReCreate);
+    assert_eq!(launcher(&app).screen, Screen::SaveFirst(path.clone()));
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(shown(&mut app, "Save changes first?"));
+    assert!(shown(&mut app, "Edit World"), "over the page it asks about");
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::SaveAndContinue));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Edit(path.clone()));
+    assert_eq!(launcher(&app).rename, "Renamed", "the edit is kept");
+
+    act(&mut app, Act::ReCreate);
+    act(&mut app, Act::DontSave);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    assert_eq!(launcher(&app).form.name, "Old \u{2014} new world");
+    assert_eq!(library::read(&path).unwrap().unwrap().name, "Old");
+
+    launcher_mut(&mut app).show(Screen::Worlds);
+    app.update();
+    act(&mut app, Act::Edit(path.clone()));
+    type_into(&mut app, Field::Rename, "Renamed");
+    act(&mut app, Act::EditMode(GameMode::Survival));
+    act(&mut app, Act::ReCreate);
+    act(&mut app, Act::SaveAndContinue);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    assert_eq!(launcher(&app).form.name, "Renamed \u{2014} new world");
+    assert_eq!(launcher(&app).form.game_mode, GameMode::Survival);
+    let saved = library::read(&path).unwrap().unwrap();
+    assert_eq!(saved.name, "Renamed");
+    assert_eq!(saved.mode_changes.default, Some(GameMode::Survival));
+}

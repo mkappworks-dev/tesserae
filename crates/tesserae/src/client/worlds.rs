@@ -97,6 +97,8 @@ enum Screen {
     /// Leaving a changed setup, which asks first; it returns to the step.
     Discard(Step),
     Edit(PathBuf),
+    /// Leaving Edit World for a new World with unsaved changes, which asks first.
+    SaveFirst(PathBuf),
     Delete(PathBuf),
     Trust(Next),
     /// Trust asked in a dialog over step `on`, which moves on to `to` once granted.
@@ -531,6 +533,8 @@ pub(super) enum Act {
     PickGame(usize),
     ToggleMod(usize),
     SaveName,
+    DontSave,
+    SaveAndContinue,
     ConfirmDelete,
     Trust,
     /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
@@ -1217,6 +1221,8 @@ fn handle(
             | Act::CopySeed
             | Act::EditMode(..)
             | Act::SaveName
+            | Act::DontSave
+            | Act::SaveAndContinue
             | Act::ConfirmDelete => on_edit_world(l, &mut cx, act),
             Act::New
             | Act::ReCreate
@@ -1321,7 +1327,7 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             Screen::Discard(step) | Screen::StepTrust { on: step, .. } => {
                 l.show(Screen::Create(step))
             }
-            Screen::Delete(path) => l.show(Screen::Edit(path)),
+            Screen::Delete(path) | Screen::SaveFirst(path) => l.show(Screen::Edit(path)),
             Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
             Screen::Worlds | Screen::Library => l.show(Screen::Title),
             Screen::Opening(_) | Screen::Title => {}
