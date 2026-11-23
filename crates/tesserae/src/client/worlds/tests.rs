@@ -162,7 +162,7 @@ fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
     app.update();
     app.update();
     assert_eq!(focused_act(&app), Some(Act::New));
-    act(&mut app, Act::New);
+    new_world(&mut app);
     type_into(&mut app, Field::Name, "  Ridge ");
     type_into(&mut app, Field::Seed, "-1");
     act(&mut app, Act::More);
@@ -207,7 +207,7 @@ fn a_new_world_is_creative_unless_survival_is_chosen() {
             .set(AppState::List);
         app.update();
         app.update();
-        act(&mut app, Act::New);
+        new_world(&mut app);
         if let Some(mode) = chosen {
             act(&mut app, Act::Mode(GameMode::Survival));
             act(&mut app, Act::Mode(mode));
@@ -226,7 +226,7 @@ fn an_invalid_seed_or_name_keeps_the_form_and_writes_nothing() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     type_into(&mut app, Field::Seed, "18446744073709551616");
     finish(&mut app);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
@@ -238,7 +238,9 @@ fn an_invalid_seed_or_name_keeps_the_form_and_writes_nothing() {
     assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
     assert!(app.world().resource::<Switch>().0.is_none());
     press(&mut app, KeyCode::Escape);
-    assert_eq!(launcher(&app).screen, Screen::Discard(Step::World));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Discard(Step::Game));
     act(&mut app, Act::DiscardSetup);
     assert_eq!(launcher(&app).screen, Screen::Worlds);
 }
@@ -638,17 +640,18 @@ fn a_new_form_opens_with_its_random_seed_in_the_field() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     let form = &launcher(&app).form;
     assert_eq!(form.seed, form.random_seed.to_string());
     let random = form.random_seed;
     assert_eq!(resolved(&mut app), format!("Seed: {random}"));
     act(&mut app, Act::Back);
+    act(&mut app, Act::Back);
     assert!(
         matches!(launcher(&app).screen, Screen::Worlds),
         "an untouched form leaves without asking"
     );
-    act(&mut app, Act::New);
+    new_world(&mut app);
     type_into(&mut app, Field::Seed, "ridge");
     assert!(resolved(&mut app).starts_with("Seed from these words: "));
 }
@@ -658,7 +661,7 @@ fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     type_into(&mut app, Field::Seed, "");
     let shown = app
         .world_mut()
@@ -703,8 +706,8 @@ fn creating_takes_two_steps_and_back_keeps_the_picks() {
     );
     app.update();
     act(&mut app, Act::New);
-    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
     act(&mut app, Act::PickGame(0));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
     act(&mut app, Act::ToggleMod(1));
@@ -756,7 +759,7 @@ fn picking_a_game_ticks_what_it_suggests_and_a_suggestion_can_be_unticked() {
             .with_game_suggests(&["wanderer"]),
     );
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     assert!(launcher(&app).form.mods.contains("wanderer"));
     act(&mut app, Act::Next);
     act(&mut app, Act::ToggleMod(0));
@@ -770,6 +773,11 @@ fn picking_a_game_ticks_what_it_suggests_and_a_suggestion_can_be_unticked() {
     );
 }
 
+/// Marks `ids` untrusted, as the fake's Trust check would report them from now on.
+fn untrust(app: &mut App, ids: &[&str]) {
+    app.world_mut().resource_mut::<Installed>().untrusted = Installed::fake(None, ids).untrusted;
+}
+
 fn installed_required(app: &App) -> Vec<String> {
     app.world().resource::<Installed>().required("terra")
 }
@@ -779,11 +787,12 @@ fn the_rail_cannot_skip_trust_on_the_mods_step() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
-        Installed::fake(Some(("terra", "0.1.0")), &["terra", "lamps"]).with_mod("lamps", &[]),
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     act(&mut app, Act::Next);
+    untrust(&mut app, &["lamps"]);
     act(&mut app, Act::ToggleMod(0));
     for target in [Step::Biomes, Step::Review] {
         act(&mut app, Act::Step(target));
@@ -808,7 +817,7 @@ fn create_asks_for_trust_on_its_own_page_only_when_it_was_revoked_after_the_mods
         Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     act(&mut app, Act::Step(Step::Review));
     app.world_mut().resource_mut::<Installed>().untrusted =
         Installed::fake(None, &["lamps"]).untrusted;
@@ -828,7 +837,7 @@ fn the_mods_step_shows_one_category_per_tab_and_filters_by_search() {
     let worlds = Directory::new();
     let mut app = app(&worlds, installed);
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     act(&mut app, Act::Next);
     assert!(shown(&mut app, "Lamps") && shown(&mut app, "Strata"));
     act(&mut app, Act::ModTab(Some("Terrain".into())));
@@ -965,6 +974,8 @@ fn a_controller_alone_creates_a_world_without_typing() {
     let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     assert_eq!(focused_act(&app), Some(Act::New));
     tap(&mut app, pad, GamepadButton::South);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    tap(&mut app, pad, GamepadButton::South);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
     reach(&mut app, pad, Act::Randomize);
     tap(&mut app, pad, GamepadButton::South);
@@ -994,7 +1005,7 @@ fn the_form_locks_dependencies_blocks_unsatisfiable_mods_and_records_the_set() {
     let worlds = Directory::new();
     let mut app = app(&worlds, mod_installed());
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     assert!(launcher(&app).form.mods.is_empty(), "Mods start unticked");
     act(&mut app, Act::Next);
     act(&mut app, Act::ToggleMod(0));
@@ -1034,8 +1045,10 @@ fn a_controller_reaches_a_mod_toggle_and_ticks_it() {
     let worlds = Directory::new();
     let (mut app, pad) = pad_app(&worlds, mod_installed());
     tap(&mut app, pad, GamepadButton::South);
-    reach(&mut app, pad, Act::Next);
-    tap(&mut app, pad, GamepadButton::South);
+    for _ in 0..2 {
+        reach(&mut app, pad, Act::Next);
+        tap(&mut app, pad, GamepadButton::South);
+    }
     reach(&mut app, pad, Act::ToggleMod(1));
     tap(&mut app, pad, GamepadButton::South);
     assert!(launcher(&app).form.mods.contains("reeds"));
@@ -1150,7 +1163,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             "create",
             Screen::Worlds,
             Some(Act::New),
-            vec!["Name", "Seed", "Randomize", "Next", "Back"],
+            vec!["PickGame(0)", "Next", "Step(World)"],
         ),
         (
             "edit",
@@ -1203,6 +1216,9 @@ fn the_keyboard_walks_world_mods_biomes_and_review_and_creates_the_world() {
     ));
     assert_eq!(focused_act(&app), Some(Act::New));
     key(&mut app, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert_eq!(focused_act(&app), Some(Act::PickGame(0)));
+    key(&mut app, KeyCode::Enter);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
     type_into(&mut app, Field::Name, "Ridge");
     type_into(&mut app, Field::Seed, "42");
@@ -1228,6 +1244,12 @@ fn the_keyboard_walks_world_mods_biomes_and_review_and_creates_the_world() {
     );
     assert_eq!(created.game_mode, GameMode::Survival);
     assert_eq!(created.game.unwrap().id, "terra");
+}
+
+/// Opens Create World and passes the Game step, to the World step.
+fn new_world(app: &mut App) {
+    act(app, Act::New);
+    act(app, Act::Next);
 }
 
 /// Through the remaining steps to Create World, which runs only from Review.
@@ -1277,7 +1299,7 @@ fn to_biomes(installed: Installed) -> (App, Directory) {
     let mut app = app(&worlds, installed);
     app.insert_resource(Previewer(fake_preview));
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     act(&mut app, Act::Next);
     act(&mut app, Act::Next);
     (app, worlds)
@@ -1431,7 +1453,7 @@ fn reset_restores_the_declared_biomes_and_untouched_biomes_store_nothing() {
 
     let worlds = Directory::new();
     let mut skipped = app_with_previewer(&worlds);
-    act(&mut skipped, Act::New);
+    new_world(&mut skipped);
     finish(&mut skipped);
     assert_eq!(created(&skipped).biomes, None);
 }
@@ -1448,12 +1470,14 @@ fn next_on_mods_asks_for_trust_in_place_and_then_shows_the_biomes() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
-        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
     app.insert_resource(Previewer(fake_preview));
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     act(&mut app, Act::Next);
+    untrust(&mut app, &["lamps"]);
+    act(&mut app, Act::ToggleMod(0));
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
     assert!(launcher(&app).trust_asked);
@@ -1470,12 +1494,13 @@ fn changing_the_mods_hides_the_trust_panel_until_next_asks_again() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
-        Installed::fake(Some(("terra", "0.1.0")), &["terra"]).with_mod("lamps", &[]),
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
     app.insert_resource(Previewer(fake_preview));
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     act(&mut app, Act::Next);
+    untrust(&mut app, &["lamps"]);
     act(&mut app, Act::Next);
     assert!(launcher(&app).trust_asked);
     act(&mut app, Act::ToggleMod(0));
@@ -1588,11 +1613,11 @@ fn create_from_these_settings_prefills_every_step() {
 }
 
 #[test]
-fn a_long_name_or_a_missing_game_holds_the_world_step() {
+fn a_long_name_holds_the_world_step_and_a_missing_game_the_game_step() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
-    act(&mut app, Act::New);
+    new_world(&mut app);
     assert!(
         !shown(&mut app, "64 characters"),
         "the hint leaves the limit to the message"
@@ -1604,24 +1629,25 @@ fn a_long_name_or_a_missing_game_holds_the_world_step() {
         launcher(&app).form.problem.as_deref(),
         Some("Use a World name of 64 characters or fewer.")
     );
-    assert_eq!(ticks(&mut app), 0, "the rail ticks no step");
+    assert_eq!(ticks(&mut app), 1, "the rail ticks the Game step only");
     type_into(&mut app, Field::Name, "Fine");
     launcher_mut(&mut app).form.game = None;
     launcher_mut(&mut app).version += 1;
     app.update();
     act(&mut app, Act::Next);
-    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
     assert_eq!(launcher(&app).form.problem.as_deref(), Some(NO_GAME));
     act(&mut app, Act::Step(Step::Review));
     assert_eq!(
         launcher(&app).screen,
-        Screen::Create(Step::World),
+        Screen::Create(Step::Game),
         "the rail cannot skip an invalid step"
     );
-    type_into(&mut app, Field::Name, "Fine");
     launcher_mut(&mut app).form.game = Some("terra".into());
     act(&mut app, Act::Next);
-    assert_eq!(ticks(&mut app), 1, "a valid step is ticked once passed");
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+    assert_eq!(ticks(&mut app), 2, "a valid step is ticked once passed");
 }
 
 /// The rail's ticks: one per earlier step that is valid.
@@ -1641,7 +1667,7 @@ fn cancelling_a_changed_setup_asks_before_discarding() {
     act(&mut app, Act::New);
     press(&mut app, KeyCode::Escape);
     assert_eq!(launcher(&app).screen, Screen::Worlds, "nothing to lose");
-    act(&mut app, Act::New);
+    new_world(&mut app);
     type_into(&mut app, Field::Name, "Half done");
     act(&mut app, Act::Next);
     press(&mut app, KeyCode::Escape);
@@ -1651,15 +1677,18 @@ fn cancelling_a_changed_setup_asks_before_discarding() {
         "back a step"
     );
     press(&mut app, KeyCode::Escape);
-    assert!(matches!(launcher(&app).screen, Screen::Discard(_)));
-    assert_eq!(modal_groups(&mut app), 1, "a dialog");
-    assert!(
-        shown(&mut app, "A World of your own"),
-        "over the step it leaves"
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Discard(Step::Game),
+        "cancels from the first step"
     );
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(shown(&mut app, "Choose a Game"), "over the step it leaves");
     assert_eq!(focused_act(&app), Some(Act::KeepEditing));
     act(&mut app, Act::KeepEditing);
-    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
     assert_eq!(launcher(&app).form.name, "Half done");
     press(&mut app, KeyCode::Escape);
     act(&mut app, Act::DiscardSetup);
@@ -1795,7 +1824,7 @@ fn east_is_back_on_each_screen_and_dismisses_on_the_title() {
     for (opener, there, back) in [
         (Act::Worlds, Screen::Worlds, Screen::Title),
         (Act::Library, Screen::Library, Screen::Title),
-        (Act::New, Screen::Create(Step::World), Screen::Worlds),
+        (Act::New, Screen::Create(Step::Game), Screen::Worlds),
     ] {
         reach(&mut app, pad, opener.clone());
         tap(&mut app, pad, GamepadButton::South);
@@ -1874,7 +1903,7 @@ fn a_button_already_down_when_the_launcher_appears_waits_for_release() {
     assert_eq!(launcher(&app).screen, Screen::Title);
     pad_button(&mut app, pad, GamepadButton::South, 0.0);
     tap(&mut app, pad, GamepadButton::South);
-    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
 }
 
 #[test]
@@ -2340,4 +2369,212 @@ fn hovering_a_world_lights_its_slot_and_shows_its_icons() {
         Screen::Edit(river),
         "its pencil edits it"
     );
+}
+
+/// Each Game row on the Game step, in the order shown, as its texts joined.
+fn game_rows(app: &mut App) -> Vec<String> {
+    let rows: Vec<Entity> = app
+        .world_mut()
+        .query::<(Entity, &Act)>()
+        .iter(app.world())
+        .filter_map(|(e, a)| matches!(a, Act::PickGame(_)).then_some(e))
+        .collect();
+    let Some(list) = rows
+        .first()
+        .and_then(|row| app.world().get::<ChildOf>(*row))
+        .map(ChildOf::parent)
+    else {
+        return Vec::new();
+    };
+    let ordered: Vec<Entity> = app
+        .world()
+        .get::<Children>(list)
+        .map(|c| c.iter().filter(|e| rows.contains(e)).collect())
+        .unwrap_or_default();
+    ordered
+        .into_iter()
+        .map(|row| {
+            let mut texts = Vec::new();
+            let mut stack = vec![row];
+            while let Some(e) = stack.pop() {
+                if let Some(text) = app.world().get::<Text>(e) {
+                    texts.push(text.0.clone());
+                }
+                if let Some(children) = app.world().get::<Children>(e) {
+                    stack.extend(children.iter().rev());
+                }
+            }
+            texts.join(" ")
+        })
+        .collect()
+}
+
+fn two_games() -> Installed {
+    let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[]);
+    installed.games.insert(
+        0,
+        GameRef {
+            id: "ember".into(),
+            version: "0.2.0".into(),
+        },
+    );
+    installed
+}
+
+#[test]
+fn a_new_world_starts_on_the_game_step_with_terra_first_and_the_choice_marked() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, two_games());
+    app.update();
+    act(&mut app, Act::New);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert!(shown(&mut app, "Choose a Game"));
+    let rows = game_rows(&mut app);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(
+        rows[0].starts_with("Terra") && rows[0].contains('\u{2713}'),
+        "{rows:?}"
+    );
+    assert!(
+        rows[1].starts_with("Ember") && !rows[1].contains('\u{2713}'),
+        "{rows:?}"
+    );
+    assert_eq!(focused_act(&app), Some(Act::PickGame(1)), "the chosen Game");
+    act(&mut app, Act::PickGame(0));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert_eq!(launcher(&app).form.game.as_deref(), Some("ember"));
+    let rows = game_rows(&mut app);
+    assert!(
+        rows[1].starts_with("Ember") && rows[1].contains('\u{2713}'),
+        "{rows:?}"
+    );
+    act(&mut app, Act::PickGame(0));
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Create(Step::World),
+        "the chosen Game again moves on"
+    );
+}
+
+#[test]
+fn leaving_the_game_step_asks_to_trust_the_game_and_cancel_stays() {
+    let worlds = Directory::new();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.update();
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(shown(&mut app, "Trust this item to continue?"));
+    assert!(shown(&mut app, "Choose a Game"), "over the Game step");
+    assert_eq!(
+        focused_act(&app),
+        Some(Act::Back),
+        "Cancel, so Enter alone never trusts"
+    );
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert_eq!(modal_groups(&mut app), 0);
+    act(&mut app, Act::Back);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Worlds,
+        "Cancel on the Game step leaves an untouched setup"
+    );
+    act(&mut app, Act::New);
+    act(&mut app, Act::Step(Step::Review));
+    assert_eq!(modal_groups(&mut app), 1, "the rail asks too");
+    act(&mut app, Act::TrustStep);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    assert!(app.world().resource::<Installed>().untrusted.is_empty());
+}
+
+/// `code` pressed while `modifier` is held.
+fn chord(app: &mut App, modifier: KeyCode, code: KeyCode) {
+    use bevy::input::ButtonState;
+    use bevy::input::keyboard::{Key, KeyboardInput};
+    let window = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>()
+        .single(app.world())
+        .unwrap();
+    let send = |app: &mut App, key_code, state| {
+        app.world_mut().write_message(KeyboardInput {
+            key_code,
+            logical_key: Key::Unidentified(bevy::input::keyboard::NativeKey::Unidentified),
+            state,
+            text: None,
+            repeat: false,
+            window,
+        });
+        app.update();
+    };
+    send(app, modifier, ButtonState::Pressed);
+    key(app, code);
+    send(app, modifier, ButtonState::Released);
+}
+
+fn focus_on(app: &mut App, wanted: Act) {
+    let entity = app
+        .world_mut()
+        .query::<(Entity, &Act)>()
+        .iter(app.world())
+        .find_map(|(e, a)| (*a == wanted).then_some(e))
+        .unwrap();
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(entity, FocusCause::Auto);
+}
+
+#[test]
+fn ctrl_or_cmd_enter_and_start_move_on_from_anywhere_and_create_on_review() {
+    let worlds = Directory::new();
+    let (mut app, pad) = pad_app(&worlds, two_games());
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    let prompts: Vec<(String, String)> = [
+        ("Enter", "Select"),
+        ("Ctrl+Enter", "Next"),
+        ("Esc", "Cancel"),
+    ]
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .to_vec();
+    assert_eq!(frame::testing::prompts(&mut app), prompts);
+    focus_on(&mut app, Act::PickGame(0));
+    chord(&mut app, KeyCode::ControlLeft, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+    assert_eq!(
+        launcher(&app).form.game.as_deref(),
+        Some("terra"),
+        "the focused Game is not picked"
+    );
+    assert!(
+        app.world()
+            .get::<Field>(app.world().resource::<InputFocus>().get().unwrap())
+            .is_some(),
+        "the name field has focus"
+    );
+    chord(&mut app, KeyCode::SuperLeft, KeyCode::Enter);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Create(Step::Mods),
+        "one step, from a text field too"
+    );
+    tap(&mut app, pad, GamepadButton::Start);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    chord(&mut app, KeyCode::ControlRight, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    let labels: Vec<String> = frame::testing::prompts(&mut app)
+        .into_iter()
+        .map(|(_, label)| label)
+        .collect();
+    assert_eq!(labels, ["Select", "Create", "Back"]);
+    chord(&mut app, KeyCode::ControlLeft, KeyCode::Enter);
+    assert_eq!(created(&app).game.unwrap().id, "terra");
 }

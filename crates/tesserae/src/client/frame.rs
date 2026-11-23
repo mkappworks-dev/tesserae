@@ -54,6 +54,8 @@ const PRESS_DARKEN: f32 = 0.06;
 pub(super) enum Cap {
     Tab,
     Enter,
+    /// Moves a stepped screen on from anywhere on it; Ctrl or ⌘ both work.
+    CtrlEnter,
     Esc,
     Del,
     Letter(char),
@@ -64,6 +66,7 @@ impl Cap {
         match self {
             Cap::Tab => "Tab".into(),
             Cap::Enter => "Enter".into(),
+            Cap::CtrlEnter => "Ctrl+Enter".into(),
             Cap::Esc => "Esc".into(),
             Cap::Del => "Del".into(),
             Cap::Letter(c) => c.to_ascii_uppercase().to_string(),
@@ -114,6 +117,7 @@ impl Cap {
     fn pad(self) -> Option<GamepadButton> {
         match self {
             Cap::Enter => Some(GamepadButton::South),
+            Cap::CtrlEnter => Some(GamepadButton::Start),
             Cap::Esc => Some(GamepadButton::East),
             Cap::Del => Some(GamepadButton::North),
             Cap::Tab | Cap::Letter(_) => None,
@@ -322,6 +326,16 @@ pub(super) fn menu_sheet<A: Bundle>(
     sheet: MenuSheet<A>,
     body: impl FnOnce(&mut ChildSpawnerCommands),
 ) -> Option<Entity> {
+    menu_sheet_with(main, sheet, (), body)
+}
+
+/// [`menu_sheet`] with `scroll` on the scrolling body, for a screen that keeps its place there.
+pub(super) fn menu_sheet_with<A: Bundle>(
+    main: &mut ChildSpawnerCommands,
+    sheet: MenuSheet<A>,
+    scroll: impl Bundle,
+    body: impl FnOnce(&mut ChildSpawnerCommands),
+) -> Option<Entity> {
     let mut primary = None;
     main.spawn((
         BackgroundGradient(vec![
@@ -359,14 +373,17 @@ pub(super) fn menu_sheet<A: Bundle>(
                 ui::paragraph(header, subtitle, theme::TEXT_SMALL, theme::muted());
             }
         });
-        s.spawn(Node {
-            flex_grow: 1.0,
-            min_height: Val::Px(0.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(16.0), Val::Px(24.0)),
-            overflow: Overflow::scroll_y(),
-            ..default()
-        })
+        s.spawn((
+            scroll,
+            Node {
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(16.0), Val::Px(24.0)),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+        ))
         .with_children(body);
         if let Some((label, act)) = sheet.primary {
             s.spawn(Node {
