@@ -72,9 +72,8 @@ fn type_into(app: &mut App, field: Field, value: &str) {
         .iter(app.world())
         .find_map(|(e, f)| (*f == field).then_some(e))
         .unwrap();
-    app.world_mut()
-        .entity_mut(entity)
-        .insert(EditableText::new(value));
+    // In place, as typing changes it: a field's first appearance is not an edit.
+    *app.world_mut().get_mut::<EditableText>(entity).unwrap() = EditableText::new(value);
     app.update();
 }
 
@@ -1156,12 +1155,14 @@ use bevy::window::PrimaryWindow;
 #[derive(Component)]
 struct Placed;
 
+type Focusable = Or<(
+    With<bevy::ui_widgets::Button>,
+    With<crate::client::pad::Surface>,
+)>;
+
 /// A column of buttons in spawn order; the real layout engine does not run
 /// headless, and focus navigation needs sizes and positions.
-fn lay_out(
-    mut commands: Commands,
-    buttons: Query<Entity, (With<bevy::ui_widgets::Button>, Without<Placed>)>,
-) {
+fn lay_out(mut commands: Commands, buttons: Query<Entity, (Focusable, Without<Placed>)>) {
     let mut fresh: Vec<Entity> = buttons.iter().collect();
     fresh.sort();
     for (i, entity) in fresh.into_iter().enumerate() {

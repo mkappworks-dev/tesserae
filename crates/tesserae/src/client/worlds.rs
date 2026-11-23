@@ -1159,8 +1159,11 @@ fn sync_fields(
             Field::Seed => launcher.form.seed = value,
             Field::Rename => launcher.rename = value,
             Field::ColourHex => {
-                // The picker keeps the field; rebuilding it would take the focus.
-                if let Some(rgb) = colour::parse(&value) {
+                // The picker keeps the field; rebuilding it would take the focus. Its own refresh
+                // to a colour picked elsewhere is pending, and the old text must not win.
+                let refreshing = (text.pending_edits.iter())
+                    .any(|e| matches!(e, bevy::text::TextEdit::Insert(_)));
+                if !refreshing && let Some(rgb) = colour::parse(&value) {
                     colour::set_rgb(launcher.bypass_change_detection(), rgb);
                 }
             }

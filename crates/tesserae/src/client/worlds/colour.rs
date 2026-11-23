@@ -154,7 +154,7 @@ pub(super) fn set_rgb(l: &mut Launcher, to: [u8; 3]) {
         return;
     };
     let (shown, _) = current(draft, draft.selected, picking.air);
-    if shown == to && draft.choices[draft.selected].sky_fog.is_some() {
+    if shown == to {
         return;
     }
     picking.hsv = hsv(to);
@@ -734,13 +734,15 @@ fn drag_to(
     true
 }
 
+type Placed = (&'static ComputedNode, &'static UiGlobalTransform);
+
 /// Keeps the open picker inside the window and its panel: it hangs above its control when there
 /// is more room there, and moves left when it would run past the window's right edge. Layout has
 /// placed it by then, so it moves a frame after it opens.
 pub(super) fn hang(
     mut pickers: Query<(&mut Node, &ComputedNode, &UiGlobalTransform), With<Picker>>,
     roots: Query<&ComputedNode, (With<Root>, Without<Picker>)>,
-    panels: Query<(&ComputedNode, &UiGlobalTransform), (With<pages::PanelScroll>, Without<Picker>)>,
+    panels: Query<Placed, (With<pages::PanelScroll>, Without<Picker>)>,
 ) {
     let Some(window) = roots.iter().next().map(ComputedNode::size) else {
         return;
