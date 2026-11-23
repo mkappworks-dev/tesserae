@@ -3154,7 +3154,7 @@ fn review_sections(
             (
                 "Seed",
                 f.seed()
-                    .map_or_else(|e| Value::Text(e), |n| Value::Seed(n, Act::CopyResolved)),
+                    .map_or_else(Value::Text, |n| Value::Seed(n, Act::CopyResolved)),
             ),
             ("Voxel size", Value::Text(format!("{} m", f.voxel_size_m))),
         ];
