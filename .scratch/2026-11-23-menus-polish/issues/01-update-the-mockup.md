@@ -81,3 +81,22 @@ states set from the browser console where there is no route):
   (`/map`). `/mods` has no toolbar and the `/inventory` catalogue grid already
   scrolls under its search. Focus scrolls a row clear of the toolbar
   (`scroll-padding-top`).
+
+- Toasts study (`/toasts`, also "Toasts (study)" in the screen picker): one
+  toast component (`notify(text, tone)` in `mockup/toasts.js`, styles in
+  `mockup/toasts.css`) for every screen. The study panel switches the backdrop
+  (Worlds with its prompt bar, or the /play HUD in Survival with Compass and
+  minimap on) and the position (bottom centre, top centre, top right, bottom
+  left; defaults top centre in game, bottom centre in menus), and fires info,
+  done, refused, an 8 s error, a repeat (×2, timer restarts) and three at once
+  (at most 3, newest nearest the anchor edge). Dark notice-card panel, icon and
+  left edge by tone (neutral, green, amber), fade with an 8 px move away from the
+  anchor edge, 3 s; fade only under reduced motion. `toast()` and the engine
+  mirror `notice()` both go through it at the screen's default position; the old
+  `#toast` and `#notice-card` are gone. At 1280×720 with three toasts, bottom
+  centre in game reaches the reticle; top right in menus and top centre in menus
+  sit over the Worlds sheet's top edge; nothing touches the HUD or prompt bar.
+
+- Settings help strip (`/settings/behavior` and every category): the boxed help column is gone, so the rows take the sheet's full width. A strip along the bottom of the sheet, above the prompt bar and outside the scrolling rows, shows the focused or hovered setting's name in bold, its explanation muted, and a note on the current value where it has one (`VALUE_NOTES` in `mockup/settings.js`: Sprint speed, Removal and Crouch activation, Window mode, Display sync, Frame rate limit, Anti-aliasing, Render scale). With no row focused it shows the category's one-line description (`CATEGORY_HELP`). Rows that had no explanation got one. `frame({ strip })` puts it after the body.
+
+- Settings help strip look: the strip is a band in the side rail's tone (`rgb(10 11 12 / 0.9)`) across the foot of the sheet, keeping its 1 px top edge, with 6 px more padding above and below. The setting's name is bold at 15 px, the explanation stays muted, and the value note is in `--leaf` with the value bold (**Walk**: no sprint.), split at the first `: ` of the `VALUE_NOTES` text. Checked at 1280×720 in all seven categories.

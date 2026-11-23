@@ -46,6 +46,7 @@ function currentPath() {
       map: "/map",
       structures: "/structures",
       place: "/place",
+      toasts: "/toasts",
     }[state.screen] || "/"
   );
 }
@@ -94,7 +95,9 @@ function syncRoute() {
                                       ? "Structures"
                                       : state.screen === "place"
                                         ? "Place Tool"
-                                        : "Worlds";
+                                        : state.screen === "toasts"
+                                          ? "Toasts"
+                                          : "Worlds";
   document.title = `${title} — Tesserae prototype`;
 }
 
@@ -169,6 +172,7 @@ function restoreRoute() {
       "/map": "map",
       "/structures": "structures",
       "/place": "place",
+      "/toasts": "toasts",
     }[path] || "home";
 }
 

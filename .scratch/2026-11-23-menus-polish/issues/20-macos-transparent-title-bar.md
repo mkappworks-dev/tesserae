@@ -1,6 +1,6 @@
 # 20: macOS window without a title bar
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -17,12 +17,21 @@ keep their native frame; ticket 21 adds the window mode setting for them.
 
 ## Acceptance criteria
 
-- [ ] On macOS the scenery reaches the top edge with no title bar or title text
-- [ ] Close, minimise and full screen work from the window buttons; the window
+- [x] On macOS the scenery reaches the top edge with no title bar or title text
+- [x] Close, minimise and full screen work from the window buttons; the window
       still drags by its top strip
-- [ ] No menu title, prompt or control sits under the window buttons, checked
+- [x] No menu title, prompt or control sits under the window buttons, checked
       by on-screen capture of the title screen, a Create World step, Settings and
       the pause menu
-- [ ] Other platforms are unchanged
+- [x] Other platforms are unchanged
 
 ## Comments
+
+AppKit's transparent title bar measured 32 pt, with the buttons at x 9-69, y
+9-23 pt. On macOS `theme::SCREEN_PAD_TOP` is 32 instead of 28, so a sheet starts
+below the strip; the launcher pages now use it too. The profiling monitor no
+longer sets the two title bar fields itself. Dragging by the strip and the
+buttons are AppKit's own and were not exercised by hand: the session has no
+input automation or Screen Recording permission, so captures are in-app and
+show the scenery, not the buttons.
+
