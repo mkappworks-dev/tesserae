@@ -1572,6 +1572,50 @@ fn modal_groups(app: &mut App) -> usize {
         .count()
 }
 
+fn edited(app: &App, at: usize) -> BiomeChoice {
+    launcher(app).form.biomes.as_ref().unwrap().choices[at].clone()
+}
+
+fn slider_value(app: &mut App, knob: Knob) -> f32 {
+    app.world_mut()
+        .query::<(&pages::KnobSlider, &bevy::ui_widgets::SliderValue)>()
+        .iter(app.world())
+        .find_map(|(k, v)| (k.0 == knob).then_some(v.0))
+        .unwrap_or_else(|| panic!("no {knob:?} slider on screen"))
+}
+
+#[test]
+fn arrow_keys_move_the_edited_biome_on_the_climate_map() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    let handle = app
+        .world_mut()
+        .query_filtered::<Entity, With<pages::ClimateHandle>>()
+        .single(app.world())
+        .expect("the edit panel's climate map has a handle");
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(handle, FocusCause::Auto);
+    let version = launcher(&app).version;
+    press(&mut app, KeyCode::ArrowRight);
+    press(&mut app, KeyCode::ArrowDown);
+    press(&mut app, KeyCode::ArrowDown);
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::ShiftLeft);
+    press(&mut app, KeyCode::ArrowUp);
+    let meadow = edited(&app, 1);
+    assert_eq!((meadow.temperature, meadow.humidity), (0.31, 0.58));
+    assert_eq!(edited(&app, 0), declared("t:ash_flats", 0.7));
+    assert_eq!(slider_value(&mut app, Knob::Temperature), 0.31);
+    assert_eq!(slider_value(&mut app, Knob::Humidity), 0.58);
+    assert_eq!(
+        launcher(&app).version,
+        version,
+        "the handle keeps its focus"
+    );
+}
+
 #[test]
 fn no_biome_left_holds_the_biomes_step() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));

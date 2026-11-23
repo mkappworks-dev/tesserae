@@ -3693,6 +3693,10 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesD
 #[derive(Component)]
 pub(super) struct CurrentDot;
 
+/// The edited Biome's dot, which arrow keys move while it has the focus.
+#[derive(Component)]
+pub(super) struct ClimateHandle;
+
 /// Every Biome's point on temperature and humidity; the selected one is
 /// larger, named, and moves with its sliders.
 fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
@@ -3772,6 +3776,9 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 if current {
                     dot.insert((
                         CurrentDot,
+                        ClimateHandle,
+                        TabIndex(0),
+                        crate::client::pad::Plane,
                         BoxShadow::new(
                             fade(theme::DOT_GLOW),
                             Val::Px(0.0),

@@ -340,6 +340,7 @@ type Structure<'w, 's> = (
     Query<'w, 's, (Entity, &'static super::settings::Operation)>,
     Query<'w, 's, (), With<bevy::ui_widgets::TextInput>>,
     Query<'w, 's, (), With<Stepper>>,
+    Query<'w, 's, (), With<Plane>>,
 );
 struct Candidate {
     area: FocusableArea,
@@ -349,6 +350,11 @@ struct Candidate {
 /// moving focus off it.
 #[derive(Component)]
 pub(super) struct Stepper;
+
+/// A point on a map that all four arrow keys move, as a text field keeps them for its caret.
+/// The D-pad still navigates, so a controller never gets stuck on it.
+#[derive(Component)]
+pub(super) struct Plane;
 
 /// Left (`by` -1) or Right (+1) on a focused [`Stepper`].
 #[derive(EntityEvent, Clone, Copy, Debug)]
@@ -372,7 +378,7 @@ fn navigate(
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
     focusables: Focusables,
-    (groups, parents, disabled, sliders, tabs, typing, steppers): Structure,
+    (groups, parents, disabled, sliders, tabs, typing, steppers, planes): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
     let owner = ownership.owner;
@@ -417,7 +423,11 @@ fn navigate(
         .and_then(|entity| candidates.iter().find(|c| c.area.entity == entity));
     // Arrows move menu focus as the D-pad does, except in a text field, where they move the caret.
     let arrow = keys
-        .filter(|_| !focus.get().is_some_and(|entity| typing.contains(entity)))
+        .filter(|_| {
+            !focus
+                .get()
+                .is_some_and(|entity| typing.contains(entity) || planes.contains(entity))
+        })
         .and_then(|keys| {
             [
                 (KeyCode::ArrowUp, CompassOctant::North),

@@ -2,6 +2,7 @@
 //! library, before any Game runs. It only manages closed World folders;
 //! opening one hands it to the loader.
 
+mod biomes;
 mod create;
 mod edit_world;
 mod mods;
@@ -724,6 +725,7 @@ fn logic(app: &mut App) {
             Update,
             (
                 keys,
+                biomes::nudge,
                 sync_fields,
                 highlight,
                 handle,
