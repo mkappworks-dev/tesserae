@@ -1324,7 +1324,6 @@ fn foot(view: &mut ChildSpawnerCommands) {
 fn legend(view: &mut ChildSpawnerCommands) {
     view.spawn((
         SidePanel,
-        ScrollPosition::default(),
         Node {
             position_type: PositionType::Absolute,
             top: Val::Px(70.0),
@@ -1334,36 +1333,36 @@ fn legend(view: &mut ChildSpawnerCommands) {
             flex_direction: FlexDirection::Column,
             padding: UiRect::new(Val::Px(14.0), Val::Px(14.0), Val::Px(6.0), Val::Px(14.0)),
             border_radius: BorderRadius::all(Val::Px(8.0)),
-            overflow: Overflow::scroll_y(),
             ..default()
         },
         BackgroundColor(LEGEND_FILL),
     ))
     .with_children(|panel| {
-        super::waypoint_panel::sections(panel);
-        super::waypoint_panel::section(panel, PanelTab::Explore).with_children(|section| {
-            section.spawn((
-                LegendList,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(2.0),
-                    ..default()
-                },
-            ));
-            section.spawn((
-                AreaText,
-                Text::new(""),
-                theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
-                TextColor(theme::muted()),
-                Pickable::IGNORE,
-                Node {
-                    margin: UiRect::top(Val::Px(10.0)),
-                    padding: UiRect::top(Val::Px(10.0)),
-                    border: UiRect::top(Val::Px(theme::RULE)),
-                    ..default()
-                },
-                BorderColor::all(theme::edge()),
-            ));
+        super::waypoint_panel::sections(panel).with_children(|list| {
+            super::waypoint_panel::section(list, PanelTab::Explore).with_children(|section| {
+                section.spawn((
+                    LegendList,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(2.0),
+                        ..default()
+                    },
+                ));
+                section.spawn((
+                    AreaText,
+                    Text::new(""),
+                    theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
+                    TextColor(theme::muted()),
+                    Pickable::IGNORE,
+                    Node {
+                        margin: UiRect::top(Val::Px(10.0)),
+                        padding: UiRect::top(Val::Px(10.0)),
+                        border: UiRect::top(Val::Px(theme::RULE)),
+                        ..default()
+                    },
+                    BorderColor::all(theme::edge()),
+                ));
+            });
         });
     });
 }

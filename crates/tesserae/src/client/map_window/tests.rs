@@ -1030,6 +1030,50 @@ mod waypoints {
         );
     }
 
+    fn scroller(app: &App, entity: Entity) -> Option<Entity> {
+        let parent = app.world().get::<ChildOf>(entity)?.parent();
+        let node = app.world().get::<Node>(parent);
+        if node.is_some_and(|n| n.overflow.y == bevy::ui::OverflowAxis::Scroll) {
+            Some(parent)
+        } else {
+            scroller(app, parent)
+        }
+    }
+
+    fn find(app: &mut App, wanted: WpControl) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &WpControl)>()
+            .iter(app.world())
+            .find_map(|(e, c)| (*c == wanted).then_some(e))
+            .unwrap_or_else(|| panic!("no {wanted:?}"))
+    }
+
+    #[test]
+    fn the_legend_tabs_stay_put_while_the_wheel_scrolls_the_list_under_them() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        let row = find(&mut app, WpControl::Select(1));
+        let list = scroller(&app, row).expect("the list scrolls");
+        for tab in [PanelTab::Waypoints, PanelTab::Explore] {
+            let tab = find(&mut app, WpControl::Tab(tab));
+            assert_eq!(scroller(&app, tab), None, "a tab scrolls with the list");
+        }
+
+        app.world_mut().resource_mut::<MapWindow>().pointer = None;
+        app.world_mut()
+            .write_message(bevy::input::mouse::MouseWheel {
+                unit: bevy::input::mouse::MouseScrollUnit::Line,
+                x: 0.0,
+                y: -1.0,
+                window: Entity::PLACEHOLDER,
+                phase: bevy::input::touch::TouchPhase::Moved,
+            });
+        app.update();
+        assert!(app.world().get::<ScrollPosition>(list).unwrap().y > 0.0);
+    }
+
     #[test]
     fn the_panes_follow_the_tab_and_the_tabs_are_left_to_the_pointer_and_q_and_e() {
         let mut app = app();

@@ -15,7 +15,7 @@ use super::actions::Actions;
 use super::buttons::{self, ButtonStyle};
 use super::frame::PointerOnly;
 use super::map_pop;
-use super::map_window::{MapWindow, SidePanel, closed};
+use super::map_window::{MapWindow, closed};
 use super::menu_ui as ui;
 use super::minimap::Spot;
 use super::theme;
@@ -68,6 +68,8 @@ pub(super) enum WpControl {
 #[derive(Component)]
 struct ListBox;
 #[derive(Component)]
+struct LegendScroll;
+#[derive(Component)]
 pub(super) struct Pane(pub(super) PanelTab);
 
 #[derive(Component)]
@@ -119,8 +121,9 @@ fn key_cap(tabs: &mut ChildSpawnerCommands, key: &str) {
     ));
 }
 
-/// The tabs between their Q and E caps, and the Waypoints pane; the window builds the Explored one.
-pub(super) fn sections(panel: &mut ChildSpawnerCommands) {
+/// The tabs between their Q and E caps, and under them the scrolling node holding the Waypoints
+/// pane; the window builds the Explored pane in the node this returns.
+pub(super) fn sections<'a>(panel: &'a mut ChildSpawnerCommands) -> EntityCommands<'a> {
     panel
         .spawn(Node {
             flex_shrink: 0.0,
@@ -146,16 +149,29 @@ pub(super) fn sections(panel: &mut ChildSpawnerCommands) {
             }
             key_cap(tabs, "E");
         });
-    section(panel, PanelTab::Waypoints).with_children(|section| {
-        section.spawn((
-            ListBox,
-            Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(2.0),
-                ..default()
-            },
-        ));
+    let mut list = panel.spawn((
+        LegendScroll,
+        ScrollPosition::default(),
+        Node {
+            flex_direction: FlexDirection::Column,
+            min_height: Val::Px(0.0),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    ));
+    list.with_children(|list| {
+        section(list, PanelTab::Waypoints).with_children(|section| {
+            section.spawn((
+                ListBox,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(2.0),
+                    ..default()
+                },
+            ));
+        });
     });
+    list
 }
 
 fn activate(
@@ -395,7 +411,7 @@ fn distances(spot: Res<Spot>, marks: Res<Marks>, mut texts: Query<(&Distance, &m
 fn scroll_list(
     actions: Res<Actions>,
     window: Res<MapWindow>,
-    mut panels: Query<&mut ScrollPosition, With<SidePanel>>,
+    mut panels: Query<&mut ScrollPosition, With<LegendScroll>>,
 ) {
     if window.pointer.is_some() {
         return;

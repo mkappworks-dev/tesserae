@@ -32,4 +32,6 @@ list the mockup gives the same toolbar.
 - Done: the list under each toolbar is now the page's `PageScroll` node, so it
   alone scrolls and keeps its place across a rebuild; the sheet body above it
   holds the toolbar still. The Biome panel's cap is now the split's height
-  instead of `62vh`. The `/map` legend tabs were left to the map lane.
+  instead of `62vh`. The `/map` legend's Waypoints and Explored tabs sit above
+  a scrolling node that holds both panes, so the wheel scrolls the list under
+  them.
