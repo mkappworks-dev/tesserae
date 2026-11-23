@@ -851,6 +851,10 @@
 .pick-row {
   grid-template-columns: 86px minmax(0, 1fr);
 }
+/* Sky and Fog are short labels; the room goes to "Same as the land around it". */
+.pick-row:has(.colour-trigger) {
+  grid-template-columns: 32px minmax(0, 1fr);
+}
 .slide-row input {
   width: 100%;
   margin: 0;

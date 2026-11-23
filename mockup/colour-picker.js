@@ -12,10 +12,16 @@ const COLOUR_PRESETS = [
   ["Ember red", "#b23a2a"],
 ];
 
-function colourField(label, bind, value) {
-  const hex = normalHex(value) || "#ffffff";
-  return `<button type="button" class="select-trigger input colour-trigger" data-colour="${esc(bind)}" data-bind="${esc(bind)}" value="${hex}" aria-label="${esc(label)}" aria-haspopup="dialog" aria-expanded="false">${selectSwatch(hex)}<span class="select-value colour-value">${hex.toUpperCase()}</span>${icon("down", 16)}</button>`;
+const BORROWED_AIR = "Same as the land around it";
+
+/* With no `value` the field is empty and shows `borrowed`, the colour the
+   game draws in its place; Esc in the popup goes back to that. */
+function colourField(label, bind, value, borrowed = "#ffffff") {
+  const own = normalHex(value);
+  const hex = own || normalHex(borrowed) || "#ffffff";
+  return `<button type="button" class="select-trigger input colour-trigger" data-colour="${esc(bind)}" data-bind="${esc(bind)}" value="${own || ""}" data-borrowed="${hex}" aria-label="${esc(label)}" aria-haspopup="dialog" aria-expanded="false">${selectSwatch(hex)}<span class="select-value colour-value${own ? "" : " borrowed"}">${own ? hex.toUpperCase() : BORROWED_AIR}</span>${icon("down", 16)}</button>`;
 }
+const shownHex = (trigger) => trigger.value || trigger.dataset.borrowed;
 
 function normalHex(text) {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(text).trim());
@@ -71,7 +77,7 @@ function openColourPicker(trigger) {
   closeSelect();
   closeColourPicker();
   const start = trigger.value;
-  openColour = { trigger, start, hsv: hexToHsv(start) };
+  openColour = { trigger, start, hsv: hexToHsv(shownHex(trigger)) };
   const label = trigger.getAttribute("aria-label");
   const popup = document.createElement("div");
   popup.id = "colour-layer";
@@ -95,7 +101,8 @@ function openColourPicker(trigger) {
 function closeColourPicker(restoreFocus = false, revert = false) {
   if (!openColour) return;
   const { trigger, start } = openColour;
-  if (revert && trigger.value !== start) setColour(start);
+  if (revert && trigger.value !== start)
+    setColour(start, hexToHsv(start || trigger.dataset.borrowed));
   if (trigger.value !== start)
     trigger.dispatchEvent(new Event("change", { bubbles: true }));
   $("#colour-layer")?.remove();
@@ -113,8 +120,12 @@ function setColour(hex, hsv = hexToHsv(hex)) {
   openColour.hsv = hsv;
   if (trigger.value !== hex) {
     trigger.value = hex;
-    trigger.querySelector(".colour-value").textContent = hex.toUpperCase();
-    trigger.querySelector(".select-swatch").style.setProperty("--swatch", hex);
+    const text = trigger.querySelector(".colour-value");
+    text.textContent = hex ? hex.toUpperCase() : BORROWED_AIR;
+    text.classList.toggle("borrowed", !hex);
+    trigger
+      .querySelector(".select-swatch")
+      .style.setProperty("--swatch", shownHex(trigger));
     trigger.dispatchEvent(new Event("input", { bubbles: true }));
   }
   paintColour();
@@ -127,7 +138,7 @@ function paintColour() {
   const layer = $("#colour-layer");
   if (!layer) return;
   const { hsv, trigger } = openColour;
-  const hex = trigger.value;
+  const hex = shownHex(trigger);
   const sv = layer.querySelector(".colour-sv"),
     hue = layer.querySelector(".colour-hue");
   sv.style.setProperty("--hue", `hsl(${hsv.h} 100% 50%)`);

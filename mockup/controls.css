@@ -378,6 +378,19 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
+/* One line, so picking a colour never changes the row's height: the panel
+   would re-clamp its scroll and the picker closes when its field moves.
+   Contained, so it fills the panel's width rather than widening it. */
+.game .select-trigger .colour-value.borrowed {
+  contain: inline-size;
+  flex: 1;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .colour-presets {
   display: grid;
   grid-template-columns: repeat(8, 1fr);

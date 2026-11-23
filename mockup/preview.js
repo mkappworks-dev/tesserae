@@ -257,8 +257,8 @@ function paintBiome(canvas, b, game = state.game) {
     deco: "trees",
     density: 0.06,
   };
-  const sky = hex(b.sky);
-  const fog = hex(b.fog);
+  const sky = hex(b.sky || DEFAULT_SKY);
+  const fog = hex(b.fog || DEFAULT_FOG);
   const grad = ctx.createLinearGradient(0, 0, 0, H * 0.78);
   grad.addColorStop(0, css(sky));
   grad.addColorStop(1, css(fog));
@@ -482,7 +482,54 @@ const gameSample = (name) => ({
   voxel: "1",
   biomes: defaultBiomes(name),
 });
+// The Client's `land_around`: the other turned-on Biomes' declared colour,
+// the nearest in climate weighing most (`SKY_BLEND_WIDTH` in climate.rs).
+function landAround(biomes, at, key) {
+  const here = biomes[at];
+  const coloured = biomes
+    .filter((b, i) => i !== at && b.enabled && b[key])
+    .map((b) => [Math.hypot(b.t - here.t, b.h - here.h), hex(b[key])]);
+  if (!coloured.length) return null;
+  const nearest = Math.min(...coloured.map(([d]) => d));
+  const sum = [0, 0, 0];
+  let total = 0;
+  for (const [d, rgb] of coloured) {
+    const w = Math.exp(-(d - nearest) / 0.1);
+    total += w;
+    rgb.forEach((v, c) => (sum[c] += w * v));
+  }
+  return (
+    "#" +
+    sum
+      .map((v) =>
+        Math.round(v / total)
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")
+  );
+}
+function shownAir(biomes, at, key) {
+  const own = biomes[at][key];
+  if (own) return { hex: own, borrowed: false };
+  const around = landAround(biomes, at, key);
+  if (around) return { hex: around, borrowed: true };
+  return { hex: key === "sky" ? DEFAULT_SKY : DEFAULT_FOG, borrowed: false };
+}
+function repaintBorrowedAir() {
+  document.querySelectorAll('[data-colour^="biome."]').forEach((t) => {
+    if (t.value) return;
+    const air = shownAir(
+      state.biomes,
+      state.selected,
+      t.dataset.colour.slice(6),
+    );
+    t.dataset.borrowed = air.hex;
+    t.querySelector(".select-swatch").style.setProperty("--swatch", air.hex);
+  });
+}
 function drawWorldPreviews() {
+  repaintBorrowedAir();
   document.querySelectorAll("canvas.world-preview").forEach((canvas) => {
     const live = canvas.dataset.live;
     const source =
@@ -495,10 +542,16 @@ function drawWorldPreviews() {
             : worlds.find((w) => w.id === Number(canvas.dataset.worldId));
     if (!source) return;
     if (live === "biome") {
-      const key = JSON.stringify([state.game, source]);
+      const i = Number(canvas.dataset.biome);
+      const shown = {
+        ...source,
+        sky: shownAir(state.biomes, i, "sky").hex,
+        fog: shownAir(state.biomes, i, "fog").hex,
+      };
+      const key = JSON.stringify([state.game, shown]);
       if (canvas.dataset.key === key) return;
       canvas.dataset.key = key;
-      paintBiome(canvas, source);
+      paintBiome(canvas, shown);
       return;
     }
     const spec = previewSpec(source);
