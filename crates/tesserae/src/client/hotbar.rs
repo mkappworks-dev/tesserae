@@ -51,10 +51,14 @@ pub(super) fn rebuild(
     (hotbar, catalogue, looks): (Res<Hotbar>, Res<Catalogue>, Res<Looks>),
     covers: super::menu::Covers,
     dead: Option<Res<super::death::Dead>>,
+    layout: Option<Res<super::layout_menu::LayoutMenu>>,
     roots: Query<Entity, With<HotbarRoot>>,
     mut shown: Local<Option<Hotbar>>,
 ) {
-    let hidden = super::menu::covered(&covers) || !super::death::alive(dead);
+    // Quick layout's prompt bar takes the bottom of the screen.
+    let hidden = super::menu::covered(&covers)
+        || !super::death::alive(dead)
+        || layout.is_some_and(|layout| layout.open);
     let wanted = (!hidden).then(|| hotbar.clone());
     if *shown == wanted && !catalogue.is_changed() && !looks.is_changed() {
         return;
@@ -580,6 +584,25 @@ mod tests {
             .open = false;
         app.update();
         assert_eq!(count(&mut app), 1);
+    }
+
+    #[test]
+    fn the_bar_gives_way_to_quick_layout_s_prompt_bar() {
+        let mut app = app();
+        app.init_resource::<super::super::layout_menu::LayoutMenu>();
+        send(&mut app, &[(0, "t:rock", 1)], 0);
+        let count = |app: &mut App| {
+            app.world_mut()
+                .query::<&HotbarRoot>()
+                .iter(app.world())
+                .count()
+        };
+        assert_eq!(count(&mut app), 1);
+        app.world_mut()
+            .resource_mut::<super::super::layout_menu::LayoutMenu>()
+            .open = true;
+        app.update();
+        assert_eq!(count(&mut app), 0);
     }
 
     #[test]

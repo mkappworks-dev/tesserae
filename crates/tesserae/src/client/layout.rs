@@ -923,8 +923,6 @@ fn tally(answer: &LayoutAnswer) -> [usize; 3] {
 /// What the menu and the status card say, in three parts that are set apart:
 /// the shape, the next step with what the aim would lay, and the keys.
 pub(super) struct Summary {
-    /// How many Voxels the aim would lay, once the Server has said.
-    pub(super) count: Option<usize>,
     /// The span's size in Voxels and in metres.
     pub(super) size: String,
     pub(super) body: String,
@@ -934,11 +932,7 @@ pub(super) struct Summary {
 #[cfg(test)]
 impl Summary {
     pub(super) fn joined(&self) -> String {
-        let count = self.count.map_or("-".to_owned(), |count| count.to_string());
-        format!(
-            "{count} Voxels\n{}\n{}\n{}",
-            self.size, self.body, self.hint
-        )
+        format!("{}\n{}\n{}", self.size, self.body, self.hint)
     }
 }
 
@@ -977,9 +971,6 @@ pub(super) fn summary(
     };
     let fresh =
         current(mode, layout, hotbar, camera).and_then(|intent| preview.fresh(&intent, now));
-    let count = fresh
-        .filter(|answer| answer.refused.is_none())
-        .map(|answer| tally(answer)[0]);
     let size = if between {
         let c = mode.points.get(2).copied().or(mode.depth);
         match mode.points[..] {
@@ -1014,7 +1005,7 @@ pub(super) fn summary(
         body.push_str(&format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels"));
     }
     let leave = format!(
-        " · {} menu · {} leave",
+        " · {} edit · {} exit",
         keys(Action::Layout),
         keys(Action::ClearTool)
     );
@@ -1027,19 +1018,14 @@ pub(super) fn summary(
         }
     } else {
         format!(
-            "{} place · {} cancel · {} / {} or digits for the count{leave}",
+            "{} place · {} cancel · {} / {} count{leave}",
             keys(Action::Place),
             keys(Action::Remove),
             keys(Action::LayoutMore),
             keys(Action::LayoutLess),
         )
     };
-    Summary {
-        count,
-        size,
-        body,
-        hint,
-    }
+    Summary { size, body, hint }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -1916,7 +1902,7 @@ mod tests {
             ],
         );
         let said = say(&mut app);
-        assert!(said.starts_with("2 Voxels\n4 × 1 × 1 · "), "{said}");
+        assert!(said.starts_with("4 × 1 × 1 · "), "{said}");
         assert!(
             said.contains("2 will be placed, 1 out of reach, 1 blocked"),
             "{said}"
