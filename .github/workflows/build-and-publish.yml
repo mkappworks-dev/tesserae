@@ -1,6 +1,8 @@
 name: Build and Publish
 
 on:
+  # A manual run builds every archive and keeps them as run artifacts, with no release involved.
+  workflow_dispatch:
   workflow_call:
     inputs:
       tag:
@@ -20,8 +22,44 @@ permissions:
   contents: write
 
 jobs:
+  # Games and Mods are WASM components, identical on every platform, so they are packaged once here
+  # and each binary job only copies the result in.
+  games:
+    name: Package Games and Mods
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --target wasm32-wasip2
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      - name: Package
+        run: ./scripts/package-demo
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: |
+            dist/games
+            dist/mods
+          if-no-files-found: error
+
   binaries:
     name: Build ${{ matrix.os_label }}/${{ matrix.arch }}
+    needs: [games]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -64,16 +102,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
+      - name: Download dist
+        uses: actions/download-artifact@v5
+        with:
+          name: dist
+          path: dist
+
       # No version injection: release-please bumps Cargo.toml and the binary reads
       # it through env!("CARGO_PKG_VERSION").
       - name: Build
         run: cargo build -p tesserae --release --locked --target ${{ matrix.target }}
 
+      # Headless, so it needs no GPU or window. Proves the binary starts and loads a packaged Game.
+      # Skipped for the x86_64 macOS build, which cross-compiles on an arm64 runner.
+      - name: Smoke test
+        if: matrix.target != 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="target/${{ matrix.target }}/release/tesserae"
+          [ "${{ matrix.os_label }}" = windows ] && exe="${exe}.exe"
+          "$exe" validate dist/games/terra --mods dist/mods --trust-for-run
+
       - name: Package archive (unix)
         if: matrix.os_label != 'windows'
         shell: bash
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ inputs.tag || 'dev' }}
         run: |
           set -euo pipefail
           ARCHIVE="tesserae_${TAG}_${{ matrix.os_label }}_${{ matrix.arch }}.tar.gz"
@@ -85,6 +140,7 @@ jobs:
           mkdir -p "${STAGE}/tesserae"
           cp "target/${{ matrix.target }}/release/tesserae" "${STAGE}/tesserae/"
           cp -R assets "${STAGE}/tesserae/"
+          cp -R dist/games dist/mods "${STAGE}/tesserae/"
           tar -C "${STAGE}" -czf "${ARCHIVE}" tesserae
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
@@ -93,7 +149,7 @@ jobs:
         if: matrix.os_label == 'windows'
         shell: bash
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ inputs.tag || 'dev' }}
         run: |
           set -euo pipefail
           ARCHIVE="tesserae_${TAG}_windows_${{ matrix.arch }}.zip"
@@ -101,20 +157,30 @@ jobs:
           mkdir -p "${STAGE}/tesserae"
           cp "target/${{ matrix.target }}/release/tesserae.exe" "${STAGE}/tesserae/"
           cp -R assets "${STAGE}/tesserae/"
+          cp -R dist/games dist/mods "${STAGE}/tesserae/"
           (cd "${STAGE}" && 7z a "${ARCHIVE}" tesserae)
           mv "${STAGE}/${ARCHIVE}" .
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Upload to release
+        if: inputs.tag != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
         run: gh release upload "${TAG}" "${ARCHIVE}" "${ARCHIVE}.sha256" --clobber
 
+      - name: Keep as artifact
+        if: inputs.tag == ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.os_label }}-${{ matrix.arch }}
+          path: tesserae_dev_*
+
   publish:
     name: Publish release
+    if: inputs.tag != ''
     needs: [binaries]
     runs-on: ubuntu-latest
     steps:
