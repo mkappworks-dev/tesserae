@@ -55,17 +55,6 @@ fn launcher(app: &App) -> &Launcher {
 }
 
 fn act(app: &mut App, act: Act) {
-    // A card's Edit is in its menu: open it first, as a Player does.
-    if let Act::Edit(path) = &act
-        && app
-            .world_mut()
-            .query::<&Act>()
-            .iter(app.world())
-            .all(|a| *a != act)
-        && launcher(app).screen == Screen::Worlds
-    {
-        self::act(app, Act::Menu(path.clone()));
-    }
     let entity = app
         .world_mut()
         .query::<(Entity, &Act)>()
@@ -298,38 +287,48 @@ fn delete_defaults_to_cancel_refuses_an_open_world_then_removes_it() {
 }
 
 #[test]
-fn a_cards_menu_opens_and_closes_and_deletes_from_the_list_without_visiting_edit() {
+fn e_and_delete_act_on_the_highlighted_world_and_delete_still_confirms() {
     let worlds = Directory::new();
-    let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
+    let river = library::create(&worlds.0, &played("River bend", "terra", 30)).unwrap();
+    let ash = library::create(&worlds.0, &played("Cinder hollow", "terra", 20)).unwrap();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<bevy::input::mouse::AccumulatedMouseMotion>();
     app.update();
     act(&mut app, Act::Worlds);
-    act(&mut app, Act::Menu(path.clone()));
-    assert_eq!(launcher(&app).menu.as_ref(), Some(&path));
-    act(&mut app, Act::Menu(path.clone()));
-    assert_eq!(launcher(&app).menu, None, "the dots toggle it");
-    act(&mut app, Act::Menu(path.clone()));
-    press(&mut app, KeyCode::Escape);
-    assert_eq!(launcher(&app).menu, None);
+    app.update();
+    press(&mut app, KeyCode::KeyE);
     assert_eq!(
         launcher(&app).screen,
         Screen::Worlds,
-        "Escape only closes it"
+        "New World has no Edit"
     );
 
-    act(&mut app, Act::Menu(path.clone()));
-    act(&mut app, Act::DeleteWorld(path.clone()));
-    app.update();
-    assert_eq!(launcher(&app).menu, None, "an act closes it");
-    assert_eq!(launcher(&app).screen, Screen::Delete(path.clone()));
-    assert!(shown(&mut app, "Your Worlds"), "over the list, not Edit");
+    let tile = control(&mut app, &Act::Play(ash.clone()));
+    frame::testing::hover(&mut app, tile);
+    assert_eq!(focused_act(&app), Some(Act::Play(ash.clone())));
+    press(&mut app, KeyCode::KeyE);
+    assert_eq!(launcher(&app).screen, Screen::Edit(ash.clone()));
     press(&mut app, KeyCode::Escape);
     assert_eq!(launcher(&app).screen, Screen::Worlds);
-    assert!(path.exists());
-    act(&mut app, Act::Menu(path.clone()));
-    act(&mut app, Act::DeleteWorld(path.clone()));
+    app.update();
+    assert_eq!(
+        focused_act(&app),
+        Some(Act::Play(ash.clone())),
+        "back on the slot it left"
+    );
+
+    let tile = control(&mut app, &Act::Play(river.clone()));
+    frame::testing::hover(&mut app, tile);
+    press(&mut app, KeyCode::Delete);
+    assert_eq!(launcher(&app).screen, Screen::Delete(river.clone()));
+    assert!(shown(&mut app, "River bend"), "over the list, not Edit");
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    assert!(river.exists());
+    act(&mut app, Act::DeleteHighlighted);
     act(&mut app, Act::ConfirmDelete);
-    assert!(!path.exists());
+    assert!(!river.exists());
+    assert!(ash.exists());
     assert_eq!(launcher(&app).screen, Screen::Worlds);
 }
 
@@ -413,18 +412,19 @@ fn a_world_whose_mod_is_missing_or_reversioned_cannot_open() {
         id: "lake".into(),
         version: "1.0".into(),
     }];
-    library::create(&worlds.0, &needs).unwrap();
+    let path = library::create(&worlds.0, &needs).unwrap();
     let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[]);
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     act(&mut app, Act::Worlds);
-    assert!(app.world().resource::<Switch>().0.is_none());
-    let has_open = app
-        .world_mut()
-        .query::<&Act>()
-        .iter(app.world())
-        .any(|a| matches!(a, Act::Play(_) | Act::Continue));
-    assert!(!has_open, "Open is not offered while items are unmet");
+    assert!(shown(&mut app, "Mod `lake` 1.0 is not installed"));
+    act(&mut app, Act::Play(path));
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    assert!(
+        app.world().resource::<Switch>().0.is_none(),
+        "its slot does not open while items are unmet"
+    );
+    assert_eq!(controls(&mut app, &Act::Continue), 0);
     assert_eq!(
         app.world().resource::<Installed>().unmet(&needs),
         vec!["Mod `lake` 1.0 is not installed".to_string()]
@@ -545,11 +545,8 @@ fn the_title_is_framed_and_the_screens_not_yet_moved_keep_the_header() {
         frame::testing::prompts(&mut app),
         keys(&[("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")])
     );
-    for screen in [Act::Worlds, Act::Home, Act::Library] {
-        act(&mut app, screen);
-        if launcher(&app).screen == Screen::Title {
-            continue;
-        }
+    {
+        act(&mut app, Act::Library);
         assert!(header_shown(&mut app));
         assert!(
             frame::testing::prompts(&mut app).is_empty(),
@@ -1135,7 +1132,6 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
         .flipped
         .insert(Disclosure::ManageWorld);
     let play = format!("{:?}", Act::Play(path.clone()));
-    let menu = format!("{:?}", Act::Menu(path.clone()));
     let screens: [(&str, Screen, Option<Act>, Vec<&str>); 7] = [
         (
             "title",
@@ -1143,12 +1139,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             None,
             vec!["Continue", "Worlds", "New", "Library", "Settings", "Quit"],
         ),
-        (
-            "worlds",
-            Screen::Worlds,
-            None,
-            vec!["Search", "New", &play, &menu, "Home"],
-        ),
+        ("worlds", Screen::Worlds, None, vec!["New", &play]),
         (
             "library",
             Screen::Library,
@@ -1708,29 +1699,22 @@ fn search_filters_the_worlds_by_name_or_game() {
     let river = library::create(&worlds.0, &played("River bend", "terra", 30)).unwrap();
     let ash = library::create(&worlds.0, &played("Cinder hollow", "ember", 20)).unwrap();
     let reeds = library::create(&worlds.0, &played("Reed marsh", "terra", 10)).unwrap();
+    let mut others = Vec::new();
+    for at in 0..6 {
+        let filler = played(&format!("Quarry {at}"), "stone", at);
+        others.push(library::create(&worlds.0, &filler).unwrap());
+    }
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     act(&mut app, Act::Worlds);
-    fn edits(world: &World, entity: Entity, out: &mut Vec<PathBuf>) {
-        if let Some(Act::Menu(path)) = world.get::<Act>(entity) {
-            out.push(path.clone());
-        }
-        for child in world.get::<Children>(entity).into_iter().flatten() {
-            edits(world, *child, out);
-        }
-    }
     let listed = |app: &mut App| {
-        let cards: Vec<Entity> = app
+        let mut shown: Vec<PathBuf> = app
             .world_mut()
-            .query::<(Entity, &WorldCard, &Node)>()
+            .query::<(&Slot, &Node)>()
             .iter(app.world())
-            .filter(|(_, _, node)| node.display != Display::None)
-            .map(|(entity, ..)| entity)
+            .filter(|(_, node)| node.display != Display::None)
+            .filter_map(|(slot, _)| slot.0.clone())
             .collect();
-        let mut shown = Vec::new();
-        for card in cards {
-            edits(app.world(), card, &mut shown);
-        }
         shown.sort();
         shown
     };
@@ -1738,11 +1722,11 @@ fn search_filters_the_worlds_by_name_or_game() {
         paths.sort();
         paths
     };
-    assert_eq!(
-        listed(&mut app),
-        sorted(vec![river.clone(), ash.clone(), reeds.clone()])
-    );
+    let mut every = vec![river.clone(), ash.clone(), reeds.clone()];
+    every.extend(others);
+    assert_eq!(listed(&mut app), sorted(every));
     type_into(&mut app, Field::Search, "river");
+    assert!(!new_world_shown(&mut app), "a search hides New World");
     assert_eq!(listed(&mut app), std::slice::from_ref(&river));
     type_into(&mut app, Field::Search, "EMBER");
     assert_eq!(listed(&mut app), [ash]);
@@ -1806,14 +1790,12 @@ fn key(app: &mut App, code: KeyCode) {
 #[test]
 fn east_is_back_on_each_screen_and_dismisses_on_the_title() {
     let worlds = Directory::new();
-    let path = library::create(&worlds.0, &details("Keep", true)).unwrap();
+    library::create(&worlds.0, &details("Keep", true)).unwrap();
     let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     for (opener, there, back) in [
         (Act::Worlds, Screen::Worlds, Screen::Title),
         (Act::Library, Screen::Library, Screen::Title),
         (Act::New, Screen::Create(Step::World), Screen::Worlds),
-        (Act::Menu(path.clone()), Screen::Worlds, Screen::Worlds),
-        (Act::Home, Screen::Title, Screen::Title),
     ] {
         reach(&mut app, pad, opener.clone());
         tap(&mut app, pad, GamepadButton::South);
@@ -1821,16 +1803,16 @@ fn east_is_back_on_each_screen_and_dismisses_on_the_title() {
         tap(&mut app, pad, GamepadButton::East);
         assert_eq!(launcher(&app).screen, back, "{opener:?}");
     }
+    tap(&mut app, pad, GamepadButton::East);
+    assert_eq!(launcher(&app).screen, Screen::Title);
 }
 
 /// From the title, through Worlds, to one World's Edit page.
 fn pad_to_edit(app: &mut App, pad: Entity, path: &Path) {
     reach(app, pad, Act::Worlds);
     tap(app, pad, GamepadButton::South);
-    reach(app, pad, Act::Menu(path.to_owned()));
-    tap(app, pad, GamepadButton::South);
-    reach(app, pad, Act::Edit(path.to_owned()));
-    tap(app, pad, GamepadButton::South);
+    reach(app, pad, Act::Play(path.to_owned()));
+    tap(app, pad, GamepadButton::West);
     assert_eq!(launcher(app).screen, Screen::Edit(path.to_owned()));
     reach(app, pad, Act::Disclose(Disclosure::ManageWorld));
     tap(app, pad, GamepadButton::South);
@@ -2191,4 +2173,171 @@ fn the_mods_library_shows_each_mods_thumbnail_or_swatches_and_what_it_adds() {
     );
     assert!(colour_shown(&mut app, [21, 22, 23, 255]));
     assert!(colour_shown(&mut app, [31, 32, 33, 255]));
+}
+
+fn new_world_shown(app: &mut App) -> bool {
+    app.world_mut()
+        .query::<(&Slot, &Node)>()
+        .iter(app.world())
+        .any(|(slot, node)| slot.0.is_none() && node.display != Display::None)
+}
+
+fn search_shown(app: &mut App) -> bool {
+    controls_of(app, Field::Search) > 0
+}
+
+fn controls_of(app: &mut App, wanted: Field) -> usize {
+    app.world_mut()
+        .query::<&Field>()
+        .iter(app.world())
+        .filter(|f| **f == wanted)
+        .count()
+}
+
+#[test]
+fn the_search_appears_only_once_the_worlds_no_longer_fit() {
+    let worlds = Directory::new();
+    for at in 0..8 {
+        library::create(&worlds.0, &played(&format!("World {at}"), "terra", at)).unwrap();
+    }
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    assert!(!search_shown(&mut app), "eight fit");
+    assert!(new_world_shown(&mut app));
+    press(&mut app, KeyCode::Escape);
+    library::create(&worlds.0, &played("World 8", "terra", 8)).unwrap();
+    launcher_mut(&mut app).refresh(&worlds.0);
+    act(&mut app, Act::Worlds);
+    assert!(search_shown(&mut app), "nine do not");
+    assert_eq!(focused_act(&app), Some(Act::New), "the slots come first");
+}
+
+fn prompt_list(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(k, l)| (k.to_string(), l.to_string()))
+        .collect()
+}
+
+#[test]
+fn the_worlds_are_framed_slots_with_new_world_first_and_focused() {
+    let worlds = Directory::new();
+    library::create(&worlds.0, &played("River bend", "terra", 30)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::New));
+    assert!(!header_shown(&mut app));
+    assert_eq!(
+        frame::testing::prompts(&mut app),
+        prompt_list(&[
+            ("Enter", "Play"),
+            ("E", "Edit"),
+            ("Del", "Delete"),
+            ("Esc", "Back")
+        ])
+    );
+    for gone in ["MAIN MENU", "Stored on this device", "1 World"] {
+        assert!(!shown(&mut app, gone), "{gone}");
+    }
+    assert_eq!(controls(&mut app, &Act::Home), 0, "Back is a prompt");
+    assert!(shown(&mut app, "New World"));
+    assert!(shown(&mut app, "River bend"));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Title);
+}
+
+#[test]
+fn with_no_worlds_only_play_and_back_are_prompted() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::New));
+    assert_eq!(
+        frame::testing::prompts(&mut app),
+        prompt_list(&[("Enter", "Play"), ("Esc", "Back")])
+    );
+}
+
+/// The slot whose Edit and Delete icons are showing.
+fn icons_shown_on(app: &mut App) -> Vec<Act> {
+    app.world_mut()
+        .query_filtered::<(&ChildOf, &Visibility), With<pages::SlotActions>>()
+        .iter(app.world())
+        .filter(|(_, visibility)| **visibility != Visibility::Hidden)
+        .map(|(tile, _)| tile.parent())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .filter_map(|tile| app.world().get::<Act>(tile).cloned())
+        .collect()
+}
+
+#[test]
+fn on_a_controller_the_d_pad_walks_the_slots_x_edits_and_y_deletes() {
+    let worlds = Directory::new();
+    let river = library::create(&worlds.0, &played("River bend", "terra", 30)).unwrap();
+    let ash = library::create(&worlds.0, &played("Cinder hollow", "terra", 20)).unwrap();
+    let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    reach(&mut app, pad, Act::Worlds);
+    tap(&mut app, pad, GamepadButton::South);
+    assert_eq!(focused_act(&app), Some(Act::New));
+    assert!(icons_shown_on(&mut app).is_empty(), "New World has none");
+    let mut visited = Vec::new();
+    for button in [GamepadButton::DPadDown, GamepadButton::DPadUp] {
+        for _ in 0..4 {
+            tap(&mut app, pad, button);
+            visited.extend(focused_act(&app));
+        }
+    }
+    assert!(visited.contains(&Act::Play(river.clone())));
+    assert!(visited.contains(&Act::Play(ash.clone())));
+    assert!(
+        visited.iter().all(|a| matches!(a, Act::New | Act::Play(_))),
+        "never onto the icons: {visited:?}"
+    );
+
+    reach(&mut app, pad, Act::Play(ash.clone()));
+    assert_eq!(icons_shown_on(&mut app), [Act::Play(ash.clone())]);
+    tap(&mut app, pad, GamepadButton::West);
+    assert_eq!(launcher(&app).screen, Screen::Edit(ash.clone()));
+    tap(&mut app, pad, GamepadButton::East);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+
+    reach(&mut app, pad, Act::Play(river.clone()));
+    tap(&mut app, pad, GamepadButton::North);
+    assert_eq!(launcher(&app).screen, Screen::Delete(river.clone()));
+    assert_eq!(focused_act(&app), Some(Act::Back), "cancel first");
+    tap(&mut app, pad, GamepadButton::South);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    assert!(river.exists());
+}
+
+#[test]
+fn hovering_a_world_lights_its_slot_and_shows_its_icons() {
+    let worlds = Directory::new();
+    let river = library::create(&worlds.0, &played("River bend", "terra", 30)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<bevy::input::mouse::AccumulatedMouseMotion>();
+    app.update();
+    act(&mut app, Act::Worlds);
+    app.update();
+    assert!(icons_shown_on(&mut app).is_empty());
+    let tile = control(&mut app, &Act::Play(river.clone()));
+    frame::testing::hover(&mut app, tile);
+    app.update();
+    assert_eq!(icons_shown_on(&mut app), [Act::Play(river.clone())]);
+    assert_eq!(
+        app.world().get::<BackgroundColor>(tile).unwrap().0,
+        pages::SLOT_LIT
+    );
+    act(&mut app, Act::Edit(river.clone()));
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Edit(river),
+        "its pencil edits it"
+    );
 }

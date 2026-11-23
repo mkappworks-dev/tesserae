@@ -963,10 +963,13 @@ pub(super) enum IconKind {
     Dismiss,
     /// The place Tool's card: the prototype's `layout` outline.
     Layout,
+    /// A World slot's Edit and Delete.
+    Pencil,
+    Trash,
 }
-const ICONS: usize = 25;
+const ICONS: usize = 27;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 22] = [
+const DRAWN: [IconKind; 24] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -989,6 +992,8 @@ const DRAWN: [IconKind; 22] = [
     IconKind::FlagPlus,
     IconKind::Dismiss,
     IconKind::Layout,
+    IconKind::Pencil,
+    IconKind::Trash,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1300,6 +1305,34 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
                 .fold(f32::MAX, f32::min)
                 .min(segment(v(14.0, 17.5), v(21.0, 17.5)))
                 .min(segment(v(17.5, 14.0), v(17.5, 21.0))),
+        ),
+        IconKind::Pencil => stroke(
+            path(&[
+                v(4.0, 20.0),
+                v(8.0, 20.0),
+                v(19.0, 9.0),
+                v(15.0, 5.0),
+                v(4.0, 16.0),
+                v(4.0, 20.0),
+            ])
+            .min(segment(v(14.0, 6.0), v(18.0, 10.0))),
+        ),
+        IconKind::Trash => stroke(
+            segment(v(4.0, 7.0), v(20.0, 7.0))
+                .min(segment(v(10.0, 11.0), v(10.0, 17.0)))
+                .min(segment(v(14.0, 11.0), v(14.0, 17.0)))
+                .min(path(&[
+                    v(6.0, 7.0),
+                    v(7.0, 20.0),
+                    v(17.0, 20.0),
+                    v(18.0, 7.0),
+                ]))
+                .min(path(&[
+                    v(9.0, 7.0),
+                    v(9.0, 4.0),
+                    v(15.0, 4.0),
+                    v(15.0, 7.0),
+                ])),
         ),
         IconKind::Chevron => stroke(path(&[v(9.0, 5.0), v(16.0, 12.0), v(9.0, 19.0)])),
         IconKind::Collapsed => fill(convex(&[v(8.0, 6.0), v(17.0, 12.0), v(8.0, 18.0)])),

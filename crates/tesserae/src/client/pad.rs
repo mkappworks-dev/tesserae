@@ -312,6 +312,7 @@ type Focusables<'w, 's> = Query<
         Or<(With<Button>, With<Slider>)>,
         Without<super::menu_ui::SearchField>,
         Without<super::frame::PromptKey>,
+        Without<super::frame::PointerOnly>,
     ),
 >;
 type Sliders<'w, 's> = Query<
