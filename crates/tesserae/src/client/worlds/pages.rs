@@ -1110,13 +1110,32 @@ fn mode_picks(
 ) {
     label(parent, "Game mode");
     gap(parent, 8.0);
+    segmented(
+        parent,
+        MODES.map(|(mode, name, _)| (act(mode), name, chosen == mode)),
+    );
+    gap(parent, 8.0);
+    let about = MODES
+        .iter()
+        .find(|(mode, ..)| *mode == chosen)
+        .map_or("", |(.., about)| about);
+    ui::paragraph(
+        parent,
+        note.unwrap_or(about),
+        theme::TEXT_SMALL,
+        theme::muted(),
+    );
+}
+
+/// One option per segment, Left and Right moving between them; the chosen one is filled.
+fn segmented<const N: usize>(parent: &mut ChildSpawnerCommands, options: [(Act, &str, bool); N]) {
     parent
         .spawn((
             BackgroundColor(theme::MODE),
             BorderColor::all(theme::edge()),
             Node {
                 display: Display::Grid,
-                grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(1.0)],
+                grid_template_columns: vec![GridTrack::flex(1.0); N],
                 column_gap: Val::Px(2.0),
                 padding: UiRect::all(Val::Px(3.0)),
                 border: UiRect::all(Val::Px(theme::RULE)),
@@ -1126,17 +1145,16 @@ fn mode_picks(
             },
         ))
         .with_children(|segments| {
-            for (mode, name, _) in MODES {
-                let selected = chosen == mode;
+            for (act, name, selected) in options {
                 let (fill, ink) = if selected {
                     (theme::SAGE, theme::SAGE_INK)
                 } else {
                     (Color::NONE, theme::muted())
                 };
-                let mut half = segments.spawn((
+                let mut segment = segments.spawn((
                     bevy::ui_widgets::Button,
                     super::super::pad::Stepper,
-                    act(mode),
+                    act,
                     Pick {
                         fill,
                         edge: Color::NONE,
@@ -1151,26 +1169,15 @@ fn mode_picks(
                         ..default()
                     },
                 ));
-                // As a radio group: Tab reaches the chosen half only, and Left and Right the other.
+                // As a radio group: Tab reaches the chosen segment only, and Left and Right the others.
                 if selected {
-                    half.insert(TabIndex(0));
+                    segment.insert(TabIndex(0));
                 }
-                half.with_children(|h| {
+                segment.with_children(|h| {
                     ui::weighted_text(h, name, 13.0, theme::SEMIBOLD, ink);
                 });
             }
         });
-    gap(parent, 8.0);
-    let about = MODES
-        .iter()
-        .find(|(mode, ..)| *mode == chosen)
-        .map_or("", |(.., about)| about);
-    ui::paragraph(
-        parent,
-        note.unwrap_or(about),
-        theme::TEXT_SMALL,
-        theme::muted(),
-    );
 }
 
 fn problem(parent: &mut ChildSpawnerCommands, message: Option<&String>) {
@@ -1361,7 +1368,7 @@ fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
     gap(col, 24.0);
     label(col, "Voxel size \u{00b7} fixed at creation");
     gap(col, 8.0);
-    voxel_selector(col, f.voxel_size_m);
+    voxel_picks(col, f.voxel_size_m);
     name
 }
 
@@ -1379,72 +1386,18 @@ fn climate_fields(aside: &mut ChildSpawnerCommands, climate: &ClimateDraft) {
     }
 }
 
-/// The Voxel size and what it costs, as one ◀ value ▶ selector in a field's frame.
-fn voxel_selector(col: &mut ChildSpawnerCommands, chosen: f32) {
-    let value = VOXEL_SIZES
+/// The Voxel sizes as one segmented control, with what the chosen one costs under it.
+fn voxel_picks(col: &mut ChildSpawnerCommands, chosen: f32) {
+    segmented(
+        col,
+        VOXEL_SIZES.map(|(size, name, _)| (Act::VoxelSize(size), name, chosen == size)),
+    );
+    gap(col, 8.0);
+    let about = VOXEL_SIZES
         .iter()
-        .find(|(size, _)| *size == chosen)
-        .map_or_else(|| format!("{chosen} m"), |(_, label)| (*label).to_owned());
-    col.spawn((
-        bevy::ui_widgets::Button,
-        super::super::pad::Stepper,
-        TabIndex(0),
-        Act::VoxelStep(1),
-        Pick {
-            fill: theme::FIELD,
-            edge: theme::field_edge(),
-            hover: Some((theme::FIELD_HOVER, theme::field_edge())),
-        },
-        BackgroundColor(theme::FIELD),
-        BorderColor::all(theme::field_edge()),
-        Node {
-            height: Val::Px(theme::CONTROL_HEIGHT),
-            padding: UiRect::left(Val::Px(12.0)),
-            border: UiRect::all(Val::Px(theme::RULE)),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-            align_items: AlignItems::Center,
-            flex_shrink: 0.0,
-            ..default()
-        },
-    ))
-    .with_children(|select| {
-        select.spawn((
-            Text::new(value),
-            ui::font(theme::TEXT_BODY),
-            TextColor(theme::INK),
-            Node {
-                flex_grow: 1.0,
-                min_width: Val::Px(0.0),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
-        for (glyph, by) in [("\u{25c0}", -1), ("\u{25b6}", 1)] {
-            select
-                .spawn(Node {
-                    width: Val::Px(FIELD_ACTION),
-                    height: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    flex_shrink: 0.0,
-                    ..default()
-                })
-                .observe(
-                    move |mut click: On<bevy::picking::events::PointerClick>,
-                          mut queue: ResMut<Queue>| {
-                        // Not also the selector's own click, which steps forward.
-                        click.propagate(false);
-                        queue.0.push(Act::VoxelStep(by));
-                    },
-                )
-                .with_child((
-                    Text::new(glyph),
-                    ui::font(11.0),
-                    TextColor(theme::muted()),
-                    Pickable::IGNORE,
-                ));
-        }
-    });
+        .find(|(size, ..)| *size == chosen)
+        .map_or("", |(.., about)| about);
+    ui::paragraph(col, about, theme::TEXT_SMALL, theme::muted());
 }
 
 /// The side of one icon button inside a field.
