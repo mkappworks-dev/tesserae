@@ -1,6 +1,6 @@
 # 01: Update the mockup
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -12,8 +12,43 @@ Update `mockup/` for the spec's mockup changes: the trust modal's Details toggle
 
 ## Acceptance criteria
 
-- [ ] Each change is reachable at a mockup route or state, listed in this ticket's Comments
-- [ ] The Place Tool page has its own route
-- [ ] `npm run fmt:check` passes
+- [x] Each change is reachable at a mockup route or state, listed in this ticket's Comments
+- [x] The Place Tool page has its own route
+- [x] `npm run fmt:check` passes
 
 ## Comments
+
+Where to see each change (`python3 mockup/server.py`, then these routes;
+states set from the browser console where there is no route):
+
+- Trust modal Details: `/worlds/new/mods`, then `state.trusted = false;
+  goStep(3)`. Cancel is focused; Details (closed by default) lists each code
+  item's permissions and the host limits from `tesserae_mods::trust_prompt`,
+  and names the data-only items. The item list and the Details list both
+  scroll inside the modal, which stays inside the window. The full Trust page
+  (`/worlds/new/trust`) is unchanged.
+- Edit World discard dialog: `/worlds/1/edit`, change the name or mode, then
+  Esc (or the Esc Cancel prompt). Keep editing is focused; Discard returns to
+  Worlds unsaved. Without edits Esc leaves at once.
+- Biomes panel: `/worlds/new/biomes`, then click a biome's pencil. The panel
+  heads with the biome's diorama; Temperature, Humidity and Caves are one-line
+  sliders above the climate map, then Ground and Atmosphere (Sky and Fog on one
+  row). Also fixed: editing now flips the panel's status to Customised (a
+  filter checkbox shared its `data-biome-status` selector).
+- Inventory search: `/inventory` and `/inventory/crafting`. A search field
+  under the tabs, always shown; / focuses it and the prompt bar shows / Search.
+- Layout-ready card: `/layout`, then Enter (Build). The card shows L Edit,
+  ⌫ Exit and RMB Place as key caps, nothing clickable.
+- Place Tool page: `/place` (also "Place Tool overlay" in the screen picker).
+  The Structures stage over the World with a Quick layout-style side panel:
+  Outside | Inside | Placing, the Game's Templates, Turn, the outcome and the
+  size and Voxel total. Prompt bar: ↑ ↓ Template, R Turn, V View, Enter Hold
+  (back to play with the Tool), Esc Exit. `/structures` is unchanged and now
+  shares its stage code; K from play still opens it.
+- Ticket 13's behaviour: a press outside any open popup (Mods and Biomes
+  filter and sort, World card menus, Settings and other selectors, the Map
+  popover) closes it and is swallowed, so it presses nothing beneath. One
+  capture-phase rule in `interaction.js`; a popup's own button still toggles
+  it and Esc still closes it.
+- The screen picker also lists Structures (`/structures`) and shows it there.
+
