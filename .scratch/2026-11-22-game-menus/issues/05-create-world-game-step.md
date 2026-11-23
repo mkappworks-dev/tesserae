@@ -1,6 +1,6 @@
 # 05: Create World: Game step and titles
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [02: Menu frame and prompt bar, on the title
 screen](./02-menu-frame-and-prompt-bar.md), [03: Optional thumbnail in
@@ -19,19 +19,30 @@ Game.
 
 ## Acceptance criteria
 
-- [ ] The Game step lists the installed Games with Terra first and the current
+- [x] The Game step lists the installed Games with Terra first and the current
       choice marked
-- [ ] Leaving the Game step with an untrusted Game asks for trust; declining
+- [x] Leaving the Game step with an untrusted Game asks for trust; declining
       stays on the step
-- [ ] The rail and the panel share one height
-- [ ] Next and Create World sit in the same place on every step
-- [ ] Enter activates the focused control; Enter on the already-chosen Game,
-      or in a text field, moves to the next step
-- [ ] Ctrl+Enter (⌘+Enter on macOS) or the controller's Start moves to the
-      next step, or creates the World on Review, from anywhere on the step
-- [ ] Review opens with Create World focused, so Enter creates
-- [ ] The trust modal opens on Cancel; trusting takes a deliberate move to
-      Trust
-- [ ] Esc goes back a step, or cancels from the first step
+- [x] The rail and the panel share one height
+- [x] Next and Create World sit in the same place on every step
+- [x] Enter activates the focused control; Enter on the already-chosen Game, or
+      in a text field, moves to the next step
+- [x] Ctrl+Enter (⌘+Enter on macOS) or the controller's Start moves to the next
+      step, or creates the World on Review, from anywhere on the step
+- [x] Review opens with Create World focused, so Enter creates
+- [x] The trust modal opens on Cancel; trusting takes a deliberate move to Trust
+- [x] Esc goes back a step, or cancels from the first step
 
 ## Comments
+
+- The Game step's Trust dialog is a new `Screen::StepTrust { on, to }` with
+  `Act::TrustStep`; the Mods step still asks inline with its old panel and
+  `Act::TrustMods`, left for ticket 08 to move onto the same dialog.
+- The Ctrl+Enter cap reads "Ctrl+Enter" on every platform, as the mockup does;
+  ⌘+Enter works on macOS without its own cap.
+- Ctrl+Enter or Start drops whatever the focused control queued from the same
+  Enter, so moving on never also picks the focused Game.
+- Re-Create still opens on the World step, past the Game step, since its Game is
+  fixed; ticket 10 moves it to Review.
+- A component Game without a thumbnail shows the old landscape tile; ticket 06
+  can swap in the terrain preview once the Game is trusted.

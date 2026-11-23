@@ -45,11 +45,11 @@ pub(super) fn spawn(
     let page = match &l.screen {
         Screen::Delete(_) if l.from_menu => Screen::Worlds,
         Screen::Delete(path) => Screen::Edit(path.clone()),
-        Screen::Discard(step) => Screen::Create(*step),
+        Screen::Discard(step) | Screen::StepTrust { on: step, .. } => Screen::Create(*step),
         screen => screen.clone(),
     };
     // Screens move onto the frame one at a time; the rest keep the old header and footer.
-    let framed = page == Screen::Title;
+    let framed = matches!(page, Screen::Title | Screen::Create(_));
     let mut root = commands.spawn((
         Root,
         TabGroup::default(),
@@ -93,11 +93,12 @@ pub(super) fn spawn(
                 }
                 Screen::Worlds => worlds(main, l, installed, scroll),
                 Screen::Library => library_page(main, installed, thumbnails, scroll),
+                Screen::Create(Step::Game) => game_page(main, l, installed, thumbnails, scroll),
                 Screen::Create(Step::World) => form(main, l, installed, scroll),
                 Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
                 Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
                 Screen::Create(Step::Review) => review(main, l, installed, scroll),
-                Screen::Delete(_) | Screen::Discard(_) => None,
+                Screen::Delete(_) | Screen::Discard(_) | Screen::StepTrust { .. } => None,
                 Screen::Edit(path) => edit(main, l, installed, path, scroll),
                 Screen::Trust(next) => trust(main, l, installed, next, scroll),
                 Screen::Opening(name) => {
@@ -107,15 +108,7 @@ pub(super) fn spawn(
             };
         });
         if framed {
-            frame::prompt_bar(
-                root,
-                SCENERY_PLACE,
-                vec![
-                    frame::Prompt::<()>::new(frame::Cap::Tab, "Navigate"),
-                    frame::Prompt::new(frame::Cap::Enter, "Select"),
-                    frame::Prompt::new(frame::Cap::Esc, "Back"),
-                ],
-            );
+            frame::prompt_bar(root, SCENERY_PLACE, prompts(&page));
         } else {
             footer(root, SCENERY_PLACE);
         }
@@ -124,11 +117,39 @@ pub(super) fn spawn(
         match &l.screen {
             Screen::Delete(path) => focus = delete(root, l, path),
             Screen::Discard(_) => focus = discard(root),
+            Screen::StepTrust { .. } => focus = step_trust(root, installed),
             _ if resetting => focus = reset(root),
             _ => {}
         }
     });
     focus
+}
+
+fn prompts(page: &Screen) -> Vec<frame::Prompt<Act>> {
+    use frame::{Cap, Prompt};
+    match page {
+        Screen::Create(step) => {
+            let (forward, act) = match step.next() {
+                Some(_) => ("Next", Act::Next),
+                None => ("Create", Act::Create),
+            };
+            let back = if step.previous().is_some() {
+                "Back"
+            } else {
+                "Cancel"
+            };
+            vec![
+                Prompt::new(Cap::Enter, "Select"),
+                Prompt::new(Cap::CtrlEnter, forward).act(act),
+                Prompt::new(Cap::Esc, back).act(Act::Back),
+            ]
+        }
+        _ => vec![
+            Prompt::new(Cap::Tab, "Navigate"),
+            Prompt::new(Cap::Enter, "Select"),
+            Prompt::new(Cap::Esc, "Back"),
+        ],
+    }
 }
 
 /// The scenery's place, as the prototype's footer names its landscape.
@@ -1638,9 +1659,6 @@ fn form(
             "Give it a name you\u{2019}ll want to come back to.",
             "New World",
         ));
-        section(col, |r| section_text(r, "Choose your Game"));
-        game_picker(col, f, installed);
-        gap(col, 8.0);
         mode_picks(
             col,
             "Game mode",
@@ -1737,120 +1755,168 @@ fn row(
         .with_children(children);
 }
 
-/// Every installed Game as a card with its landscape and what it is about.
-fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) {
-    col.spawn(Node {
-        display: Display::Grid,
-        grid_template_columns: RepeatedGridTrack::flex(3, 1.0),
-        column_gap: Val::Px(8.0),
-        row_gap: Val::Px(8.0),
-        flex_shrink: 0.0,
-        ..default()
-    })
-    .with_children(|grid| {
-        for (i, g) in installed.games.iter().enumerate() {
-            let chosen = f.game.as_deref() == Some(g.id.as_str());
-            let (fill, edge) = if chosen {
-                (theme::CARD_CHOSEN, theme::CARD_CHOSEN_EDGE)
-            } else {
-                (theme::CARD, theme::edge())
-            };
-            grid.spawn((
-                bevy::ui_widgets::Button,
-                TabIndex(0),
-                Act::PickGame(i),
-                Pick {
-                    fill,
-                    edge,
-                    hover: Some((
-                        if chosen {
-                            theme::CARD_CHOSEN_HOVER
-                        } else {
-                            theme::CARD_HOVER
-                        },
-                        edge,
-                    )),
-                },
-                BackgroundColor(fill),
-                BorderColor::all(edge),
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(12.0)),
-                    border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                    min_width: Val::Px(0.0),
-                    ..default()
-                },
-            ))
-            .with_children(|card| {
-                thumbnail(
-                    card,
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(38.0),
-                        margin: UiRect::bottom(Val::Px(9.0)),
-                        ..default()
-                    },
+/// The installed Games, the default first, as the order the Game step lists them in.
+pub(super) fn game_order(installed: &Installed) -> Vec<usize> {
+    let default = installed.game.as_ref().map(|g| &g.id);
+    let mut order: Vec<usize> = (0..installed.games.len()).collect();
+    order.sort_by_key(|&i| Some(&installed.games[i].id) != default);
+    order
+}
+
+/// Step one: every installed Game with its picture and what it is about.
+fn game_page(
+    main: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    thumbnails: &Thumbnails,
+    scroll: Vec2,
+) -> Option<Entity> {
+    let mut chosen_row = None;
+    let forward = step_frame(main, l, installed, Step::Game, scroll, |col| {
+        problem(col, l.form.problem.as_ref());
+        col.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|list| {
+            for i in game_order(installed) {
+                let g = &installed.games[i];
+                let chosen = l.form.game.as_deref() == Some(g.id.as_str());
+                let row = game_row(
+                    list,
+                    i,
+                    g,
+                    installed,
+                    picture(installed, thumbnails, &g.id),
+                    chosen,
                 );
-                let name = ui::title(&g.id);
-                ui::weighted_text(
-                    card,
-                    if chosen {
-                        format!("{name} \u{2713}")
-                    } else {
-                        name
-                    },
-                    theme::TEXT_BODY,
-                    theme::BOLD,
-                    theme::INK,
-                );
-                card.spawn((
-                    Text::new(
-                        installed
-                            .about(&g.id)
-                            .1
-                            .map_or_else(|| format!("Version {}", g.version), str::to_owned),
-                    ),
-                    theme::font(theme::TEXT_CAPTION),
-                    bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                    TextColor(theme::muted()),
-                    Pickable::IGNORE,
-                ));
                 if chosen {
-                    card.spawn((
-                        BackgroundColor(theme::CARD_CHOSEN_EDGE),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            right: Val::Px(0.0),
-                            bottom: Val::Px(0.0),
-                            height: Val::Px(theme::CARD_BAR),
-                            border_radius: BorderRadius::bottom(Val::Px(
-                                theme::RADIUS_CONTROL - theme::RULE,
-                            )),
-                            ..default()
-                        },
-                        Pickable::IGNORE,
-                    ));
+                    chosen_row = Some(row);
                 }
-            });
-        }
+            }
+        });
     });
-    let mut note = |value: String| {
-        gap(col, 8.0);
-        ui::paragraph(col, value, theme::TEXT_SMALL, theme::muted());
+    chosen_row.or(forward)
+}
+
+fn game_row(
+    list: &mut ChildSpawnerCommands,
+    index: usize,
+    g: &GameRef,
+    installed: &Installed,
+    picture: Picture,
+    chosen: bool,
+) -> Entity {
+    let (fill, edge) = if chosen {
+        (theme::CARD_CHOSEN, theme::CARD_CHOSEN_EDGE)
+    } else {
+        (theme::CARD, theme::edge())
     };
-    if !installed.untrusted.is_empty() {
-        note("Needs Trust before it opens.".into());
-    }
-    if let Some(game) = f.game.as_deref() {
-        let needs = installed.required(game).len();
-        if needs > 0 {
-            note(format!(
-                "{} needs {needs} Mods, chosen on the next page.",
-                ui::title(game)
+    list.spawn((
+        bevy::ui_widgets::Button,
+        TabIndex(0),
+        Act::PickGame(index),
+        Pick {
+            fill,
+            edge,
+            hover: Some((
+                if chosen {
+                    theme::CARD_CHOSEN_HOVER
+                } else {
+                    theme::CARD_HOVER
+                },
+                edge,
+            )),
+        },
+        BackgroundColor(fill),
+        BorderColor::all(edge),
+        Node {
+            padding: UiRect::new(Val::Px(10.0), Val::Px(14.0), Val::Px(10.0), Val::Px(10.0)),
+            column_gap: Val::Px(14.0),
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
+    .with_children(|row| {
+        game_picture(row, picture);
+        row.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|words| {
+            ui::weighted_text(
+                words,
+                ui::title(&g.id),
+                theme::TEXT_BODY,
+                theme::BOLD,
+                theme::INK,
+            );
+            words.spawn((
+                Text::new(
+                    installed
+                        .about(&g.id)
+                        .1
+                        .map_or_else(|| format!("Version {}", g.version), str::to_owned),
+                ),
+                theme::font(theme::TEXT_CAPTION),
+                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+            ));
+        });
+        if chosen {
+            row.spawn((
+                Text::new("\u{2713}"),
+                theme::weighted(theme::TEXT_BODY, theme::BOLD),
+                TextColor(theme::CARD_CHOSEN_EDGE),
+                Pickable::IGNORE,
             ));
         }
+    })
+    .id()
+}
+
+/// A Game's thumbnail, or its Material swatches; a component Game declares no Materials, so it
+/// gets the neutral landscape tile until the terrain preview can draw it.
+fn game_picture(row: &mut ChildSpawnerCommands, picture: Picture) {
+    match picture {
+        Picture::Thumbnail(image) => {
+            row.spawn((
+                ImageNode::new(image),
+                BorderColor::all(theme::edge()),
+                Node {
+                    width: Val::Px(144.0),
+                    height: Val::Px(81.0),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+        }
+        Picture::Swatches(colours) if !colours.is_empty() => {
+            draw_picture(row, Picture::Swatches(colours));
+        }
+        Picture::Swatches(_) => thumbnail(
+            row,
+            Node {
+                width: Val::Px(144.0),
+                height: Val::Px(81.0),
+                ..default()
+            },
+        ),
     }
 }
 
@@ -2568,9 +2634,8 @@ fn trust(
     focus
 }
 
-/// Create World's frame: the step rail beside a sheet, with Cancel or Back,
-/// where the player is, and the way forward in the footer. Returns that way
-/// forward, which takes focus on every step after the first.
+/// Create World's frame: the step rail beside the sheet, with the step's title and its one way
+/// forward, which is returned. Back and Next are prompts too.
 fn step_frame(
     main: &mut ChildSpawnerCommands,
     l: &Launcher,
@@ -2579,101 +2644,47 @@ fn step_frame(
     scroll: Vec2,
     body: impl FnOnce(&mut ChildSpawnerCommands),
 ) -> Option<Entity> {
-    let (title, subtitle) = match step {
-        Step::World => (
-            "A World of your own",
-            "Choose a Game, give it a name, and plant a seed.",
-        ),
-        Step::Mods => (
-            "Make it your kind of World",
-            "Add materials and possibilities. You can keep it simple.",
-        ),
-        Step::Biomes => (
-            "Find your natural balance",
-            "Choose Biomes, then tune how they appear.",
-        ),
-        Step::Review => (
-            "Ready for a new beginning?",
-            "A last look at the place you\u{2019}re about to call yours.",
-        ),
+    let title = match step {
+        Step::Game => "Choose a Game",
+        Step::World => "Name your World",
+        Step::Mods => "Add Mods",
+        Step::Biomes => "Shape the biomes",
+        Step::Review => "Ready to begin",
     };
-    let eyebrow = format!("CREATE WORLD / {}", step.label().to_uppercase());
+    // Only the Game step explains itself: a Game is the one unfamiliar idea.
+    let subtitle =
+        (step == Step::Game).then_some("It shapes the land, its biomes and what you can build.");
+    let trusting = step == Step::Mods && l.trust_asked && !installed.untrusted.is_empty();
+    let primary = match step.next() {
+        Some(_) if trusting => (
+            if installed.untrusted.len() == 1 {
+                "Trust it and continue".to_owned()
+            } else {
+                format!("Trust {} and continue", installed.untrusted.len())
+            },
+            Act::TrustMods,
+        ),
+        Some(next) => (format!("Next: {}", next.label()), Act::Next),
+        None => ("Create World".to_owned(), Act::Create),
+    };
     let mut forward = None;
     workspace(main, |w| {
         step_rail(w, l, installed, step);
-        cine::sheet(
+        forward = frame::menu_sheet_with(
             w,
-            Sheet {
-                eyebrow: &eyebrow,
+            frame::MenuSheet {
                 title,
                 subtitle,
+                primary: Some((primary.0.as_str(), primary.1)),
             },
             page_scroll(scroll),
             body,
-            |foot| {
-                buttons::button(
-                    foot,
-                    if step.previous().is_some() {
-                        "Back"
-                    } else {
-                        "Cancel"
-                    },
-                    Act::Back,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Ghost,
-                        align: if step.previous().is_some() {
-                            Align::Before("\u{2190}")
-                        } else {
-                            Align::Centre
-                        },
-                    },
-                );
-                footer_hint(
-                    foot,
-                    format!("{} of {}", step.index() + 1, Step::ORDER.len()),
-                );
-                let trusting =
-                    step == Step::Mods && l.trust_asked && !installed.untrusted.is_empty();
-                forward = Some(match step.next() {
-                    Some(_) if trusting => buttons::button(
-                        foot,
-                        if installed.untrusted.len() == 1 {
-                            "Trust it and continue".to_owned()
-                        } else {
-                            format!("Trust {} and continue", installed.untrusted.len())
-                        },
-                        Act::TrustMods,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Primary,
-                            align: Align::After("\u{2192}"),
-                        },
-                    ),
-                    Some(next) => buttons::button(
-                        foot,
-                        format!("Next: {}", next.label()),
-                        Act::Next,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Primary,
-                            align: Align::After("\u{2192}"),
-                        },
-                    ),
-                    None => buttons::button(
-                        foot,
-                        "Create World",
-                        Act::Create,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Primary,
-                            align: Align::After("\u{2192}"),
-                        },
-                    ),
-                });
-            },
         );
     });
     forward
 }
 
-/// The steps beside Create World's sheet, as tall as they need to be. A step
+/// The steps beside Create World's sheet, as tall as it is. A step
 /// before this one shows a tick only once it is valid.
 fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, current: Step) {
     w.spawn((
@@ -2681,7 +2692,6 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
         cine::framed(Node {
             width: Val::Px(165.0),
             flex_shrink: 0.0,
-            align_self: AlignSelf::FlexStart,
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(7.0),
             padding: UiRect::axes(Val::Px(12.0), Val::Px(20.0)),
@@ -2734,6 +2744,7 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
                     IconKind::Check
                 } else {
                     match step {
+                        Step::Game => IconKind::Layout,
                         Step::World => IconKind::World,
                         Step::Mods => IconKind::Mods,
                         Step::Biomes => IconKind::Biomes,
@@ -3746,6 +3757,53 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 },
             );
             keep
+        },
+    )
+}
+
+/// Trust before a step that runs the chosen items; Cancel is focused, so Enter alone never grants.
+fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed) -> Option<Entity> {
+    let items = &installed.untrusted;
+    let title = if items.len() == 1 {
+        "Trust this item to continue?".to_owned()
+    } else {
+        format!("Trust {} items to continue?", items.len())
+    };
+    dialog(
+        root,
+        &title,
+        |d| {
+            cine::dialog_text(
+                d,
+                "The next steps preview what these items make, which runs them. Only trust ones you know.",
+                theme::muted(),
+            );
+            trust_rows(d, items);
+        },
+        |row| {
+            let cancel = buttons::button(
+                row,
+                "Cancel",
+                Act::Back,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
+            );
+            buttons::button(
+                row,
+                if items.len() == 1 {
+                    "Trust and continue".to_owned()
+                } else {
+                    format!("Trust all {} and continue", items.len())
+                },
+                Act::TrustStep,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Primary,
+                    align: Align::Centre,
+                },
+            );
+            cancel
         },
     )
 }

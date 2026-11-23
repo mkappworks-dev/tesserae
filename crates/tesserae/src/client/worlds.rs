@@ -13,6 +13,7 @@ use open::*;
 
 use std::path::{Path, PathBuf};
 
+use bevy::input::gamepad::GamepadButton;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 
@@ -92,12 +93,18 @@ enum Screen {
     Edit(PathBuf),
     Delete(PathBuf),
     Trust(Next),
+    /// Trust asked in a dialog over step `on`, which moves on to `to` once granted.
+    StepTrust {
+        on: Step,
+        to: Step,
+    },
     Opening(String),
 }
 
 /// The steps of Create World, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Step {
+    Game,
     World,
     Mods,
     Biomes,
@@ -105,10 +112,17 @@ pub(super) enum Step {
 }
 
 impl Step {
-    const ORDER: [Step; 4] = [Step::World, Step::Mods, Step::Biomes, Step::Review];
+    const ORDER: [Step; 5] = [
+        Step::Game,
+        Step::World,
+        Step::Mods,
+        Step::Biomes,
+        Step::Review,
+    ];
 
     fn label(self) -> &'static str {
         match self {
+            Step::Game => "Game",
             Step::World => "World",
             Step::Mods => "Mods",
             Step::Biomes => "Biomes",
@@ -475,6 +489,8 @@ pub(super) enum Act {
     Trust,
     /// The Mods step's primary button: trusts what the panel lists, then shows the Biomes.
     TrustMods,
+    /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
+    TrustStep,
     Dismiss,
     Disclose(Disclosure),
     ModTab(Option<String>),
@@ -870,11 +886,32 @@ fn keys(
     if settings.is_some_and(|s| s.open) {
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) || pad.is_some_and(|pad| pad.cancel) {
+    if keys.just_pressed(KeyCode::Escape) || pad.as_ref().is_some_and(|pad| pad.cancel) {
         queue.0.push(match launcher.screen {
             Screen::Title | Screen::Worlds if launcher.card.is_some() => Act::Dismiss,
             _ => Act::Back,
         });
+    }
+    let chord = keys.just_pressed(KeyCode::Enter)
+        && keys.any_pressed([
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::SuperLeft,
+            KeyCode::SuperRight,
+        ]);
+    let start = pad.is_some_and(|pad| pad.navigation.just_pressed(GamepadButton::Start));
+    if let Screen::Create(step) = launcher.screen
+        && (chord || start)
+        && !launcher.form.biomes.as_ref().is_some_and(|d| d.resetting)
+    {
+        // The focused button took the same Enter; moving on wins, as it would from a text field.
+        queue.0.clear();
+        queue.0.push(if step.next().is_some() {
+            Act::Next
+        } else {
+            Act::Create
+        });
+        return;
     }
     // Enter in a text field submits its form; on buttons it activates them.
     if keys.just_pressed(KeyCode::Enter)
@@ -1099,6 +1136,7 @@ fn handle(
             | Act::Voxel(..)
             | Act::Mode(..)
             | Act::TrustMods
+            | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
             Act::Home
             | Act::Worlds
@@ -1169,7 +1207,9 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 None if l.form.unchanged_from(&l.initial) => l.show(Screen::Worlds),
                 None => l.show(Screen::Discard(step)),
             },
-            Screen::Discard(step) => l.show(Screen::Create(step)),
+            Screen::Discard(step) | Screen::StepTrust { on: step, .. } => {
+                l.show(Screen::Create(step))
+            }
             Screen::Delete(path) => l.show(Screen::Edit(path)),
             Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
             Screen::Worlds | Screen::Library => l.show(Screen::Title),
