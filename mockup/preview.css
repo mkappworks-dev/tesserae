@@ -863,7 +863,7 @@
   margin-top: 4px;
 }
 .biome-panel.compact .climate-plot .climate-map {
-  aspect-ratio: 3 / 1;
+  aspect-ratio: 2 / 1;
 }
 .biome-panel.compact .axis-x {
   margin-top: 4px;
@@ -906,7 +906,7 @@
 .game .biome-card.selected {
   background: #29292e;
   border-color: #c0c7bb;
-  box-shadow: inset 3px 0 #c0c7bb;
+  box-shadow: inset 0 0 0 1px #c0c7bb;
 }
 .biome-panel.compact .climate-plot {
   margin: 0 0 4px;

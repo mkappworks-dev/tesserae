@@ -809,21 +809,34 @@ mod waypoints {
     }
 
     #[test]
-    fn a_click_outside_the_popover_closes_it_as_cancel_does() {
+    fn with_the_add_popover_open_a_click_on_the_map_moves_its_point() {
         let mut app = app();
         declare(&mut app, kinds());
         opened(&mut app);
+        explore(&mut app, [0, 0], None, 8);
         adding_popover(&mut app);
-        crate::client::frame::testing::click_outside(&mut app);
-        assert_eq!(window(&app).pop, None);
+        assert!(!crate::client::frame::testing::covered(&mut app));
+        click_at(&mut app, Vec2::new(2.0, 0.0));
+        assert_eq!(window(&app).pop, Some(Pop::Add(Vec2::new(4.0, 0.0))));
         assert!(window(&app).adding && is_open(&app));
         assert!(intents(&mut app).is_empty());
-        send_list(&mut app, base_list());
-        control(&mut app, WpControl::Select(1));
-        crate::client::frame::testing::click_outside(&mut app);
-        assert_eq!(window(&app).pop, None);
-        assert!(is_open(&app));
-        assert!(intents(&mut app).is_empty());
+    }
+
+    #[test]
+    fn with_a_popover_open_a_click_on_another_marker_opens_its_popover() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        let mut list = Waypoints::default();
+        list.push("Base", "terra:home", 20.0, 0.0, false);
+        list.push("Camp", "terra:home", -20.0, 0.0, false);
+        send_list(&mut app, list);
+        click_at(&mut app, Vec2::new(5.0, 0.0));
+        assert_eq!(window(&app).pop, Some(Pop::Edit(1)));
+        assert!(!crate::client::frame::testing::covered(&mut app));
+        click_at(&mut app, Vec2::new(-5.0, 0.0));
+        assert_eq!(window(&app).pop, Some(Pop::Edit(2)));
+        assert_eq!(app.world().resource::<Marks>().selected(), Some(2));
     }
 
     #[test]

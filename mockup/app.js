@@ -66,6 +66,8 @@ const games = {
     required: ["timber"],
   },
 };
+const DEFAULT_SKY = "#87ceeb";
+const DEFAULT_FOG = "#ffffff";
 const biomeDefaults = [
   {
     t: 0.5,
@@ -74,8 +76,6 @@ const biomeDefaults = [
     rock: "Stone",
     soil: "Dirt",
     surface: "Grass",
-    sky: "#7e92a8",
-    fog: "#88a0be",
     swatch: "#71965b",
   },
   {
@@ -85,8 +85,6 @@ const biomeDefaults = [
     rock: "Stone",
     soil: "Sand",
     surface: "Sand",
-    sky: "#b0a080",
-    fog: "#c4b28e",
     swatch: "#c1a575",
   },
   {
@@ -96,8 +94,6 @@ const biomeDefaults = [
     rock: "Stone",
     soil: "Dirt",
     surface: "Snow",
-    sky: "#96a4b8",
-    fog: "#b0bed0",
     swatch: "#d0d9d1",
   },
   {
@@ -107,8 +103,6 @@ const biomeDefaults = [
     rock: "Stone",
     soil: "Mud",
     surface: "Grass",
-    sky: "#879e9b",
-    fog: "#a6b9ad",
     swatch: "#527365",
   },
   {
@@ -118,8 +112,6 @@ const biomeDefaults = [
     rock: "Stone",
     soil: "Dirt",
     surface: "Grass",
-    sky: "#aaab8c",
-    fog: "#c1b79c",
     swatch: "#a79e59",
   },
 ];
@@ -225,6 +217,8 @@ let worlds = [
 function defaultBiomes(game) {
   return games[game].names.map((name, i) => ({
     name,
+    sky: DEFAULT_SKY,
+    fog: DEFAULT_FOG,
     ...clone(biomeDefaults[i]),
     ...(games[game].palette?.[i] || {}),
     enabled: true,
@@ -767,9 +761,14 @@ function slideRow(label, key, value, { min, max, step, format }) {
 function biomeEditor() {
   const b = state.biomes[state.selected];
   const fixed = (v) => Number(v).toFixed(2);
-  const pick = (label, key, value, options) =>
-    `<div class="pick-row"><span>${label}</span>${customSelect(label, key, value, options)}</div>`;
-  return `<section class="biome-panel compact" aria-label="Edit ${esc(b.name)}"><header class="panel-head">${biomeThumb(b, state.selected)}<div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${climateMap(b)}${slideRow("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface, ["Grass", "Sand", "Snow", "Melon"])}${pick("Soil", "biome.soil", b.soil, ["Dirt", "Sand", "Mud", "Melon"])}${pick("Rock", "biome.rock", b.rock, ["Stone", "Melon"])}</div><div class="panel-section"><span class="form-label">Atmosphere</span><div class="color-stack">${[
+  const materials = Object.entries(GROUND).map(([name, swatch]) => ({
+    value: name,
+    label: name,
+    swatch,
+  }));
+  const pick = (label, key, value) =>
+    `<div class="pick-row"><span>${label}</span>${customSelect(label, key, value, materials, "", { search: "Search Materials" })}</div>`;
+  return `<section class="biome-panel compact" aria-label="Edit ${esc(b.name)}"><header class="panel-head">${biomeThumb(b, state.selected)}<div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${climateMap(b)}${slideRow("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface)}${pick("Soil", "biome.soil", b.soil)}${pick("Rock", "biome.rock", b.rock)}</div><div class="panel-section"><span class="form-label">Atmosphere</span><div class="color-stack">${[
     ["Sky", "sky"],
     ["Fog", "fog"],
   ]
@@ -1548,6 +1547,7 @@ document.addEventListener(
     if (
       e.key === "Escape" &&
       !state.pop &&
+      !openSelect &&
       state.biomeEdit != null &&
       !$("#dialog-root").children.length
     ) {
