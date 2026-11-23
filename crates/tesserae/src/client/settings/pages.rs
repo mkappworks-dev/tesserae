@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::client::menu_ui::Tab;
+use crate::client::presentation::WindowMode;
 use crate::client::theme;
 use crate::server::player::SpeedLevel;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -470,6 +471,21 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
 
 pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allowed: bool) {
     let map_hint = |text: &'static str| if map_allowed { text } else { UNAVAILABLE };
+    group(list, "WINDOW", |card| {
+        setting_row(
+            card,
+            "Window mode",
+            "Borderless fullscreen covers the screen without changing its mode, so switching away is instant. Fullscreen takes over the display.",
+            |row| {
+                select(
+                    row,
+                    p.window_mode,
+                    WindowMode::ALL.map(|mode| (mode, mode.label().into())),
+                    Operation::WindowMode,
+                )
+            },
+        );
+    });
     group(list, "FRAME PRESENTATION", |card| {
         setting_row(
             card,

@@ -258,6 +258,7 @@ pub(super) fn run(
                 Operation::MinimapSize(size) => p.minimap_size = size,
                 Operation::Invert(on) => p.invert_y = on,
                 Operation::ScrollDirection(on) => p.reverse_scroll = on,
+                Operation::WindowMode(mode) => p.window_mode = mode,
                 Operation::Sync(on) => p.display_sync = on,
                 Operation::Cap(cap) => p.fps_cap = cap,
                 Operation::AntiAliasing(aa) => p.anti_aliasing = aa,
