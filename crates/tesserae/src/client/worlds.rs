@@ -707,6 +707,9 @@ fn review_capture(
                 "filter" => Act::ModPop(Pop::Filter),
                 "sort" => Act::ModPop(Pop::Sort),
                 "all" => Act::SelectShownMods,
+                "biome" => Act::SelectBiome(0),
+                "biome-filter" => Act::BiomePop(Pop::Filter),
+                "biome-sort" => Act::BiomePop(Pop::Sort),
                 // The Opening card stays up: no World is handed to the loader.
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {

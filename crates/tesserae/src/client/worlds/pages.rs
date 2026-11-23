@@ -3871,7 +3871,8 @@ fn biome_editor(split: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
             Node {
                 flex_direction: FlexDirection::Column,
                 width: Val::Px(320.0),
-                max_height: Val::Px(520.0),
+                // The sheet's body is about this tall, so Reset and Done stay in view.
+                max_height: Val::Vh(62.0),
                 flex_shrink: 0.0,
                 border: UiRect::all(Val::Px(theme::RULE)),
                 border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
