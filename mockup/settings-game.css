@@ -1,35 +1,32 @@
 /* Game-feel pass for this area; see menus.css for the shared shell. */
-.settings-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 28px;
-  align-items: start;
+/* The rail's tone, so the strip reads as frame along the sheet's foot. */
+.game .menu-sheet .settings-help {
+  flex: none;
+  min-height: calc(64px * var(--text-scale, 1) + 35px);
+  padding: 17px 32px 18px;
+  background: rgb(10 11 12 / 0.9);
+  border-top: 1px solid var(--edge);
+  font-size: calc(13px * var(--text-scale, 1));
+  line-height: 1.45;
 }
-.settings-help {
-  position: sticky;
-  top: 0;
-  padding: 14px 16px;
-  background: rgb(255 255 255 / 0.04);
-  border-left: 2px solid var(--leaf);
-  min-height: 96px;
-}
-.settings-help b {
+.settings-help > b {
   display: block;
-  font-size: calc(14px * var(--text-scale, 1));
-  font-weight: 600;
+  font-size: calc(15px * var(--text-scale, 1));
+  font-weight: 700;
 }
 .settings-help p {
-  margin: 8px 0 0;
-  font-size: calc(13px * var(--text-scale, 1));
-  line-height: 1.55;
+  margin: 2px 0 0;
+  max-width: 90ch;
   color: var(--muted);
 }
-.game.large-text .settings-layout {
-  grid-template-columns: 1fr;
+.settings-help .settings-note {
+  color: var(--leaf);
 }
-.game.large-text .settings-help {
-  position: static;
-  order: -1;
+.settings-help .settings-note b {
+  font-weight: 700;
+}
+.settings-help .settings-note:empty {
+  display: none;
 }
 .game .settings-rows .setting-row {
   padding: 10px 0;

@@ -345,19 +345,9 @@ function handMarkup(stack) {
   return `${crack}${burst}<div class="hand ${motion}" aria-hidden="true"><i class="arm"></i>${item ? voxelIcon(item) : ""}</div>`;
 }
 
-/* The engine's notice card (menu_ui::notify): top right, one at a time, 2.6 s by default. */
-function notice(text, tone = "info", seconds = 2.6) {
-  const card = $("#notice-card");
-  card.textContent = text;
-  card.dataset.tone = tone;
-  card.classList.remove("show");
-  void card.offsetWidth;
-  card.classList.add("show");
-  clearTimeout(notice.timer);
-  notice.timer = setTimeout(
-    () => card.classList.remove("show"),
-    seconds * 1000,
-  );
+/* The engine's notice card (menu_ui::notify), drawn by the shared toast component. */
+function notice(text, tone = "info") {
+  notify(text, tone === "warn" ? "refused" : "info");
   log(text);
 }
 const feedRows = [];
@@ -727,18 +717,3 @@ document.addEventListener("contextmenu", (e) => {
     placeHeld();
   }
 });
-
-function placeToast() {
-  const hud = state.screen === "play" && $(".hud-bottom"),
-    t = $("#toast");
-  if (!hud) {
-    t.style.bottom = "";
-    return;
-  }
-  t.style.bottom =
-    $("#game").getBoundingClientRect().bottom -
-    hud.getBoundingClientRect().top +
-    10 +
-    "px";
-}
-window.addEventListener("resize", () => placeToast());

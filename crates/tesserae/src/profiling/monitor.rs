@@ -5,18 +5,6 @@ use bevy::{
     window::{Monitor, MonitorSelection, OnMonitor, WindowMode, WindowPosition},
 };
 
-pub(crate) fn window(mut window: Window) -> Window {
-    if std::env::var_os("TESSERAE_SCREENSHOT").is_some()
-        && std::env::var_os("TESSERAE_PROFILE_BORDERLESS").is_some()
-        && std::env::var_os("TESSERAE_PROFILE_MONITOR_HZ").is_some()
-    {
-        // macOS reads these attributes when creating the NSWindow, not on mode changes.
-        window.fullsize_content_view = true;
-        window.titlebar_transparent = true;
-    }
-    window
-}
-
 #[derive(Resource)]
 struct Request {
     millihertz: u32,
