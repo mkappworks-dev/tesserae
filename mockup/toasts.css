@@ -1,0 +1,123 @@
+/* One toast component on every screen; placeToast() sets the anchor's offsets. */
+#toasts {
+  position: absolute;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(420px, calc(100% - 36px));
+  pointer-events: none;
+}
+/* Newest sits nearest the anchor edge. */
+#toasts[data-pos="top-centre"] {
+  flex-direction: column-reverse;
+}
+#toasts:is([data-pos="bottom-centre"], [data-pos="top-centre"]) {
+  left: 50%;
+  transform: translateX(-50%);
+}
+/* A slot collapses its row as it leaves, so the stack closes up instead of jumping. */
+.toast-slot {
+  --tone: #a8b5bd;
+  display: grid;
+  grid-template-rows: 1fr;
+  max-width: 100%;
+  opacity: 0;
+  transform: translateY(var(--rise, 8px));
+  transition:
+    opacity 0.2s ease-out,
+    transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1),
+    grid-template-rows 0.22s ease-in 0.04s;
+}
+#toasts[data-pos="top-centre"] .toast-slot {
+  --rise: -8px;
+}
+.toast-slot.show {
+  opacity: 1;
+  transform: none;
+}
+.toast-slot.leaving {
+  opacity: 0;
+  transform: none;
+  grid-template-rows: 0fr;
+}
+.toast-slot[data-tone="done"] {
+  --tone: #8fc27a;
+}
+.toast-slot:is([data-tone="refused"], [data-tone="error"]) {
+  --tone: #d6a95a;
+}
+.toast-card {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 3px 0;
+  padding: 9px 14px 9px 12px;
+  background: rgb(10 11 12 / 0.9);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--edge, #64646b);
+  border-radius: 0;
+  color: #f1f0ed;
+  font-size: 13px;
+  line-height: 1.35;
+}
+#toasts[data-scope="game"] .toast-card {
+  font-size: 14px;
+}
+.toast-text {
+  flex: 1;
+}
+.toast-icon {
+  flex: none;
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.toast-count:empty {
+  display: none;
+}
+.toast-count {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: #ffffff1a;
+  color: #c7c9ce;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.toast-slot.bump .toast-card {
+  animation: toast-bump 0.24s ease-out;
+}
+@keyframes toast-bump {
+  40% {
+    transform: scale(1.03);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-slot,
+  .toast-slot.show,
+  .toast-slot.leaving {
+    transform: none;
+    transition: opacity 0.2s;
+  }
+  .toast-slot.bump .toast-card {
+    animation: none;
+  }
+}
+.game.reduced-motion .toast-slot {
+  transform: none;
+  transition: opacity 0.2s;
+}
+.game.reduced-motion .toast-slot.bump .toast-card {
+  animation: none;
+}
+.toast-study .sim-group button[aria-pressed="true"] {
+  background: #1d1c18;
+  color: #fffaf0;
+}

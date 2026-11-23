@@ -44,7 +44,9 @@ pub(super) fn spawn(
     // A dialog draws over the page it asks about.
     let page = match &l.screen {
         Screen::Delete(_) if l.from_list => Screen::Worlds,
-        Screen::Delete(path) | Screen::SaveFirst(path) => Screen::Edit(path.clone()),
+        Screen::Delete(path) | Screen::SaveFirst(path) | Screen::DiscardEdits(path) => {
+            Screen::Edit(path.clone())
+        }
         Screen::Discard(step) | Screen::StepTrust { on: step, .. } => Screen::Create(*step),
         screen => screen.clone(),
     };
@@ -76,8 +78,8 @@ pub(super) fn spawn(
             padding: UiRect::new(
                 Val::Px(theme::SCREEN_PAD_X),
                 Val::Px(theme::SCREEN_PAD_X),
-                Val::Px(28.0),
-                Val::Px(22.0),
+                Val::Px(theme::SCREEN_PAD_TOP),
+                Val::Px(theme::SCREEN_PAD_BOTTOM),
             ),
             justify_content: JustifyContent::Center,
             ..default()
@@ -97,6 +99,7 @@ pub(super) fn spawn(
                 Screen::Create(Step::Review) => review(main, l, installed, thumbnails, scroll),
                 Screen::Delete(_)
                 | Screen::SaveFirst(_)
+                | Screen::DiscardEdits(_)
                 | Screen::Discard(_)
                 | Screen::StepTrust { .. } => None,
                 Screen::Edit(path) => edit(main, l, installed, thumbnails, path, scroll),
@@ -116,6 +119,7 @@ pub(super) fn spawn(
             Screen::Delete(path) => focus = delete(root, l, path),
             Screen::Discard(_) => focus = discard(root),
             Screen::SaveFirst(_) => focus = save_first(root),
+            Screen::DiscardEdits(_) => focus = discard_edits(root),
             Screen::StepTrust { on, .. } => focus = step_trust(root, installed, *on),
             _ if resetting => focus = reset(root),
             _ => {}
@@ -4175,6 +4179,36 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 row,
                 "Discard setup",
                 Act::DiscardSetup,
+                ButtonStyle::Cinematic { kind: Kind::Danger },
+            );
+            keep
+        },
+    )
+}
+
+/// Keep editing is focused, so Enter never discards.
+fn discard_edits(root: &mut ChildSpawnerCommands) -> Option<Entity> {
+    dialog(
+        root,
+        "Discard changes?",
+        |d| {
+            cine::dialog_text(
+                d,
+                "You changed this World\u{2019}s name or mode. Leaving now throws those changes away.",
+                theme::muted(),
+            )
+        },
+        |row| {
+            let keep = buttons::button(
+                row,
+                "Keep editing",
+                Act::KeepEditing,
+                ButtonStyle::Cinematic { kind: Kind::Ghost },
+            );
+            buttons::button(
+                row,
+                "Discard",
+                Act::DiscardEdits,
                 ButtonStyle::Cinematic { kind: Kind::Danger },
             );
             keep
