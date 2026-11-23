@@ -168,22 +168,14 @@ fn flat_colours(flat: Flat) -> (Color, Color, Color) {
     match (flat.flavour, flat.selected) {
         (Flavour::Preset, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
         (Flavour::Preset, true) => (theme::CHIP, theme::CHIP_ON, theme::PRESET_ON_INK),
-        (Flavour::Step, _) => (none, none, theme::STEPPER_INK),
+        (Flavour::Step, _) => (theme::step_fill(), theme::STEPPER_EDGE, theme::INK),
         (Flavour::Method, false) => (none, none, theme::METHOD_INK),
-        (Flavour::Method, true) => (
-            theme::SEGMENT_ON,
-            theme::SEGMENT_ON_EDGE,
-            theme::SEGMENT_ON_INK,
-        ),
-        (Flavour::Shape, false) => (theme::PRESET, theme::PRESET_EDGE, theme::PRESET_INK),
-        (Flavour::Shape, true) => (
-            theme::PRESET_ON,
-            theme::PRESET_ON_EDGE,
-            theme::PRESET_ON_GLYPH,
-        ),
+        (Flavour::Method, true) => (theme::SAGE, none, theme::SAGE_INK),
+        (Flavour::Shape, false) => (theme::slot_fill(), none, theme::INK),
+        (Flavour::Shape, true) => (theme::PRESET_ON, theme::SAGE, theme::PRESET_ON_GLYPH),
         (Flavour::Way, _) => (none, none, theme::AXIS_WAY_INK),
-        (Flavour::Pick, false) => (theme::PRESET, theme::PRESET_EDGE, theme::PRESET_INK),
-        (Flavour::Pick, true) => (theme::PICK_ON, theme::PICK_ON_EDGE, theme::INK),
+        (Flavour::Pick, false) => (none, none, theme::INK),
+        (Flavour::Pick, true) => (theme::PRESET_ON, theme::SAGE, theme::INK),
     }
 }
 
@@ -326,78 +318,44 @@ pub(in crate::client) fn key_cap(
         ));
 }
 
-/// A stepper's measurements: the Catalogue's count is smaller than the Layout
-/// panel's.
-#[derive(Clone, Copy)]
-pub(in crate::client) struct Stepper {
-    pub step_width: f32,
-    pub step_text: f32,
-    pub value_width: f32,
-    pub value_weight: u16,
-}
-
-pub(in crate::client) const LAYOUT_STEPPER: Stepper = Stepper {
-    step_width: 35.0,
-    step_text: 20.0,
-    value_width: 48.0,
-    value_weight: theme::REGULAR,
-};
-pub(in crate::client) const GAP_STEPPER: Stepper = Stepper {
-    value_width: 42.0,
-    ..LAYOUT_STEPPER
-};
-
-/// One framed track: a borderless −, the value, a borderless +.
+/// A bordered −, the value, a bordered +.
 pub(in crate::client) fn stepper(
     parent: &mut ChildSpawnerCommands,
     (less, more): (impl Bundle, impl Bundle),
     value: String,
-    (size, filled): (Stepper, bool),
 ) {
     let look = Flat {
         flavour: Flavour::Step,
         selected: false,
     };
     let node = || Node {
-        width: Val::Px(size.step_width),
-        min_height: Val::Px(theme::STEP_HEIGHT),
-        border: UiRect::ZERO,
+        width: Val::Px(theme::STEP_PX),
+        height: Val::Px(theme::STEP_PX),
+        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
         ..default()
     };
-    let text = (size.step_text, theme::REGULAR);
+    let text = (theme::STEP_TEXT, theme::REGULAR);
     parent
-        .spawn((
-            Node {
-                align_items: AlignItems::Stretch,
-                border: UiRect::all(Val::Px(theme::RULE)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                overflow: Overflow::clip(),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(theme::STEPPER),
-            BorderColor::all(theme::STEPPER_EDGE),
-        ))
+        .spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
         .with_children(|row| {
             flat_text(row, "−", less, look, node(), text);
             row.spawn((
                 Node {
-                    width: Val::Px(size.value_width),
-                    align_items: AlignItems::Center,
+                    width: Val::Px(theme::STEP_VALUE_PX),
                     justify_content: JustifyContent::Center,
                     ..default()
                 },
-                BackgroundColor(if filled {
-                    theme::STEPPER_VALUE
-                } else {
-                    Color::NONE
-                }),
                 Pickable::IGNORE,
             ))
             .with_child(figures(
                 value,
-                theme::STEPPER_VALUE_TEXT,
-                size.value_weight,
+                theme::TEXT_BODY,
+                theme::SEMIBOLD,
                 theme::INK,
             ));
             flat_text(row, "+", more, look, node(), text);

@@ -1150,6 +1150,8 @@ fn view_box(root: &mut ChildSpawnerCommands, image: Handle<Image>, place: Option
     });
 }
 
+const TITLE_TOP_PX: f32 = 18.0;
+
 fn title(view: &mut ChildSpawnerCommands, place: Option<&str>) {
     view.spawn((
         Pickable::IGNORE,
@@ -1160,7 +1162,7 @@ fn title(view: &mut ChildSpawnerCommands, place: Option<&str>) {
             padding: UiRect {
                 left: Val::Px(24.0),
                 right: Val::Px(48.0),
-                top: Val::Px(18.0),
+                top: Val::Px(TITLE_TOP_PX.max(theme::TITLE_BAR_PX)),
                 bottom: Val::Px(28.0),
             },
             flex_direction: FlexDirection::Column,

@@ -411,8 +411,8 @@ fn section(
 fn method(body: &mut ChildSpawnerCommands, kind: Kind) {
     body.spawn((
         Node {
-            column_gap: Val::Px(5.0),
-            padding: UiRect::all(Val::Px(4.0)),
+            column_gap: Val::Px(2.0),
+            padding: UiRect::all(Val::Px(3.0)),
             border: UiRect::all(Val::Px(theme::RULE)),
             border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
             flex_shrink: 0.0,
@@ -437,7 +437,7 @@ fn method(body: &mut ChildSpawnerCommands, kind: Kind) {
                 Node {
                     flex_grow: 1.0,
                     flex_basis: Val::ZERO,
-                    min_height: Val::Px(36.0),
+                    min_height: Val::Px(34.0),
                     padding: UiRect::all(Val::Px(7.0)),
                     border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                     ..default()
@@ -564,7 +564,6 @@ fn axis_row(
             row,
             (Control::Count(axis, -1), Control::Count(axis, 1)),
             layout.lengths[axis].to_string(),
-            (look::LAYOUT_STEPPER, true),
         );
     });
 }
@@ -668,7 +667,6 @@ fn gap_row(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_si
                     row,
                     (Control::Gap(-1), Control::Gap(1)),
                     layout.gap.to_string(),
-                    (look::GAP_STEPPER, true),
                 );
             });
     });
