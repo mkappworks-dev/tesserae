@@ -128,7 +128,12 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 choice.enabled = !choice.enabled;
             }
         }),
-        Act::SelectBiome(at) => edit_biomes(l, |d| d.select(at)),
+        Act::SelectBiome(at) => edit_biomes(l, |d| {
+            d.select(at);
+            d.editing = true;
+        }),
+        Act::CloseBiome => edit_biomes(l, |d| d.editing = false),
+        Act::ResetBiome => edit_biomes(l, |d| d.reset_one(d.selected)),
         Act::CycleGround(layer) => edit_biomes(l, |d| cycle(d, layer)),
         Act::ResetBiomes => edit_biomes(l, |d| d.resetting = true),
         Act::ConfirmReset => {

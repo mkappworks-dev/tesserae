@@ -159,3 +159,52 @@ fn drag_to(
     place(draft, local.x + 0.5, 0.5 - local.y);
     follow(draft, sliders, commands);
 }
+
+/// What a Biome's preview is drawn from: its own sky, fog and ground, and how cavernous it is.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Look {
+    pub(super) sky: [u8; 3],
+    pub(super) fog: [u8; 3],
+    pub(super) surface: [u8; 3],
+    pub(super) soil: [u8; 3],
+    pub(super) rock: [u8; 3],
+    pub(super) caves: f32,
+}
+
+/// A Biome that sets no sky or fog takes the Game's, which the declarations do not carry.
+const GAME_SKY: [u8; 3] = [126, 146, 168];
+const GAME_FOG: [u8; 3] = [136, 160, 190];
+
+pub(super) fn look(l: &Launcher, at: usize) -> Option<Look> {
+    let draft = l.form.biomes.as_ref()?;
+    let choice = draft.choices.get(at)?;
+    let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
+    let source = l.terrain.as_ref().map(|(_, source)| source.as_ref());
+    let colour = |name: Option<&String>| name.map_or([96, 88, 80], |n| material(source, n));
+    Some(Look {
+        sky: choice.sky_fog.map_or(GAME_SKY, |s| s.sky),
+        fog: choice.sky_fog.map_or(GAME_FOG, |s| s.fog),
+        surface: colour(ground.map(|g| &g.surface)),
+        soil: colour(ground.map(|g| &g.soil)),
+        rock: colour(ground.map(|g| &g.rock)),
+        caves: choice.cave_scale.unwrap_or(1.0),
+    })
+}
+
+/// A Material's appearance colour, or one made from its name while the Game is not yet read, so
+/// two Materials never look alike by accident.
+fn material(source: Option<&tesserae_core::terrain_preview::Source>, name: &str) -> [u8; 3] {
+    let declared = source.and_then(|s| {
+        let (_, id) = s.materials.iter().find(|(n, _)| n == name)?;
+        let (_, rgba) = s.colours.iter().find(|(m, _)| m == id)?;
+        Some([rgba[0], rgba[1], rgba[2]])
+    });
+    declared.unwrap_or_else(|| {
+        let hash = name.bytes().fold(0x811c_9dc5_u32, |h, b| {
+            (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+        });
+        let hue = (hash % 360) as f32;
+        let c = Color::hsl(hue, 0.35, 0.45).to_srgba();
+        [c.red, c.green, c.blue].map(|v| (v * 255.0).round() as u8)
+    })
+}

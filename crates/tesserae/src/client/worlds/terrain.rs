@@ -1,5 +1,5 @@
-//! The World step's terrain preview, drawn off the main thread whenever what it shows changes, so
-//! typing a seed never waits on the Generator.
+//! The terrain preview beside the World and Biomes steps, drawn off the main thread whenever
+//! what it shows changes, so typing a seed never waits on the Generator.
 
 use std::sync::Arc;
 
@@ -48,10 +48,10 @@ impl TerrainPreview {
 #[derive(Component)]
 pub(super) struct TerrainPicture;
 
-/// What the World step's preview should show now, or `None` to leave it as it is: off the step,
+/// What the preview should show now, or `None` to leave it as it is: off its steps,
 /// before the Game is read, or while the seed or a Climate size does not parse.
 fn wanted(l: &Launcher) -> Option<Inputs> {
-    if l.screen != Screen::Create(Step::World) {
+    if !matches!(l.screen, Screen::Create(Step::World | Step::Biomes)) {
         return None;
     }
     let (ids, source) = l.terrain.as_ref()?;

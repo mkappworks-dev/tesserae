@@ -186,6 +186,8 @@ struct BiomesDraft {
     declared: BiomePreview,
     choices: Vec<BiomeChoice>,
     selected: usize,
+    /// Whether the edit panel shows the selected Biome, in place of the terrain preview.
+    editing: bool,
     resetting: bool,
     /// Typed text, kept while it does not parse: sky, then fog.
     colours: [String; 2],
@@ -247,6 +249,7 @@ impl BiomesDraft {
             choices: declared.biomes.clone(),
             declared,
             selected: 0,
+            editing: false,
             resetting: false,
             colours: Default::default(),
         };
@@ -277,6 +280,32 @@ impl BiomesDraft {
             sky_fog.map_or_else(String::new, |s| hex(s.sky)),
             sky_fog.map_or_else(String::new, |s| hex(s.fog)),
         ];
+    }
+
+    /// Whether the player changed Biome `at` beyond turning it on or off.
+    fn customised(&self, at: usize) -> bool {
+        let (Some(choice), Some(declared)) = (self.choices.get(at), self.declared.biomes.get(at))
+        else {
+            return false;
+        };
+        BiomeChoice {
+            enabled: declared.enabled,
+            ..choice.clone()
+        } != *declared
+    }
+
+    /// Restores Biome `at` to the Game's, leaving it on or off.
+    fn reset_one(&mut self, at: usize) {
+        let (Some(choice), Some(declared)) =
+            (self.choices.get_mut(at), self.declared.biomes.get(at))
+        else {
+            return;
+        };
+        *choice = BiomeChoice {
+            enabled: choice.enabled,
+            ..declared.clone()
+        };
+        self.select(self.selected);
     }
 
     /// The Biomes that differ from the declarations.
@@ -406,7 +435,6 @@ struct Launcher {
 /// A row that shows or hides the settings under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Disclosure {
-    Ground,
     BiomeParameters,
     WorldInformation,
     ManageWorld,
@@ -498,6 +526,10 @@ pub(super) enum Act {
     ToggleBiome(usize),
     SelectBiome(usize),
     CycleGround(Layer),
+    /// The edit panel's Done: back to the terrain preview.
+    CloseBiome,
+    /// Restores the Biome in the edit panel.
+    ResetBiome,
     ResetBiomes,
     ConfirmReset,
     KeepBiomes,
@@ -738,6 +770,7 @@ fn logic(app: &mut App) {
                 show_filter,
                 filter,
                 pages::paint_bulk,
+                pages::paint_biomes,
                 placeholders,
                 opening,
                 (
@@ -1175,6 +1208,8 @@ fn handle(
             | Act::ToggleBiome(..)
             | Act::SelectBiome(..)
             | Act::CycleGround(..)
+            | Act::CloseBiome
+            | Act::ResetBiome
             | Act::ResetBiomes
             | Act::ConfirmReset
             | Act::KeepBiomes
@@ -1244,6 +1279,12 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 draft.resetting = false;
             }
             l.version += 1;
+        }
+        Act::Back
+            if l.screen == Screen::Create(Step::Biomes)
+                && l.form.biomes.as_ref().is_some_and(|d| d.editing) =>
+        {
+            edit_biomes(l, |d| d.editing = false);
         }
         Act::Back if matches!(l.screen, Screen::Delete(_)) && l.from_list => l.show(Screen::Worlds),
         Act::Back => match l.screen.clone() {

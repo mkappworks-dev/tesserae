@@ -1477,7 +1477,6 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     act(&mut app, Act::SelectBiome(1));
     slide(&mut app, Knob::Temperature, 0.35);
     slide(&mut app, Knob::Caves, 0.0);
-    act(&mut app, Act::Disclose(Disclosure::Ground));
     act(&mut app, Act::CycleGround(Layer::Surface));
     type_into(&mut app, Field::Sky, "#0a141e");
     act(&mut app, Act::Next);
@@ -1533,6 +1532,7 @@ fn slide(app: &mut App, knob: Knob, value: f32) {
 #[test]
 fn a_slider_sets_the_selected_biome_on_its_step_without_rebuilding_the_page() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(0));
     let version = launcher(&app).version;
     slide(&mut app, Knob::Humidity, 0.734);
     slide(&mut app, Knob::Caves, 2.46);
@@ -1674,6 +1674,77 @@ fn dragging_on_the_climate_map_places_the_edited_biome_under_the_pointer() {
     );
     assert_eq!(slider_value(&mut app, Knob::Temperature), 0.0);
     assert_eq!(launcher(&app).version, version, "a drag keeps its map");
+}
+
+fn biome_look(app: &mut App, at: usize) -> biomes::Look {
+    app.world_mut()
+        .query::<&pages::BiomeThumb>()
+        .iter(app.world())
+        .find_map(|t| (t.at == at).then(|| t.look.clone()))
+        .unwrap_or_else(|| panic!("no preview of Biome {at}"))
+}
+
+fn biome_tag(app: &mut App, at: usize) -> String {
+    app.world_mut()
+        .query::<(&pages::BiomeTag, &Text)>()
+        .iter(app.world())
+        .find_map(|(tag, text)| (tag.0 == at).then(|| text.0.clone()))
+        .unwrap_or_else(|| panic!("no tag on Biome {at}"))
+}
+
+fn count<C: Component>(app: &mut App) -> usize {
+    app.world_mut()
+        .query_filtered::<(), With<C>>()
+        .iter(app.world())
+        .count()
+}
+
+#[test]
+fn the_pencil_opens_the_edit_panel_in_place_of_the_terrain_preview() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    assert_eq!(count::<terrain::TerrainPicture>(&mut app), 1);
+    assert_eq!(count::<pages::ClimateMap>(&mut app), 0, "no Biome is open");
+    act(&mut app, Act::SelectBiome(1));
+    assert_eq!(count::<terrain::TerrainPicture>(&mut app), 0);
+    assert_eq!(count::<pages::ClimateMap>(&mut app), 1);
+    assert!(shown(&mut app, "Game defaults"));
+    act(&mut app, Act::CloseBiome);
+    assert_eq!(count::<pages::ClimateMap>(&mut app), 0, "Done closes it");
+    act(&mut app, Act::SelectBiome(0));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(
+        (
+            launcher(&app).screen.clone(),
+            count::<pages::ClimateMap>(&mut app)
+        ),
+        (Screen::Create(Step::Biomes), 0),
+        "Escape closes the panel before it leaves the step"
+    );
+}
+
+#[test]
+fn an_edited_biome_is_marked_customised_and_its_preview_redraws() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    let before = biome_look(&mut app, 1);
+    assert_eq!(biome_tag(&mut app, 1), "Terra");
+    act(&mut app, Act::SelectBiome(1));
+    type_into(&mut app, Field::Sky, "#0a141e");
+    let sky = biome_look(&mut app, 1);
+    assert_eq!(sky.sky, [10, 20, 30]);
+    assert_eq!(biome_tag(&mut app, 1), "Customised");
+    assert_eq!(biome_tag(&mut app, 0), "Terra", "only the edited Biome");
+    act(&mut app, Act::CycleGround(Layer::Surface));
+    let ground = biome_look(&mut app, 1);
+    assert_ne!(ground.surface, sky.surface, "a new surface redraws it");
+    slide(&mut app, Knob::Caves, 0.0);
+    assert_ne!(biome_look(&mut app, 1).caves, ground.caves);
+    assert_ne!(biome_look(&mut app, 1), before);
+    act(&mut app, Act::ToggleBiome(0));
+    assert_eq!(
+        biome_tag(&mut app, 0),
+        "Terra",
+        "turning a Biome off does not customise it"
+    );
 }
 
 #[test]
