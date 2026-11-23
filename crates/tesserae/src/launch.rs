@@ -57,7 +57,7 @@ pub struct BiomePreview {
     pub climate: tesserae_core::climate::ClimateParams,
     /// The World's own ground, which a Biome without its own takes.
     pub ground: Option<tesserae_core::biome_edits::GroundNames>,
-    /// The solid Materials a Biome's ground may be made of, by name.
+    /// The Materials a Biome's ground may be made of, by name, in declared order.
     pub materials: Vec<String>,
     /// What the terrain preview draws from; `None` in tests that draw none.
     pub source: Option<std::sync::Arc<tesserae_core::terrain_preview::Source>>,
