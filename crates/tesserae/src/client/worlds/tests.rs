@@ -3863,3 +3863,81 @@ fn left_and_right_change_edit_worlds_game_mode() {
     step(&mut app, Act::EditMode(GameMode::Survival), -1);
     assert_eq!(launcher(&app).modes.own, GameMode::Creative);
 }
+
+#[test]
+fn the_step_trust_dialog_shows_limits_only_under_details_and_enter_does_not_trust() {
+    let worlds = Directory::new();
+    let (mut app, _) = pad_app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    assert!(shown(&mut app, "RUNS CODE"));
+    assert!(shown(&mut app, "Build "), "each item names its build");
+    assert!(!shown(&mut app, "fuel per call"), "closed by default");
+    assert_eq!(focused_act(&app), Some(Act::Back));
+    key(&mut app, KeyCode::Enter);
+    app.update();
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert!(!app.world().resource::<Installed>().untrusted.is_empty());
+
+    act(&mut app, Act::Next);
+    act(&mut app, Act::TrustDetails);
+    assert!(shown(&mut app, "fuel per call"));
+    assert!(shown(&mut app, "Access files, network or environment."));
+    assert_eq!(focused_act(&app), Some(Act::TrustDetails), "focus stays");
+    act(&mut app, Act::TrustDetails);
+    assert!(!shown(&mut app, "fuel per call"));
+
+    act(&mut app, Act::TrustDetails);
+    act(&mut app, Act::Back);
+    act(&mut app, Act::Next);
+    assert!(!shown(&mut app, "fuel per call"), "reopens closed");
+}
+
+#[test]
+fn the_trust_page_shows_limits_only_under_details() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Play(path));
+    app.update();
+    assert!(shown(&mut app, "Trust this item?"));
+    assert!(!shown(&mut app, "fuel per call"));
+    act(&mut app, Act::TrustDetails);
+    assert!(shown(&mut app, "fuel per call"));
+    act(&mut app, Act::TrustDetails);
+    assert!(!shown(&mut app, "fuel per call"));
+}
+
+#[test]
+fn trust_terms_read_what_an_item_can_do_and_each_kind_of_limit_from_its_prompt() {
+    let prompt = &Installed::fake(None, &["terra"]).untrusted[0].prompt;
+    let terms = pages::trust_terms(prompt);
+    let names: Vec<&str> = terms.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Can", "Cannot", "Time", "Memory", "Commands", "Content"]
+    );
+    assert_eq!(
+        terms[0].1,
+        "Add Materials and Shapes. A Game can change World generation and view distance. \
+         Place and remove Voxels in loaded Chunks in batches."
+    );
+    assert_eq!(terms[1].1, "Access files, network or environment.");
+    assert!(terms[2].1.contains("fuel per call \u{b7} yield every"));
+    let limit = tesserae_mods::ModLimits::HOST.call_fuel;
+    assert!(limit >= 10_000, "a number long enough to group");
+    assert!(!terms[2].1.contains(&limit.to_string()), "{}", terms[2].1);
+    assert!(terms[2].1.contains(','), "{}", terms[2].1);
+}
