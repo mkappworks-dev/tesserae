@@ -963,10 +963,13 @@ pub(super) enum IconKind {
     Dismiss,
     /// The place Tool's card: the prototype's `layout` outline.
     Layout,
+    /// The seed field's Randomize and Copy.
+    Shuffle,
+    Copy,
 }
-const ICONS: usize = 25;
+const ICONS: usize = 27;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 22] = [
+const DRAWN: [IconKind; 24] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -989,6 +992,8 @@ const DRAWN: [IconKind; 22] = [
     IconKind::FlagPlus,
     IconKind::Dismiss,
     IconKind::Layout,
+    IconKind::Shuffle,
+    IconKind::Copy,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1300,6 +1305,23 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
                 .fold(f32::MAX, f32::min)
                 .min(segment(v(14.0, 17.5), v(21.0, 17.5)))
                 .min(segment(v(17.5, 14.0), v(17.5, 21.0))),
+        ),
+        IconKind::Shuffle => stroke(
+            path(&[v(16.0, 3.0), v(21.0, 3.0), v(21.0, 8.0)])
+                .min(segment(v(4.0, 20.0), v(21.0, 3.0)))
+                .min(path(&[v(21.0, 16.0), v(21.0, 21.0), v(16.0, 21.0)]))
+                .min(segment(v(15.0, 15.0), v(21.0, 21.0)))
+                .min(segment(v(4.0, 4.0), v(9.0, 9.0))),
+        ),
+        IconKind::Copy => stroke(
+            rounded(v(14.5, 14.5), Vec2::splat(5.5), 2.0).min(path(
+                &[
+                    vec![v(5.0, 15.0), v(5.0, 6.0)],
+                    arc(v(5.0, 6.0), v(7.0, 4.0), 2.0, true),
+                    vec![v(16.0, 4.0)],
+                ]
+                .concat(),
+            )),
         ),
         IconKind::Chevron => stroke(path(&[v(9.0, 5.0), v(16.0, 12.0), v(9.0, 19.0)])),
         IconKind::Collapsed => fill(convex(&[v(8.0, 6.0), v(17.0, 12.0), v(8.0, 18.0)])),
