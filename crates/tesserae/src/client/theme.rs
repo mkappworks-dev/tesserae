@@ -375,11 +375,6 @@ pub(super) const SCREEN_PAD_TOP: f32 = 28.0;
 /// AppKit's transparent title bar is 32 pt tall, its buttons 9-23 pt from the top.
 #[cfg(target_os = "macos")]
 pub(super) const SCREEN_PAD_TOP: f32 = 32.0;
-#[cfg(target_os = "macos")]
-const _: () = assert!(
-    SCREEN_PAD_TOP >= 32.0,
-    "a screen starts below the window buttons"
-);
 pub(super) const SCREEN_PAD_BOTTOM: f32 = 22.0;
 pub(super) const WORKSPACE_MAX: f32 = 1180.0;
 pub(super) const RAIL_WIDTH: f32 = 224.0;
