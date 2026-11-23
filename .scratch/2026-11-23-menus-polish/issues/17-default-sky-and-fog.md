@@ -1,6 +1,6 @@
 # 17: Default sky blue and white fog
 
-Status: done
+Status: ready-for-agent
 
 Blocked by: None (can start immediately)
 
@@ -36,3 +36,8 @@ the old haze's 10/14/22). Typing one colour on a colourless Biome keeps the
 other at the shown default, not a copy of the typed one. Every demo Game Biome
 declares its own colours, so no Game's look changes; a World with no Biomes at
 all now shows the default sky blue and white haze.
+
+Follow-up (user decision): a colourless Biome surrounded by Biomes that declare
+colours (a landform such as a mountain) carries on their sky and fog, as before
+this ticket; the default applies only where no Biome in the blend declares
+colours. A World with no Biomes keeps the new sky blue and white.
