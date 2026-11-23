@@ -58,11 +58,6 @@ pub(super) const PILL_INK: Color = Color::srgb_u8(0xf0, 0xf2, 0xed);
 pub(super) const FOCUS: Color = Color::srgb_u8(0xe2, 0xd5, 0xab);
 /// The focus ring on checkboxes and slots, which sit tighter.
 pub(super) const FOCUS_TIGHT: Color = Color::srgb_u8(0xf3, 0xf6, 0xec);
-pub(super) const MENU: Color = Color::srgb_u8(0x15, 0x15, 0x17);
-const MENU_EDGE: Color = Color::srgb_u8(0x82, 0x82, 0x8a);
-pub(super) const OPTION_HOVER: Color = Color::srgb_u8(0x30, 0x30, 0x35);
-pub(super) const OPTION_HOVER_EDGE: Color = Color::srgb_u8(0x77, 0x77, 0x80);
-pub(super) const OPTION_CHOSEN_INK: Color = Color::srgb_u8(0xdc, 0xe6, 0xd1);
 pub(super) const SEGMENT_ON: Color = Color::srgb_u8(0x35, 0x39, 0x2f);
 pub(super) const SEGMENT_ON_EDGE: Color = Color::srgb_u8(0xaa, 0xb3, 0x9e);
 pub(super) const SEGMENT_ON_INK: Color = Color::srgb_u8(0xf1, 0xf3, 0xed);
@@ -70,7 +65,6 @@ pub(super) const CHECK_EDGE: Color = Color::srgb_u8(0x05, 0x05, 0x06);
 pub(super) const CHECK_TOP: Color = Color::srgb_u8(0x1b, 0x1c, 0x1f);
 pub(super) const CHECK_BOTTOM: Color = Color::srgb_u8(0x13, 0x14, 0x16);
 pub(super) const CHECK_RING: Color = Color::srgb_u8(0x5a, 0x5d, 0x63);
-pub(super) const CHECK_RING_HOVER: Color = Color::srgb_u8(0x9a, 0x9f, 0x93);
 pub(super) const CHECK_RING_ON: Color = Color::srgb_u8(0xe6, 0xee, 0xdb);
 /// A native range input's unfilled track, which the prototype leaves to Chrome.
 pub(super) const TRACK: Color = Color::srgb_u8(0xef, 0xef, 0xef);
@@ -210,7 +204,6 @@ by_contrast! {
     OVERLAY, overlay, Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe6);
     EDGE, edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     FIELD_EDGE, field_edge, Color::srgb_u8(0xb0, 0xb4, 0xbb);
-    MENU_EDGE, menu_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     NOTICE_EDGE, notice_edge, Color::srgb_u8(0xd0, 0xd8, 0xdd);
     KEY_EDGE, key_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     SLOT_RIM, slot_rim, Color::srgb_u8(130, 134, 142);
@@ -653,7 +646,7 @@ mod tests {
         for fill in ["NOTICE_CARD", "FULL_NOTICE", "BAND"] {
             assert_eq!(pairs[fill].1.alpha(), 1.0, "{fill} is not opaque");
         }
-        for edge in ["EDGE", "FIELD_EDGE", "MENU_EDGE", "SLOT_RIM"] {
+        for edge in ["EDGE", "FIELD_EDGE", "SLOT_RIM"] {
             let (normal, stronger) = pairs[edge];
             let light = |c: Color| c.to_linear().red;
             assert!(light(stronger) > light(normal), "{edge} is not brighter");

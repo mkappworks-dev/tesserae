@@ -585,7 +585,7 @@ mod tests {
                 path: path.clone(),
                 error: None,
             });
-        settings::observe_drafts_for_test(&mut app);
+        settings::observe_operations_for_test(&mut app);
         here(&mut app, Some(0));
         seconds(&mut app, 3.0);
         let original: Vec<_> = app
@@ -598,6 +598,7 @@ mod tests {
         let operate = |app: &mut App, operation| {
             let entity = app.world_mut().spawn(operation).id();
             app.world_mut().trigger(Activate { entity });
+            app.world_mut().flush();
         };
         for (value, gain) in [(0.0_f32, 0.0), (100.0, 0.5)] {
             operate(
@@ -613,7 +614,6 @@ mod tests {
                 value,
                 is_final: true,
             });
-            operate(&mut app, settings::Operation::Apply);
             operate(&mut app, settings::Operation::Back);
             seconds(&mut app, 0.5);
             assert_eq!(tracks(&mut app), [gain]);
@@ -627,7 +627,7 @@ mod tests {
                 .collect();
             assert_eq!(original, current);
         }
-        std::fs::remove_file(path).unwrap();
+        let _ = std::fs::remove_file(path);
     }
     #[test]
     fn settings_fade_world_audio_even_when_the_virtual_clock_is_paused() {
