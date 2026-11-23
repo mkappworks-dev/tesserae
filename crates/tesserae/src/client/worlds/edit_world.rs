@@ -85,6 +85,11 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             recreate(l, cx);
         }
+        Act::DiscardEdits => {
+            if matches!(l.screen, Screen::DiscardEdits(_)) {
+                l.show(Screen::Worlds);
+            }
+        }
         Act::ConfirmDelete => {
             let Screen::Delete(path) = l.screen.clone() else {
                 return;

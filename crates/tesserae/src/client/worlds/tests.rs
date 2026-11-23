@@ -3668,6 +3668,46 @@ fn new_world_with_these_settings_asks_to_save_an_unsaved_name_or_mode_first() {
 }
 
 #[test]
+fn cancelling_edit_world_asks_before_discarding_an_unsaved_name_or_mode() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Old", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path.clone()));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Worlds, "nothing to lose");
+
+    act(&mut app, Act::Edit(path.clone()));
+    type_into(&mut app, Field::Rename, "Renamed");
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::DiscardEdits(path.clone()));
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(shown(&mut app, "Discard changes?"));
+    assert!(shown(&mut app, "Edit World"), "over the page it asks about");
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::KeepEditing));
+    act(&mut app, Act::KeepEditing);
+    assert_eq!(launcher(&app).screen, Screen::Edit(path.clone()));
+    assert_eq!(launcher(&app).rename, "Renamed", "the edit is kept");
+    press(&mut app, KeyCode::Escape);
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Edit(path.clone()),
+        "Esc keeps editing"
+    );
+
+    act(&mut app, Act::EditMode(GameMode::Survival));
+    press(&mut app, KeyCode::Escape);
+    act(&mut app, Act::DiscardEdits);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    let saved = library::read(&path).unwrap().unwrap();
+    assert_eq!(saved.name, "Old");
+    assert_eq!(saved.mode_changes.default, None);
+}
+
+#[test]
 fn a_mods_summary_line_names_each_kind_it_adds_and_leaves_out_none() {
     let summary = |materials, shapes, fluids| tesserae_mods::Summary {
         materials,
