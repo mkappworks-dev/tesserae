@@ -134,3 +134,12 @@
 .map-legend .game-tabs kbd {
   margin: 0 10px;
 }
+/* The tabs stay put while a long Waypoint list scrolls; -10px reaches over the legend padding. */
+.map-legend .game-tabs {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  margin: -10px -10px 0;
+  padding: 14px 10px 10px;
+  background: rgb(14 17 16);
+}

@@ -129,16 +129,15 @@ function openDropdown(trigger, at) {
   const above = bottom < Math.min(height, 150) && top > bottom;
   const available = Math.max(48, above ? top : bottom);
   popup.style.maxHeight = Math.min(280, available) + "px";
-  popup.style.top =
-    (above
-      ? rect.top - game.top - Math.min(height, available) - 6
-      : rect.bottom - game.top + 6) + "px";
-  /* Filtering must not resize the menu, or a menu opened above its field
-     would detach from it as the list shrinks. */
-  if (search) {
-    popup.style.height = popup.style.maxHeight;
-    popup.querySelector("input").focus({ preventScroll: true });
+  /* A menu opened above its field hangs from its bottom edge, so a search that
+     shrinks the list keeps it attached to the field. */
+  if (above) {
+    const container = inGame ? game.height : innerHeight;
+    popup.style.bottom = container - (rect.top - game.top) + 6 + "px";
+  } else {
+    popup.style.top = rect.bottom - game.top + 6 + "px";
   }
+  if (search) popup.querySelector("input").focus({ preventScroll: true });
   focusSelectOption(index);
 }
 
