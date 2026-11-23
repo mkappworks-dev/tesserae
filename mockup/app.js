@@ -835,13 +835,23 @@ function edit() {
       ["D", "New World with these settings", "duplicate", w.id],
       ["F", "Show folder", "show-folder"],
       ["Del", "Delete", "delete", w.id],
-      ["Esc", "Cancel", "worlds"],
+      ["Esc", "Cancel", "cancel-edit"],
     ],
     secondary: button("New World with these settings", "duplicate", {
       value: w.id,
     }),
     primary: button("Save changes", "save-edit", { primary: true }),
   });
+}
+function editUnsaved() {
+  const w = worlds.find((x) => x.id === state.editId);
+  return (
+    state.screen === "edit" &&
+    !!w &&
+    (state.name.trim() !== w.name ||
+      state.mode !== w.mode ||
+      state.playerMode !== w.playerMode)
+  );
 }
 function trustItems() {
   const g = state.game || "Terra";
@@ -1088,12 +1098,7 @@ function action(name, value) {
   }
   if (name === "duplicate") {
     const w = worlds.find((x) => x.id === Number(value));
-    const unsaved =
-      state.screen === "edit" &&
-      (state.name.trim() !== w.name ||
-        state.mode !== w.mode ||
-        state.playerMode !== w.playerMode);
-    if (unsaved) {
+    if (editUnsaved()) {
       dialog(
         "Save changes first?",
         `<p>You changed this World's name or mode.</p>`,
@@ -1106,6 +1111,20 @@ function action(name, value) {
       return;
     }
     action("duplicate-go", value);
+    return;
+  }
+  // Keep editing comes first, so it takes focus and Enter never discards.
+  if (name === "cancel-edit") {
+    if (!editUnsaved()) {
+      navigate("worlds");
+      return;
+    }
+    dialog(
+      "Discard changes?",
+      "<p>You changed this World's name or mode. Leaving now throws those changes away.</p>",
+      button("Keep editing", "close-dialog", { ghost: true }) +
+        button("Discard", "discard", { danger: true }),
+    );
     return;
   }
   if (name === "duplicate-save") {
@@ -1794,7 +1813,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (state.screen === "edit") {
-    navigate("worlds");
+    action("cancel-edit");
     return;
   }
   navigate("home");
