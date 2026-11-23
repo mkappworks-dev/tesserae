@@ -119,16 +119,20 @@ function setColour(hex, hsv = hexToHsv(hex)) {
   const { trigger } = openColour;
   openColour.hsv = hsv;
   if (trigger.value !== hex) {
-    trigger.value = hex;
-    const text = trigger.querySelector(".colour-value");
-    text.textContent = hex ? hex.toUpperCase() : BORROWED_AIR;
-    text.classList.toggle("borrowed", !hex);
-    trigger
-      .querySelector(".select-swatch")
-      .style.setProperty("--swatch", shownHex(trigger));
+    showColour(trigger, hex);
     trigger.dispatchEvent(new Event("input", { bubbles: true }));
   }
   paintColour();
+}
+/* Redraws a field for its new value without firing `input`. */
+function showColour(trigger, hex) {
+  trigger.value = hex;
+  const text = trigger.querySelector(".colour-value");
+  text.textContent = hex ? hex.toUpperCase() : BORROWED_AIR;
+  text.classList.toggle("borrowed", !hex);
+  trigger
+    .querySelector(".select-swatch")
+    .style.setProperty("--swatch", shownHex(trigger));
 }
 function setHsv(hsv) {
   setColour(hsvToHex(hsv), hsv);
