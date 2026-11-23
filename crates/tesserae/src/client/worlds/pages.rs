@@ -2712,7 +2712,7 @@ fn step_frame(
 /// before this one shows a tick only once it is valid.
 fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, current: Step) {
     w.spawn((
-        BackgroundColor(theme::SHEET_SHADE),
+        BackgroundColor(theme::sheet_shade()),
         BorderColor::all(theme::edge()),
         Node {
             width: Val::Px(165.0),

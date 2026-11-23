@@ -121,11 +121,19 @@ pub(super) const THUMBNAIL: [Color; 4] = [
 ];
 pub(super) const THUMBNAIL_TREE: Color = Color::srgb_u8(0x26, 0x3e, 0x2f);
 
-/// A menu sheet's shade, which also lights a focused list item: darker than the prototype's 0.72
-/// alpha because the UI blends in linear light.
-pub(super) const SHEET_SHADE: Color = Color::srgba_u8(10, 11, 12, 230);
+/// A focused menu list item's fill.
+pub(super) const LIT_ITEM: Color = Color::srgba_u8(10, 11, 12, 230);
+const SHEET_RGB: [u8; 3] = [10, 11, 12];
+
+/// A menu sheet's shade, and its rail's.
+pub(super) fn sheet_shade() -> Color {
+    css_dim(SHEET_RGB, 0.9)
+}
+
 /// The sheet's shade at its far edge.
-pub(super) const SHEET_SHADE_FAR: Color = Color::srgba_u8(10, 11, 12, 199);
+pub(super) fn sheet_shade_far() -> Color {
+    css_dim(SHEET_RGB, 0.78)
+}
 
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
 const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
@@ -671,6 +679,12 @@ mod tests {
             normal - stronger > 0.05,
             "mid-grey dims to {stronger} under stronger contrast, {normal} normally"
         );
+    }
+
+    #[test]
+    fn a_sheet_and_its_rail_dim_as_much_as_the_prototypes() {
+        assert_dims_like_the_prototype(sheet_shade(), SHEET_RGB, 0.9);
+        assert_dims_like_the_prototype(sheet_shade_far(), SHEET_RGB, 0.78);
     }
 
     #[test]

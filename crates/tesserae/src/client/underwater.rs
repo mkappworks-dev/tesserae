@@ -289,7 +289,7 @@ mod tests {
     }
 
     /// The water's colour as the tonemapper will show it, from the palette
-    /// bytes above plus the (10, 14, 22) between `HAZE_FOG_SRGB` and `HAZE_SKY_SRGB`.
+    /// bytes above plus the tonemapper's (10, 14, 22) darkening.
     fn near(a: Color, b: Color) -> bool {
         let (a, b) = (a.to_srgba(), b.to_srgba());
         [a.red - b.red, a.green - b.green, a.blue - b.blue]

@@ -333,3 +333,40 @@
   background: #cf4538;
   border-color: #cf4538;
 }
+/* A list's toolbar stays put because only the list below it scrolls; no backing
+   fill is needed, so the toolbar shares the translucent sheet's tone. */
+.game .menu-sheet .body:has(> .list-toolbar),
+.game .menu-sheet .body:has(> .world-form > .form-main > .list-toolbar) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.game .menu-sheet .body > .world-form:has(> .form-main > .list-toolbar) {
+  flex: 1;
+  min-height: 0;
+}
+.game .menu-sheet .body .form-main:has(> .list-toolbar) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.game .menu-sheet .body .form-main:has(> .list-toolbar) + .form-aside {
+  min-height: 0;
+  overflow: auto;
+}
+.list-toolbar {
+  flex: none;
+}
+.list-toolbar + #mod-results,
+.list-toolbar + #biome-results,
+.list-toolbar + #world-results,
+.list-toolbar + .list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.list-toolbar .bulk-bar {
+  margin: 0;
+  padding-block: 4px;
+}

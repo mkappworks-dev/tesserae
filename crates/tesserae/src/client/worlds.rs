@@ -280,10 +280,8 @@ impl BiomesDraft {
     fn select(&mut self, at: usize) {
         self.selected = at.min(self.choices.len().saturating_sub(1));
         let sky_fog = self.choices.get(self.selected).and_then(|c| c.sky_fog);
-        self.colours = [
-            sky_fog.map_or_else(String::new, |s| hex(s.sky)),
-            sky_fog.map_or_else(String::new, |s| hex(s.fog)),
-        ];
+        let sky_fog = sky_fog.unwrap_or(SkyFog::DEFAULT);
+        self.colours = [hex(sky_fog.sky), hex(sky_fog.fog)];
     }
 
     /// Whether the player changed Biome `at` beyond turning it on or off.
@@ -1168,8 +1166,7 @@ fn typed(draft: &mut BiomesDraft, field: Field, value: String) {
     draft.colours[at] = value;
     let selected = draft.selected;
     if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
-        // A Biome carries both colours or neither, so the other starts equal.
-        let mut pair = choice.sky_fog.unwrap_or(SkyFog { sky: rgb, fog: rgb });
+        let mut pair = choice.sky_fog.unwrap_or(SkyFog::DEFAULT);
         if at == 0 {
             pair.sky = rgb;
         } else {
