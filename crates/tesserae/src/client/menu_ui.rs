@@ -485,6 +485,7 @@ fn shell(
                             title: tab.label(),
                             subtitle: None,
                             primary: None,
+                            height: frame::SheetHeight::Steps,
                         },
                         (),
                         |body| {

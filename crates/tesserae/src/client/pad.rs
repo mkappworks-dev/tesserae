@@ -11,6 +11,7 @@ use bevy::input_focus::{
     tab_navigation::TabGroup,
 };
 use bevy::math::CompassOctant;
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
@@ -580,16 +581,19 @@ fn initial(candidates: &[Candidate], last: Option<Vec2>) -> Option<Entity> {
         .map(|c| c.area.entity)
 }
 
+/// Scrolls a newly focused control into view when a key or the controller moved focus there; the
+/// pointer's own item is already where the Player is looking.
 fn reveal_focus(
-    focus: Res<InputFocus>,
+    (focus, visible): (Res<InputFocus>, Res<InputFocusVisible>),
     labels: Res<super::actions::Labels>,
-    nodes: Query<(&ComputedNode, &UiGlobalTransform)>,
+    (nodes, hovered): (Query<(&ComputedNode, &UiGlobalTransform)>, Query<&Hovered>),
     parents: Query<&ChildOf>,
     mut scrolls: Query<(&mut ScrollPosition, &Node)>,
     mut shown: Local<Option<Entity>>,
 ) {
     let target = focus.get();
-    if *shown == target || labels.device != Device::Pad {
+    let by_pointer = target.is_some_and(|e| hovered.get(e).is_ok_and(|h| h.0));
+    if *shown == target || (labels.device != Device::Pad && !visible.0) || by_pointer {
         *shown = target;
         return;
     }
