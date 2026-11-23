@@ -492,7 +492,6 @@ impl Launcher {
 #[derive(Component, Clone, Debug, PartialEq)]
 pub(super) enum Act {
     Continue,
-    Home,
     Worlds,
     Library,
     Settings,
@@ -791,7 +790,6 @@ fn logic(app: &mut App) {
                 placeholders,
                 opening,
                 (
-                    header_hover,
                     paint_slots,
                     paint_picks,
                     shape_trees,
@@ -1254,13 +1252,9 @@ fn handle(
             | Act::Mode(..)
             | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
-            Act::Home
-            | Act::Worlds
-            | Act::Library
-            | Act::Settings
-            | Act::Quit
-            | Act::Back
-            | Act::Dismiss => navigate(l, &mut cx, act),
+            Act::Worlds | Act::Library | Act::Settings | Act::Quit | Act::Back | Act::Dismiss => {
+                navigate(l, &mut cx, act)
+            }
             Act::ModPop(..)
             | Act::ModCategory(..)
             | Act::ModSelectedOnly
@@ -1292,7 +1286,6 @@ struct Acting<'a, 'w, 's, 'e> {
 /// The acts that move between the title, the Worlds and the Library, or leave.
 fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
     match act {
-        Act::Home => l.show(Screen::Title),
         Act::Worlds => {
             l.search.clear();
             l.show(Screen::Worlds);
@@ -1533,40 +1526,6 @@ fn paint_slots(
         } else {
             Visibility::Hidden
         });
-    }
-}
-
-fn header_hover(
-    mut buttons: Query<
-        (
-            Entity,
-            &bevy::picking::hover::Hovered,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut Outline,
-        ),
-        With<pages::HeaderButton>,
-    >,
-    focus: Res<InputFocus>,
-    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
-) {
-    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
-    for (entity, hovered, mut fill, mut edge, mut outline) in &mut buttons {
-        let (f, e) = if hovered.0 {
-            (theme::QUIET_HOVER, theme::QUIET_HOVER_EDGE)
-        } else {
-            (Color::NONE, theme::ICON_EDGE)
-        };
-        fill.set_if_neq(BackgroundColor(f));
-        edge.set_if_neq(BorderColor::all(e));
-        let ring = if focused == Some(entity) {
-            theme::FOCUS
-        } else {
-            Color::NONE
-        };
-        if outline.color != ring {
-            outline.color = ring;
-        }
     }
 }
 

@@ -13,7 +13,7 @@ use super::{
     pad::PadInput,
     profile::{Preferences, Store},
 };
-use crate::client::buttons::{self, Eyebrow};
+use crate::client::buttons;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -371,7 +371,7 @@ pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, title: &str) {
             flex_shrink: 0.0,
             ..default()
         })
-        .with_children(|p| buttons::eyebrow(p, title, Eyebrow::Inventory));
+        .with_children(|p| buttons::eyebrow(p, title));
 }
 
 /// A part of the panel under a rule, with an optional small label.

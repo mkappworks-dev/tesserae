@@ -5,7 +5,7 @@
 //! While it is open the cursor is free, so mouse look is off and a click edits
 //! nothing: both already wait on a grabbed cursor.
 
-use crate::client::buttons::{self, Align, ButtonStyle};
+use crate::client::buttons::{self, ButtonStyle};
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
@@ -671,7 +671,6 @@ fn world_details(
                         Choice::CloseDetails,
                         ButtonStyle::Cinematic {
                             kind: Kind::Primary,
-                            align: Align::Centre,
                         },
                     );
                     actions

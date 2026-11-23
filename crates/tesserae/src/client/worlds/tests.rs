@@ -397,8 +397,6 @@ fn an_untrusted_game_asks_before_opening_and_cancel_runs_nothing() {
         launcher(&app).screen,
         Screen::Trust(Next::Open(path.clone()))
     );
-    app.update();
-    assert_eq!(focused_act(&app), Some(Act::Back));
     act(&mut app, Act::Back);
     assert_eq!(launcher(&app).screen, Screen::Worlds);
     assert!(app.world().resource::<Switch>().0.is_none());
@@ -524,44 +522,70 @@ fn controls(app: &mut App, wanted: &Act) -> usize {
         .count()
 }
 
-fn header_shown(app: &mut App) -> bool {
-    app.world_mut()
-        .query::<&pages::HeaderButton>()
-        .iter(app.world())
-        .next()
-        .is_some()
+fn keys(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(k, l)| (k.to_string(), l.to_string()))
+        .collect()
 }
 
 #[test]
-fn the_title_is_framed_and_the_screens_not_yet_moved_keep_the_header() {
+fn the_title_is_framed_and_only_it_quits() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     app.update();
-    assert!(!header_shown(&mut app), "the title has no header bar");
     assert_eq!(controls(&mut app, &Act::Quit), 1);
     assert_eq!(controls(&mut app, &Act::Settings), 1, "in the title's menu");
     assert!(shown(&mut app, &format!("v{}", env!("CARGO_PKG_VERSION"))));
-    let keys = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
-        pairs
-            .iter()
-            .map(|(k, l)| (k.to_string(), l.to_string()))
-            .collect()
-    };
     assert_eq!(
         frame::testing::prompts(&mut app),
         keys(&[("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")])
     );
-    {
-        act(&mut app, Act::Library);
-        assert!(header_shown(&mut app));
-        assert!(
-            frame::testing::prompts(&mut app).is_empty(),
-            "the old footer"
-        );
-        assert_eq!(controls(&mut app, &Act::Quit), 0, "only the title quits");
-        assert_eq!(controls(&mut app, &Act::Settings), 1);
-    }
+    act(&mut app, Act::Library);
+    assert_eq!(controls(&mut app, &Act::Quit), 0, "only the title quits");
+    assert_eq!(controls(&mut app, &Act::Settings), 0, "no header bar");
+}
+
+#[test]
+fn the_mods_library_is_framed_with_new_world_and_back_prompts() {
+    let worlds = Directory::new();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
+    );
+    app.update();
+    act(&mut app, Act::Library);
+    assert!(shown(&mut app, "Mods"));
+    assert!(shown(&mut app, "Lamps"));
+    assert!(!shown(&mut app, "A WORLD OF YOUR OWN"), "no header bar");
+    assert_eq!(
+        frame::testing::prompts(&mut app),
+        keys(&[("N", "New World"), ("Esc", "Back")])
+    );
+    act(&mut app, Act::New);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+}
+
+#[test]
+fn trust_is_framed_and_its_primary_trusts() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Play(path.clone()));
+    app.update();
+    assert!(shown(&mut app, "Trust this item?"));
+    assert!(!shown(&mut app, "A WORLD OF YOUR OWN"), "no header bar");
+    assert_eq!(
+        frame::testing::prompts(&mut app),
+        keys(&[("Enter", "Trust and open"), ("Esc", "Back")])
+    );
+    assert_eq!(focused_act(&app), Some(Act::Trust));
 }
 
 fn control(app: &mut App, wanted: &Act) -> Entity {
@@ -1310,12 +1334,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             vec!["Continue", "Worlds", "New", "Library", "Settings", "Quit"],
         ),
         ("worlds", Screen::Worlds, None, vec!["New", &play]),
-        (
-            "library",
-            Screen::Library,
-            None,
-            vec!["Home", "New", "Settings"],
-        ),
+        ("library", Screen::Library, None, vec![]),
         (
             "create",
             Screen::Worlds,
@@ -1344,7 +1363,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             "trust",
             Screen::Worlds,
             Some(Act::Play(path.clone())),
-            vec!["Trust", "Back"],
+            vec!["Trust"],
         ),
     ];
     for (screen, from, opener, expected) in screens {
@@ -3033,7 +3052,6 @@ fn the_worlds_are_framed_slots_with_new_world_first_and_focused() {
     act(&mut app, Act::Worlds);
     app.update();
     assert_eq!(focused_act(&app), Some(Act::New));
-    assert!(!header_shown(&mut app));
     assert_eq!(
         frame::testing::prompts(&mut app),
         prompt_list(&[
@@ -3046,7 +3064,6 @@ fn the_worlds_are_framed_slots_with_new_world_first_and_focused() {
     for gone in ["MAIN MENU", "Stored on this device", "1 World"] {
         assert!(!shown(&mut app, gone), "{gone}");
     }
-    assert_eq!(controls(&mut app, &Act::Home), 0, "Back is a prompt");
     assert!(shown(&mut app, "New World"));
     assert!(shown(&mut app, "River bend"));
     press(&mut app, KeyCode::Escape);
@@ -3408,7 +3425,6 @@ fn edit_world_is_framed_with_its_prompts_shows_the_seed_and_saves_on_ctrl_enter(
     ));
     act(&mut app, Act::Worlds);
     act(&mut app, Act::Edit(path.clone()));
-    assert!(!header_shown(&mut app), "in the frame");
     let prompts: Vec<(String, String)> = [
         ("Ctrl+Enter", "Save"),
         ("D", "New World with these settings"),

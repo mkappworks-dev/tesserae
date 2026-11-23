@@ -7,7 +7,6 @@ use bevy::prelude::*;
 const PANEL: Color = Color::srgb_u8(0x0b, 0x0b, 0x0c);
 pub(super) const RAISED: Color = Color::srgb_u8(0x18, 0x18, 0x1b);
 const SHEET_HEADER: Color = Color::srgb_u8(0x11, 0x11, 0x13);
-pub(super) const SHEET_FOOTER: Color = PANEL;
 /// World, Game, Mod and Biome cards.
 pub(super) const CARD: Color = Color::srgb_u8(0x19, 0x19, 0x1c);
 pub(super) const CHOSEN: Color = Color::srgb_u8(0x27, 0x27, 0x2b);
@@ -18,9 +17,8 @@ pub(super) const GROUT: Color = Color::BLACK;
 const RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1f);
 pub(super) const INK: Color = Color::srgb_u8(0xf7, 0xf4, 0xec);
 const MUTED: Color = Color::srgb_u8(0xc7, 0xc9, 0xce);
-/// Rail entries, the edition line and the footer.
+/// Rail entries, the edition line and the prompt bar.
 const CHROME_INK: Color = Color::srgb_u8(0xe1, 0xe4, 0xe3);
-pub(super) const EYEBROW: Color = Color::srgb_u8(0xe3, 0xe7, 0xdf);
 /// The Inventory's and the Catalogue's quieter eyebrows.
 const ITEM_EYEBROW: Color = Color::srgb_u8(0xc0, 0xc2, 0xc8);
 pub(super) const SAGE: Color = Color::srgb_u8(0xc1, 0xcd, 0xb5);
@@ -69,7 +67,7 @@ pub(super) const TRACK: Color = Color::srgb_u8(0xef, 0xef, 0xef);
 pub(super) const SCENE: Color = Color::srgb_u8(0x24, 0x2c, 0x32);
 /// Behind every menu when Simple menu background is on.
 pub(super) const SOLID_BACKGROUND: Color = Color::srgb_u8(0x10, 0x11, 0x13);
-/// The launcher's header and footer bands.
+/// The prompt bar's band.
 const BAND: Color = Color::srgba_u8(42, 52, 59, 133);
 const BAND_RULE: Color = Color::srgba_u8(220, 220, 225, 36);
 const KEY_EDGE: Color = Color::srgb_u8(0x62, 0x65, 0x6a);
@@ -87,9 +85,6 @@ pub(super) const WARNING: Color = Color::srgb_u8(0xf0, 0xc0, 0x80);
 pub(super) const ACCENT: Color = Color::srgb_u8(0xa8, 0xb5, 0xa2);
 const NOTICE_CARD: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xe6);
 
-/// The launcher header's Settings button, which sits on the band unfilled.
-pub(super) const ICON_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x38);
-pub(super) const ICON_INK: Color = Color::srgb_u8(0xe8, 0xeb, 0xe4);
 /// A picked Game or Biome card, marked by a bar along one edge.
 pub(super) const CARD_CHOSEN: Color = Color::srgb_u8(0x29, 0x29, 0x2e);
 pub(super) const CARD_CHOSEN_EDGE: Color = Color::srgb_u8(0xc0, 0xc7, 0xbb);
@@ -143,7 +138,6 @@ pub(super) const TEXT_EYEBROW: f32 = 12.0;
 pub(super) const TEXT_TAG: f32 = 11.0;
 pub(super) const TEXT_KEY: f32 = 10.0;
 pub(super) const TEXT_FOOTER: f32 = 9.0;
-pub(super) const TITLE_TRACKING: f32 = -0.7;
 /// 0.2 em of the eyebrow size.
 pub(super) const EYEBROW_TRACKING: f32 = 2.4;
 pub(super) const SECTION_TRACKING: f32 = 1.44;
@@ -226,7 +220,6 @@ pub(super) const BUTTON_PAD_X: f32 = 15.0;
 pub(super) const BUTTON_PAD_Y: f32 = 9.0;
 pub(super) const SMALL_PAD_X: f32 = 12.0;
 pub(super) const SMALL_PAD_Y: f32 = 8.0;
-pub(super) const SHEET_PAD_X: f32 = 26.0;
 pub(super) const SCREEN_PAD_X: f32 = 34.0;
 
 pub(super) const RADIUS_PANEL: f32 = 8.0;
@@ -346,7 +339,7 @@ pub(super) fn shade() -> BackgroundGradient {
 }
 
 // Pass C: the in-game Menu and Settings.
-/// The space around a launcher or Settings screen, between header and footer.
+/// The space around a launcher or Settings screen, above the prompt bar.
 pub(super) const SCREEN_PAD_TOP: f32 = 28.0;
 pub(super) const SCREEN_PAD_BOTTOM: f32 = 22.0;
 pub(super) const WORKSPACE_MAX: f32 = 1180.0;

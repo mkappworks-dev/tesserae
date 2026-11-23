@@ -1,12 +1,12 @@
 //! What each launcher screen shows, in the Cinematic layout.
 
-use crate::client::buttons::{self, Align, ButtonStyle};
+use crate::client::buttons::{self, ButtonStyle};
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::TextInput;
 
-use super::super::cinematic::{self as cine, Kind, Sheet};
+use super::super::cinematic::{self as cine, Kind};
 use super::super::frame;
 use super::super::menu_ui::IconKind;
 use super::super::scenery;
@@ -48,13 +48,8 @@ pub(super) fn spawn(
         Screen::Discard(step) | Screen::StepTrust { on: step, .. } => Screen::Create(*step),
         screen => screen.clone(),
     };
-    // Screens move onto the frame one at a time; the rest keep the old header and footer.
-    let framed = matches!(
-        page,
-        Screen::Title | Screen::Worlds | Screen::Create(_) | Screen::Edit(_)
-    );
     // The Opening screen is the loading screen's first frames: full screen, with no chrome.
-    let bare = matches!(page, Screen::Opening(_));
+    let framed = !matches!(page, Screen::Opening(_));
     let mut root = commands.spawn((
         Root,
         TabGroup::default(),
@@ -75,9 +70,6 @@ pub(super) fn spawn(
     }
     root.with_children(|root| {
         root.spawn((theme::shade(), fill(), Pickable::IGNORE));
-        if !framed && !bare {
-            header(root, logo);
-        }
         root.spawn(Node {
             flex_grow: 1.0,
             min_height: Val::Px(0.0),
@@ -117,8 +109,6 @@ pub(super) fn spawn(
         });
         if framed {
             frame::prompt_bar(root, SCENERY_PLACE, prompts(&page, l, installed));
-        } else if !bare {
-            footer(root, SCENERY_PLACE);
         }
         let resetting = l.screen == Screen::Create(Step::Biomes)
             && l.form.biomes.as_ref().is_some_and(|d| d.resetting);
@@ -183,6 +173,18 @@ fn prompts(page: &Screen, l: &Launcher, installed: &Installed) -> Vec<frame::Pro
             ]);
             prompts
         }
+        Screen::Library => {
+            let mut prompts = Vec::new();
+            if installed.game.is_some() {
+                prompts.push(Prompt::new(Cap::Letter('N'), "New World").act(Act::New));
+            }
+            prompts.push(Prompt::new(Cap::Esc, "Back").act(Act::Back));
+            prompts
+        }
+        Screen::Trust(next) => vec![
+            Prompt::new(Cap::Enter, format!("Trust and {}", trust_verb(next))),
+            Prompt::new(Cap::Esc, "Back").act(Act::Back),
+        ],
         _ => vec![
             Prompt::new(Cap::Tab, "Navigate"),
             Prompt::new(Cap::Enter, "Select"),
@@ -191,7 +193,7 @@ fn prompts(page: &Screen, l: &Launcher, installed: &Installed) -> Vec<frame::Pro
     }
 }
 
-/// The scenery's place, as the prototype's footer names its landscape.
+/// The scenery's place, as the prompt bar names its landscape.
 pub(in crate::client) const SCENERY_PLACE: &str = "TERRA / THE GREENWOOD";
 
 /// A node that covers its parent, under the parent's other children.
@@ -204,156 +206,6 @@ pub(in crate::client) fn fill() -> Node {
         bottom: Val::Px(0.0),
         ..default()
     }
-}
-
-pub(in crate::client) fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
-    root.spawn((
-        BackgroundColor(theme::band()),
-        BorderColor::all(theme::band_rule()),
-        Node {
-            height: Val::Px(73.0),
-            flex_shrink: 0.0,
-            padding: UiRect::horizontal(Val::Px(theme::SCREEN_PAD_X)),
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            border: UiRect::bottom(Val::Px(theme::RULE)),
-            ..default()
-        },
-    ))
-    .with_children(|row| {
-        row.spawn(Node {
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            padding: UiRect::axes(Val::Px(6.0), Val::Px(1.0)),
-            ..default()
-        })
-        .with_children(|brand| {
-            if let Some(logo) = logo {
-                brand.spawn((
-                    ImageNode::new(logo.0.clone()),
-                    Node {
-                        width: Val::Px(29.0),
-                        height: Val::Px(29.0),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
-            }
-            brand.spawn((
-                Text::new("Tesserae"),
-                TextFont {
-                    font: bevy::text::FontSource::family(theme::BRAND_FAMILY),
-                    ..theme::weighted(19.0, theme::SEMIBOLD)
-                },
-                bevy::text::LineHeight::RelativeToFont(1.1),
-                TextColor(theme::INK),
-                Pickable::IGNORE,
-            ));
-        });
-        row.spawn((
-            Text::new("A WORLD OF YOUR OWN"),
-            theme::font(theme::TEXT_FOOTER),
-            bevy::text::LetterSpacing::Px(2.7),
-            TextColor(theme::chrome_ink()),
-            Pickable::IGNORE,
-        ));
-        row.spawn((
-            bevy::ui_widgets::Button,
-            TabIndex(0),
-            Act::Settings,
-            HeaderButton,
-            bevy::picking::hover::Hovered::default(),
-            theme::focus_ring(),
-            BackgroundColor(Color::NONE),
-            BorderColor::all(theme::ICON_EDGE),
-            Node {
-                width: Val::Px(theme::CONTROL_HEIGHT),
-                height: Val::Px(theme::CONTROL_HEIGHT),
-                border: UiRect::all(Val::Px(theme::RULE)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-        ))
-        .with_children(|b| ui::icon(b, IconKind::Settings, theme::ICON_INK, 16.0));
-    });
-}
-
-/// The header's Settings button, quiet on the band until hovered.
-#[derive(Component)]
-pub(super) struct HeaderButton;
-
-/// `place` names where the Player is, as the prototype's footer does.
-pub(in crate::client) fn footer(root: &mut ChildSpawnerCommands, place: &str) {
-    let chrome = |value: &str| {
-        (
-            Text::new(value),
-            theme::font(theme::TEXT_FOOTER),
-            bevy::text::LetterSpacing::Px(0.9),
-            TextColor(theme::chrome_ink()),
-            Pickable::IGNORE,
-        )
-    };
-    root.spawn((
-        BackgroundColor(theme::band()),
-        BorderColor::all(theme::band_rule()),
-        Node {
-            height: Val::Px(40.0),
-            flex_shrink: 0.0,
-            padding: UiRect::horizontal(Val::Px(theme::SCREEN_PAD_X)),
-            align_items: AlignItems::Center,
-            border: UiRect::top(Val::Px(theme::RULE)),
-            ..default()
-        },
-    ))
-    .with_children(|footer| {
-        footer
-            .spawn(Node {
-                flex_grow: 1.0,
-                flex_basis: Val::Px(0.0),
-                ..default()
-            })
-            .with_child(chrome(place));
-        footer
-            .spawn(Node {
-                align_items: AlignItems::Center,
-                ..default()
-            })
-            .with_children(|hints| {
-                for (key, what) in [("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")] {
-                    hints
-                        .spawn((
-                            BorderColor::all(theme::key_edge()),
-                            Node {
-                                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
-                                margin: UiRect::new(
-                                    Val::Px(9.0),
-                                    Val::Px(3.0),
-                                    Val::Px(0.0),
-                                    Val::Px(0.0),
-                                ),
-                                border: UiRect::all(Val::Px(theme::RULE)),
-                                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
-                                ..default()
-                            },
-                        ))
-                        .with_child((
-                            Text::new(key),
-                            theme::font(theme::TEXT_KEY),
-                            bevy::text::LetterSpacing::Px(0.9),
-                            TextColor(theme::chrome_ink()),
-                            Pickable::IGNORE,
-                        ));
-                    hints.spawn(chrome(what));
-                }
-            });
-        footer.spawn(Node {
-            flex_grow: 1.0,
-            flex_basis: Val::Px(0.0),
-            ..default()
-        });
-    });
 }
 
 fn shadowed() -> TextShadow {
@@ -802,16 +654,6 @@ fn gap(parent: &mut ChildSpawnerCommands, px: f32) {
     });
 }
 
-/// The quiet middle of a sheet's footer.
-fn footer_hint(footer: &mut ChildSpawnerCommands, value: impl Into<String>) {
-    ui::text(footer, value, theme::TEXT_EYEBROW, theme::muted());
-}
-
-/// A count at a sheet footer's side.
-fn count(footer: &mut ChildSpawnerCommands, value: impl Into<String>) {
-    ui::paragraph(footer, value, theme::TEXT_SMALL, theme::muted());
-}
-
 fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
     body.spawn((
         BackgroundColor(theme::NOTICE),
@@ -950,89 +792,44 @@ fn library_page(
     thumbnails: &Thumbnails,
     scroll: Vec2,
 ) -> Option<Entity> {
-    let mut focus = None;
-    workspace(main, |w| {
-        cine::sheet(
-            w,
-            Sheet {
-                eyebrow: "MAIN MENU / MODS",
-                title: "Your Mods",
-                subtitle: "Small additions. New possibilities.",
-            },
-            page_scroll(scroll),
-            |body| {
-                ui::paragraph(
-                    body,
-                    "Installed on this device. You choose which ones a World uses when you create it.",
-                    theme::TEXT_SMALL,
-                    theme::muted(),
-                );
-                if installed.mods.is_empty() {
-                    gap(body, 14.0);
-                    cine::notice(body, "No Mods are installed. Add them to the Mods folder.");
-                }
-                for m in &installed.mods {
-                    gap(body, 8.0);
-                    let (category, about) = installed.about(&m.id);
-                    mod_card(
-                        body,
-                        ModCard {
-                            act: None,
-                            check: None,
-                            picture: Some(picture(installed, thumbnails, &m.id)),
-                            border: theme::edge(),
-                            title: ui::title(&m.id),
-                            detail: about.unwrap_or_default().to_owned(),
-                            adds: installed.adds(&m.id),
-                            tag: category.map(|c| (c.to_owned(), theme::category_ink())),
-                        },
-                    );
-                }
-                for line in &installed.rejected {
-                    gap(body, 8.0);
-                    ui::paragraph(
-                        body,
-                        format!("Skipped: {line}"),
-                        theme::TEXT_SMALL,
-                        theme::WARNING,
-                    );
-                }
-            },
-            |f| {
-                focus = Some(buttons::button(
-                    f,
-                    "Main menu",
-                    Act::Home,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Ghost,
-                        align: Align::Before("\u{2190}"),
-                    },
-                ));
-                count(
-                    f,
-                    match installed.mods.len() {
-                        1 => "1 Mod installed".to_owned(),
-                        n => format!("{n} Mods installed"),
-                    },
-                );
-                let create = buttons::button(
-                    f,
-                    "Create World",
-                    Act::New,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Primary,
-                        align: Align::After("\u{2192}"),
-                    },
-                );
-                if installed.game.is_none() {
-                    f.commands()
-                        .entity(create)
-                        .insert(bevy::ui::InteractionDisabled);
-                }
-            },
-        );
-    });
-    focus
+    let sheet = frame::MenuSheet::<()> {
+        title: "Mods",
+        subtitle: None,
+        primary: None,
+    };
+    frame::menu_sheet_with(main, sheet, page_scroll(scroll), |body| {
+        if installed.mods.is_empty() {
+            cine::notice(body, "No Mods are installed. Add them to the Mods folder.");
+        }
+        for (i, m) in installed.mods.iter().enumerate() {
+            if i > 0 {
+                gap(body, 8.0);
+            }
+            let (category, about) = installed.about(&m.id);
+            mod_card(
+                body,
+                ModCard {
+                    act: None,
+                    check: None,
+                    picture: Some(picture(installed, thumbnails, &m.id)),
+                    border: theme::edge(),
+                    title: ui::title(&m.id),
+                    detail: about.unwrap_or_default().to_owned(),
+                    adds: installed.adds(&m.id),
+                    tag: category.map(|c| (c.to_owned(), theme::category_ink())),
+                },
+            );
+        }
+        for line in &installed.rejected {
+            gap(body, 8.0);
+            ui::paragraph(
+                body,
+                format!("Skipped: {line}"),
+                theme::TEXT_SMALL,
+                theme::WARNING,
+            );
+        }
+    })
 }
 
 /// Edit World, laid out as Create World: the name and Game mode beside the saved picture and
@@ -1162,10 +959,7 @@ fn edit(
                                 row,
                                 "New World with these settings",
                                 Act::ReCreate,
-                                ButtonStyle::Cinematic {
-                                    kind: Kind::Plain,
-                                    align: Align::Centre,
-                                },
+                                ButtonStyle::Cinematic { kind: Kind::Plain },
                             );
                         } else {
                             row.spawn(Node::default());
@@ -2714,19 +2508,13 @@ fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
                 row,
                 "Keep World",
                 Act::Back,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Centre,
-                },
+                ButtonStyle::Cinematic { kind: Kind::Ghost },
             );
             buttons::button(
                 row,
                 "Delete World",
                 Act::ConfirmDelete,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Danger,
-                    align: Align::Centre,
-                },
+                ButtonStyle::Cinematic { kind: Kind::Danger },
             );
             keep
         },
@@ -2799,8 +2587,7 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
         });
 }
 
-/// Trust for the whole set on one scrolling page, with its buttons in the footer so they stay
-/// in view however many items there are.
+/// Trust for the whole set on one scrolling page; its one button trusts them all.
 fn trust(
     main: &mut ChildSpawnerCommands,
     l: &Launcher,
@@ -2808,7 +2595,6 @@ fn trust(
     next: &Next,
     scroll: Vec2,
 ) -> Option<Entity> {
-    let mut focus = None;
     let items = &installed.untrusted;
     let code = items
         .iter()
@@ -2819,77 +2605,47 @@ fn trust(
     } else {
         format!("Trust {} items?", items.len())
     };
-    main.spawn((
-        TabGroup::modal(),
-        Node {
-            flex_grow: 1.0,
-            max_width: Val::Px(1180.0),
-            min_height: Val::Px(0.0),
-            ..default()
+    let primary = format!(
+        "Trust {}and {}",
+        if items.len() == 1 {
+            String::new()
+        } else {
+            format!("all {} ", items.len())
         },
-    ))
-    .with_children(|w| {
-        cine::sheet(
-            w,
-            Sheet {
-                eyebrow: "TRUST",
-                title: &title,
-                subtitle: match (code, next) {
-                    (0, _) => "Data only: none of it runs code. Trust is for these exact files.",
-                    (_, Next::Open(_)) => {
-                        "This World needs these items before it opens. Items marked \u{201c}runs code\u{201d} run their own code."
-                    }
-                    _ => {
-                        "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
-                    }
-                },
-            },
-            page_scroll(scroll),
-            |col| {
-                problem(col, l.problem.as_ref());
-                trust_rows(col, items);
-            },
-            |foot| {
-                focus = Some(buttons::button(
-                    foot,
-                    match next {
-                        Next::Create => "Back to Review",
-                        Next::Open(_) => "Your Worlds",
-                    },
-                    Act::Back,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Ghost,
-                        align: match next {
-                            Next::Open(_) => Align::Before("\u{2190}"),
-                            Next::Create => Align::Centre,
-                        },
-                    },
-                ));
-                footer_hint(foot, "Trust is for these exact files");
-                buttons::button(
-                    foot,
-                    format!(
-                        "Trust {} and {}",
-                        if items.len() == 1 {
-                            "it".to_owned()
-                        } else {
-                            format!("all {}", items.len())
-                        },
-                        match next {
-                            Next::Open(_) => "open",
-                            Next::Create => "create",
-                        }
-                    ),
-                    Act::Trust,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Primary,
-                        align: Align::Centre,
-                    },
-                );
-            },
-        );
-    });
+        trust_verb(next)
+    );
+    let focus = frame::menu_sheet_with(
+        main,
+        frame::MenuSheet {
+            title: &title,
+            subtitle: Some(match (code, next) {
+                (0, _) => "Data only: none of it runs code. Trust is for these exact files.",
+                (_, Next::Open(_)) => {
+                    "This World needs these items before it opens. Items marked \u{201c}runs code\u{201d} run their own code."
+                }
+                _ => {
+                    "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
+                }
+            }),
+            primary: Some((primary.as_str(), Act::Trust)),
+        },
+        page_scroll(scroll),
+        |col| {
+            problem(col, l.problem.as_ref());
+            trust_rows(col, items);
+        },
+    );
+    if let Some(button) = focus {
+        main.commands().entity(button).insert(frame::Autofocus);
+    }
     focus
+}
+
+fn trust_verb(next: &Next) -> &'static str {
+    match next {
+        Next::Open(_) => "open",
+        Next::Create => "create",
+    }
 }
 
 /// Create World's frame: the step rail beside the sheet, with the step's title and its one way
@@ -4390,19 +4146,13 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 row,
                 "Keep editing",
                 Act::KeepEditing,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Centre,
-                },
+                ButtonStyle::Cinematic { kind: Kind::Ghost },
             );
             buttons::button(
                 row,
                 "Discard setup",
                 Act::DiscardSetup,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Danger,
-                    align: Align::Centre,
-                },
+                ButtonStyle::Cinematic { kind: Kind::Danger },
             );
             keep
         },
@@ -4425,10 +4175,7 @@ fn save_first(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 row,
                 "Don\u{2019}t save",
                 Act::DontSave,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Centre,
-                },
+                ButtonStyle::Cinematic { kind: Kind::Ghost },
             );
             buttons::button(
                 row,
@@ -4436,7 +4183,6 @@ fn save_first(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 Act::SaveAndContinue,
                 ButtonStyle::Cinematic {
                     kind: Kind::Primary,
-                    align: Align::Centre,
                 },
             )
         },
@@ -4471,10 +4217,7 @@ fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed, on: Step) 
                 row,
                 "Cancel",
                 Act::Back,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Centre,
-                },
+                ButtonStyle::Cinematic { kind: Kind::Ghost },
             );
             buttons::button(
                 row,
@@ -4486,7 +4229,6 @@ fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed, on: Step) 
                 Act::TrustStep,
                 ButtonStyle::Cinematic {
                     kind: Kind::Primary,
-                    align: Align::Centre,
                 },
             );
             cancel
@@ -4511,10 +4253,7 @@ fn reset(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 row,
                 "Keep changes",
                 Act::KeepBiomes,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Centre,
-                },
+                ButtonStyle::Cinematic { kind: Kind::Ghost },
             );
             buttons::button(
                 row,
@@ -4522,7 +4261,6 @@ fn reset(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 Act::ConfirmReset,
                 ButtonStyle::Cinematic {
                     kind: Kind::Primary,
-                    align: Align::Centre,
                 },
             );
             keep
