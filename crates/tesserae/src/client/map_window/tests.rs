@@ -1188,6 +1188,24 @@ mod waypoints {
     }
 
     #[test]
+    fn the_map_opens_on_the_player_with_nothing_selected() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        focus_row(&mut app, 1);
+        app.world_mut().resource_mut::<MapWindow>().centre = Some(Vec2::new(500.0, 0.0));
+        press(&mut app, KeyCode::Escape);
+        assert!(!is_open(&app));
+
+        press(&mut app, KeyCode::KeyM);
+        app.update();
+        assert_eq!(app.world().resource::<Marks>().selected(), None);
+        assert_eq!(window(&app).centre, None, "the view follows the Player");
+        assert_eq!(prompts(&mut app), browsing(&[]));
+    }
+
+    #[test]
     fn hovering_a_waypoint_in_the_legend_selects_it() {
         let mut app = app();
         declare(&mut app, kinds());
