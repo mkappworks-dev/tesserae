@@ -7,6 +7,7 @@ mod edit_world;
 mod mods;
 mod open;
 pub(super) mod pages;
+mod saved;
 mod terrain;
 
 use create::*;
@@ -728,6 +729,7 @@ fn logic(app: &mut App) {
                 highlight,
                 handle,
                 load_thumbnails,
+                saved::load,
                 terrain::draw,
                 render,
                 terrain::show,
@@ -1330,9 +1332,17 @@ fn render(
 
 /// Each installed Mod's and Game's thumbnail as an image, by id; `None` for one without.
 #[derive(Resource, Default)]
-pub(in crate::client) struct Thumbnails(std::collections::HashMap<String, Option<Handle<Image>>>);
+pub(in crate::client) struct Thumbnails(
+    std::collections::HashMap<String, Option<Handle<Image>>>,
+    saved::Pictures,
+);
 
 impl Thumbnails {
+    /// The World's saved thumbnail, `None` for a World saved without one.
+    pub(in crate::client) fn world(&self, folder: &Path) -> Option<&Handle<Image>> {
+        self.1.get(folder)
+    }
+
     pub(in crate::client) fn get(&self, id: &str) -> Option<&Handle<Image>> {
         self.0.get(id)?.as_ref()
     }
