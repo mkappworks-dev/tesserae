@@ -115,8 +115,6 @@ pub(super) const DOT_EDGE: Color = Color::srgb_u8(0x0b, 0x0c, 0x0d);
 pub(super) const DOT_RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x55);
 pub(super) const DOT_GLOW: Color = Color::srgba_u8(0, 0, 0, 0xaa);
 pub(super) const TAG_INK: Color = Color::srgb_u8(0xf3, 0xf5, 0xee);
-/// The band of ground under a Biome's swatch.
-pub(super) const GROUND: Color = Color::srgb_u8(0x55, 0x4d, 0x3c);
 /// A Mod's category beside its card.
 const CATEGORY_INK: Color = Color::srgb_u8(0xae, 0xb2, 0xb9);
 /// A World's or a Game's thumbnail: sky, far hills, a near field, the ground,
