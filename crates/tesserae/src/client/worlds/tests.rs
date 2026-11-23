@@ -397,6 +397,8 @@ fn an_untrusted_game_asks_before_opening_and_cancel_runs_nothing() {
         launcher(&app).screen,
         Screen::Trust(Next::Open(path.clone()))
     );
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::Back));
     act(&mut app, Act::Back);
     assert_eq!(launcher(&app).screen, Screen::Worlds);
     assert!(app.world().resource::<Switch>().0.is_none());
@@ -568,14 +570,17 @@ fn the_mods_library_is_framed_with_new_world_and_back_prompts() {
 }
 
 #[test]
-fn trust_is_framed_and_its_primary_trusts() {
+fn trust_is_framed_opens_on_back_and_enter_does_not_trust() {
     let worlds = Directory::new();
     let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
-    let mut app = app(
+    let (mut app, _) = pad_app(
         &worlds,
         Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
     );
-    app.update();
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
     act(&mut app, Act::Worlds);
     act(&mut app, Act::Play(path.clone()));
     app.update();
@@ -583,9 +588,17 @@ fn trust_is_framed_and_its_primary_trusts() {
     assert!(!shown(&mut app, "A WORLD OF YOUR OWN"), "no header bar");
     assert_eq!(
         frame::testing::prompts(&mut app),
-        keys(&[("Enter", "Trust and open"), ("Esc", "Back")])
+        keys(&[("Tab", "Navigate"), ("Esc", "Back")])
     );
-    assert_eq!(focused_act(&app), Some(Act::Trust));
+    assert_eq!(
+        focused_act(&app),
+        Some(Act::Back),
+        "Enter alone never trusts"
+    );
+    key(&mut app, KeyCode::Enter);
+    app.update();
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    assert!(app.world().resource::<Switch>().0.is_none());
 }
 
 fn control(app: &mut App, wanted: &Act) -> Entity {
@@ -1363,7 +1376,7 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             "trust",
             Screen::Worlds,
             Some(Act::Play(path.clone())),
-            vec!["Trust"],
+            vec!["Back", "Trust"],
         ),
     ];
     for (screen, from, opener, expected) in screens {
@@ -2129,11 +2142,13 @@ fn a_new_worlds_slot_shows_the_terrain_it_was_created_with_without_drawing_it_ag
     assert_eq!(slot_picture(&mut later, &path), Some(preview));
 }
 
-/// Saves a 2 by 1 thumbnail of one grey into the World's folder.
+/// Saves a thumbnail of one grey into the World's folder.
 fn grey_thumbnail(path: &Path, shade: u8) -> Vec<u8> {
-    let rgba = [shade, shade, shade, 255].repeat(2);
+    use tesserae_core::terrain_preview::Frame;
+    let (width, height) = (Frame::CREATE.width, Frame::CREATE.height);
+    let rgba = [shade, shade, shade, 255].repeat((width * height) as usize);
     let mut bytes = Vec::new();
-    let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+    let mut encoder = png::Encoder::new(&mut bytes, width, height);
     encoder.set_color(png::ColorType::Rgba);
     let mut writer = encoder.write_header().unwrap();
     writer.write_image_data(&rgba).unwrap();
@@ -3551,4 +3566,23 @@ fn new_world_with_these_settings_asks_to_save_an_unsaved_name_or_mode_first() {
     let saved = library::read(&path).unwrap().unwrap();
     assert_eq!(saved.name, "Renamed");
     assert_eq!(saved.mode_changes.default, Some(GameMode::Survival));
+}
+
+#[test]
+fn a_mods_summary_line_names_each_kind_it_adds_and_leaves_out_none() {
+    let summary = |materials, shapes, fluids| tesserae_mods::Summary {
+        materials,
+        shapes,
+        fluids,
+        swatches: Vec::new(),
+    };
+    assert_eq!(
+        pages::adds(&summary(4, 1, 1)).as_deref(),
+        Some("4 Materials \u{b7} 1 Shape \u{b7} 1 Fluid")
+    );
+    assert_eq!(
+        pages::adds(&summary(2, 0, 2)).as_deref(),
+        Some("2 Materials \u{b7} 2 Fluids")
+    );
+    assert_eq!(pages::adds(&summary(0, 0, 0)), None);
 }

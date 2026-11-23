@@ -3,8 +3,6 @@
 
 use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
 use tesserae_core::terrain_preview::{Frame, Image as Picture, Source};
 
@@ -92,7 +90,7 @@ pub(super) fn draw(
         match drawn {
             Ok(picture) => {
                 if let Some(mut images) = images {
-                    let image = image(picture);
+                    let image = rgba_image(picture.width, picture.height, picture.rgba);
                     match preview.image.clone() {
                         Some(handle) => {
                             let _ = images.insert(handle.id(), image);
@@ -121,20 +119,6 @@ pub(super) fn draw(
         )
     });
     preview.drawing = Some((wanted, task));
-}
-
-pub(super) fn image(picture: Picture) -> Image {
-    Image::new(
-        Extent3d {
-            width: picture.width,
-            height: picture.height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        picture.rgba,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
-    )
 }
 
 /// Hands the drawn picture to the page's preview box, which a rebuild spawns empty.

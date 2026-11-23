@@ -181,8 +181,8 @@ fn prompts(page: &Screen, l: &Launcher, installed: &Installed) -> Vec<frame::Pro
             prompts.push(Prompt::new(Cap::Esc, "Back").act(Act::Back));
             prompts
         }
-        Screen::Trust(next) => vec![
-            Prompt::new(Cap::Enter, format!("Trust and {}", trust_verb(next))),
+        Screen::Trust(_) => vec![
+            Prompt::new(Cap::Tab, "Navigate"),
             Prompt::new(Cap::Esc, "Back").act(Act::Back),
         ],
         _ => vec![
@@ -368,7 +368,7 @@ fn worlds(
         subtitle: None,
         primary: None,
     };
-    frame::menu_sheet(main, sheet, |body| {
+    frame::menu_sheet(main, sheet, (), |body| {
         if let Some(card) = &l.card {
             failure(body, card);
             gap(body, 20.0);
@@ -797,7 +797,7 @@ fn library_page(
         subtitle: None,
         primary: None,
     };
-    frame::menu_sheet_with(main, sheet, page_scroll(scroll), |body| {
+    frame::menu_sheet(main, sheet, page_scroll(scroll), |body| {
         if installed.mods.is_empty() {
             cine::notice(body, "No Mods are installed. Add them to the Mods folder.");
         }
@@ -815,7 +815,7 @@ fn library_page(
                     border: theme::edge(),
                     title: ui::title(&m.id),
                     detail: about.unwrap_or_default().to_owned(),
-                    adds: installed.adds(&m.id),
+                    adds: installed.summary(&m.id).and_then(adds),
                     tag: category.map(|c| (c.to_owned(), theme::category_ink())),
                 },
             );
@@ -1845,7 +1845,7 @@ fn mods_page(
                     border: theme::edge(),
                     title: ui::title(&m.id),
                     detail: about.unwrap_or_default().to_owned(),
-                    adds: installed.adds(&m.id),
+                    adds: installed.summary(&m.id).and_then(adds),
                     tag: category.map(|c| (c.to_owned(), theme::category_ink())),
                 };
                 if required.contains(&m.id) {
@@ -2587,7 +2587,26 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
         });
 }
 
-/// Trust for the whole set on one scrolling page; its one button trusts them all.
+/// A Mod's summary as one line, such as `2 Materials · 2 Shapes · 1 Fluid`; kinds it adds none
+/// of are left out.
+pub(super) fn adds(s: &tesserae_mods::Summary) -> Option<String> {
+    let count = |n: usize, one: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        n => Some(format!("{n} {one}s")),
+    };
+    let parts: Vec<String> = [
+        count(s.materials, "Material"),
+        count(s.shapes, "Shape"),
+        count(s.fluids, "Fluid"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+}
+
+/// Trust for the whole set on one scrolling page; Back is focused, so Enter alone never grants.
 fn trust(
     main: &mut ChildSpawnerCommands,
     l: &Launcher,
@@ -2614,31 +2633,40 @@ fn trust(
         },
         trust_verb(next)
     );
-    let focus = frame::menu_sheet_with(
+    let subtitle = match (code, next) {
+        (0, _) => "Data only: none of it runs code. Trust is for these exact files.",
+        (_, Next::Open(_)) => {
+            "This World needs these items before it opens. Items marked \u{201c}runs code\u{201d} run their own code."
+        }
+        _ => {
+            "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
+        }
+    };
+    let mut back = None;
+    frame::sheet_with_actions(
         main,
-        frame::MenuSheet {
-            title: &title,
-            subtitle: Some(match (code, next) {
-                (0, _) => "Data only: none of it runs code. Trust is for these exact files.",
-                (_, Next::Open(_)) => {
-                    "This World needs these items before it opens. Items marked \u{201c}runs code\u{201d} run their own code."
-                }
-                _ => {
-                    "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
-                }
-            }),
-            primary: Some((primary.as_str(), Act::Trust)),
-        },
+        &title,
+        Some(subtitle),
         page_scroll(scroll),
         |col| {
             problem(col, l.problem.as_ref());
             trust_rows(col, items);
         },
+        Some(|row: &mut ChildSpawnerCommands| {
+            row.spawn(Node {
+                column_gap: Val::Px(12.0),
+                ..default()
+            })
+            .with_children(|row| {
+                back = Some(buttons::button(row, "Back", Act::Back, ButtonStyle::Plain));
+                buttons::button(row, primary, Act::Trust, ButtonStyle::Primary);
+            });
+        }),
     );
-    if let Some(button) = focus {
-        main.commands().entity(button).insert(frame::Autofocus);
+    if let Some(back) = back {
+        main.commands().entity(back).insert(frame::Autofocus);
     }
-    focus
+    back
 }
 
 fn trust_verb(next: &Next) -> &'static str {
@@ -2675,7 +2703,7 @@ fn step_frame(
     let mut forward = None;
     workspace(main, |w| {
         step_rail(w, l, installed, step);
-        forward = frame::menu_sheet_with(
+        forward = frame::menu_sheet(
             w,
             frame::MenuSheet {
                 title,

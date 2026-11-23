@@ -116,10 +116,7 @@ pub fn stage(
                 name,
                 crate::thumbnail::MAX_THUMBNAIL_BYTES,
             )
-            .map_err(|reason| ModError::Manifest {
-                who: id.clone(),
-                reason: format!("thumbnail {reason}"),
-            })?;
+            .map_err(|reason| crate::thumbnail::refused(id, reason))?;
             let path = dir.join(name);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| io(parent, e))?;

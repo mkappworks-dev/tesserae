@@ -120,6 +120,12 @@ pub(super) const THUMBNAIL: [Color; 4] = [
 ];
 pub(super) const THUMBNAIL_TREE: Color = Color::srgb_u8(0x26, 0x3e, 0x2f);
 
+/// A menu sheet's shade, which also lights a focused list item: darker than the prototype's 0.72
+/// alpha because the UI blends in linear light.
+pub(super) const SHEET_SHADE: Color = Color::srgba_u8(10, 11, 12, 230);
+/// The sheet's shade at its far edge.
+pub(super) const SHEET_SHADE_FAR: Color = Color::srgba_u8(10, 11, 12, 199);
+
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
 const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
 pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);

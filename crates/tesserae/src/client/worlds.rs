@@ -1440,21 +1440,26 @@ fn load_thumbnails(
         if thumbnails.0.contains_key(&item.id) {
             continue;
         }
-        let handle = installed.thumbnail(&item.id).map(|t| {
-            images.add(Image::new(
-                bevy::render::render_resource::Extent3d {
-                    width: t.width,
-                    height: t.height,
-                    depth_or_array_layers: 1,
-                },
-                bevy::render::render_resource::TextureDimension::D2,
-                t.rgba,
-                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                bevy::asset::RenderAssetUsages::default(),
-            ))
-        });
+        let handle = installed
+            .thumbnail(&item.id)
+            .map(|t| images.add(rgba_image(t.width, t.height, t.rgba)));
         thumbnails.0.insert(item.id.clone(), handle);
     }
+}
+
+/// Straight-alpha sRGBA8 pixels, row by row from the top, as a UI image.
+fn rgba_image(width: u32, height: u32, rgba: Vec<u8>) -> Image {
+    Image::new(
+        bevy::render::render_resource::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        rgba,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    )
 }
 
 fn relative(then_s: u64) -> String {

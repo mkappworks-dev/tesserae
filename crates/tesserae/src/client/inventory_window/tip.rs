@@ -269,7 +269,7 @@ fn lines(
             let detail = format!(
                 "{} · {}",
                 declared.name,
-                if fluid { "fluid" } else { "solid" }
+                if fluid { "Fluid" } else { "Solid" }
             );
             let name = ui::title(&names.material_label(material));
             let shapes = (!fluid).then(|| names.shapes());
