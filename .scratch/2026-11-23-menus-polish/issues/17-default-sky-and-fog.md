@@ -1,6 +1,6 @@
 # 17: Default sky blue and white fog
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -18,11 +18,21 @@ it to its Game's colours, or to these defaults when it declares none.
 
 ## Acceptance criteria
 
-- [ ] In a World, standing in a biome with no declared sky and fog shows a sky
+- [x] In a World, standing in a biome with no declared sky and fog shows a sky
       blue sky and white fog
-- [ ] The Biomes step shows `#87ceeb` and `#ffffff` for such a biome, and Reset
+- [x] The Biomes step shows `#87ceeb` and `#ffffff` for such a biome, and Reset
       returns to them
-- [ ] A biome that declares its own colours is unchanged
-- [ ] The defaults are defined in one place
+- [x] A biome that declares its own colours is unchanged
+- [x] The defaults are defined in one place
 
 ## Comments
+`SkyFog::DEFAULT` in `tesserae-core` is the one definition; the renderer's haze
+(`FogSettings::default`) and the Biomes step read it. `sky_fog_at` now treats a
+Biome without colours as having the default instead of skipping it, so a
+colourless Biome no longer takes its coloured neighbour's sky, and a ranged
+(landform) Biome without colours now sets its own sky. The tonemapper lift that
+`fog_toward` adds is a separate measured constant now (`TONEMAP_DARKENING_SRGB`,
+the old haze's 10/14/22). Typing one colour on a colourless Biome keeps the
+other at the shown default, not a copy of the typed one. Every demo Game Biome
+declares its own colours, so no Game's look changes; a World with no Biomes at
+all now shows the default sky blue and white haze.

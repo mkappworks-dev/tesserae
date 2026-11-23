@@ -1622,7 +1622,7 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
                 }),
                 sky_fog: Some(tesserae_core::climate::SkyFog {
                     sky: [10, 20, 30],
-                    fog: [10, 20, 30],
+                    fog: [255, 255, 255],
                 }),
                 ..declared("t:meadow", 0.3)
             },
@@ -1892,6 +1892,28 @@ fn reset_restores_the_open_biome_and_reset_all_restores_every_biome() {
     act(&mut app, Act::ConfirmReset);
     assert_eq!(edited(&app, 0), declared("t:ash_flats", 0.7));
     assert_eq!(edited(&app, 1), declared("t:meadow", 0.3));
+}
+
+#[test]
+fn a_biome_without_colours_shows_and_resets_to_sky_blue_and_white() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    let colours = |app: &App| launcher(app).form.biomes.as_ref().unwrap().colours.clone();
+    let look = biome_look(&mut app, 1);
+    assert_eq!(
+        (look.sky, look.fog),
+        ([0x87, 0xce, 0xeb], [0xff, 0xff, 0xff])
+    );
+    act(&mut app, Act::SelectBiome(1));
+    assert_eq!(colours(&app), ["#87ceeb", "#ffffff"]);
+    type_into(&mut app, Field::Sky, "#0a141e");
+    assert_eq!(
+        edited(&app, 1).sky_fog.map(|s| s.fog),
+        Some([0xff, 0xff, 0xff]),
+        "the fog the field showed is the fog kept"
+    );
+    act(&mut app, Act::ResetBiome);
+    assert_eq!(colours(&app), ["#87ceeb", "#ffffff"]);
+    assert_eq!(edited(&app, 1).sky_fog, None);
 }
 
 fn three_biomes(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
