@@ -5,3 +5,4 @@ depends = ["hearth", "brickwork"]
 declaration = "content.toml"
 category = "Water"
 description = "Peat, mud and tar, and how they meet lava"
+thumbnail = "thumbnail.png"
