@@ -1099,6 +1099,7 @@ fn edit(
                                 );
                                 return;
                             };
+                            let waiting = modes(d) != saved_modes(d) || l.modes != modes(d);
                             fields
                                 .spawn(Node {
                                     flex_direction: FlexDirection::Column,
@@ -1109,23 +1110,16 @@ fn edit(
                                     mode_picks(
                                         picks,
                                         "Game mode",
-                                        "",
+                                        if waiting {
+                                            "Mode changes take effect when the World next opens."
+                                        } else {
+                                            "Switching to Survival keeps what you carry. Health and hunger start full."
+                                        },
                                         l.modes.own,
                                         Act::EditMode,
                                         true,
                                     );
                                 });
-                            let waiting = modes(d) != saved_modes(d) || l.modes != modes(d);
-                            ui::paragraph(
-                                fields,
-                                if waiting {
-                                    "Mode changes take effect when the World next opens."
-                                } else {
-                                    "Switching to Survival keeps what you carry. Health and hunger start full."
-                                },
-                                theme::TEXT_SMALL,
-                                theme::muted(),
-                            );
                             for line in &installed.unmet(d) {
                                 ui::paragraph(fields, line, theme::TEXT_SMALL, theme::WARNING);
                             }

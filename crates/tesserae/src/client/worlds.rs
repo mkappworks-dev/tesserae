@@ -690,6 +690,7 @@ fn review_capture(
                 "edit" => Act::Edit(first.clone()),
                 "delete" => Act::Delete,
                 "recreate" => Act::ReCreate,
+                "survival" => Act::EditMode(GameMode::Survival),
                 "open" => Act::Play(first.clone()),
                 "create" => Act::Create,
                 "next" => Act::Next,
