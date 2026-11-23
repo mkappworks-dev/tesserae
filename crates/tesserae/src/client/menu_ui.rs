@@ -350,7 +350,7 @@ fn style(
             )
         } else if quiet {
             if hover {
-                (theme::QUIET_HOVER, theme::QUIET_HOVER_EDGE)
+                (theme::quiet_hover(), theme::QUIET_HOVER_EDGE)
             } else {
                 (Color::NONE, Color::NONE)
             }
@@ -482,14 +482,11 @@ fn shell(
                 })
                 .with_children(|workspace| {
                     rail(workspace, tab);
-                    frame::menu_sheet(
+                    frame::sheet_with_foot(
                         workspace,
-                        frame::MenuSheet::<()> {
-                            title: tab.label(),
-                            subtitle: None,
-                            primary: None,
-                            height: frame::SheetHeight::Steps,
-                        },
+                        tab.label(),
+                        None,
+                        frame::SheetHeight::Steps,
                         (),
                         |body| {
                             body.spawn((
@@ -501,6 +498,7 @@ fn shell(
                                 },
                             ));
                         },
+                        super::settings::help_strip,
                     );
                 });
             });

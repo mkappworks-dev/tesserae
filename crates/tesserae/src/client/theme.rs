@@ -27,7 +27,9 @@ pub(super) const SAGE_INK: Color = Color::srgb_u8(0x16, 0x1b, 0x16);
 pub(super) const HOVER: Color = Color::srgb_u8(0x53, 0x61, 0x6b);
 pub(super) const GHOST: Color = Color::srgba_u8(40, 48, 55, 82);
 /// Hover on a borderless glyph or icon button.
-pub(super) const QUIET_HOVER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x14);
+pub(super) fn quiet_hover() -> Color {
+    css_tint(0.08)
+}
 pub(super) const QUIET_HOVER_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x70);
 pub(super) const DANGER: Color = Color::srgb_u8(0xb8, 0x3a, 0x2e);
 pub(super) const DANGER_HOVER: Color = Color::srgb_u8(0xcf, 0x45, 0x38);
@@ -88,10 +90,9 @@ pub(super) const WARNING: Color = Color::srgb_u8(0xf0, 0xc0, 0x80);
 pub(super) const ACCENT: Color = Color::srgb_u8(0xa8, 0xb5, 0xa2);
 const NOTICE_CARD: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xe6);
 
-/// A picked Game or Biome card, marked by a bar along one edge.
+/// A picked Game or Biome card.
 pub(super) const CARD_CHOSEN: Color = Color::srgb_u8(0x29, 0x29, 0x2e);
 pub(super) const CARD_CHOSEN_EDGE: Color = Color::srgb_u8(0xc0, 0xc7, 0xbb);
-pub(super) const CARD_BAR: f32 = 3.0;
 /// Card fills under the pointer: the prototype's `brightness(1.15)`.
 pub(super) const CARD_HOVER: Color = Color::srgb_u8(0x1d, 0x1d, 0x20);
 pub(super) const CARD_CHOSEN_HOVER: Color = Color::srgb_u8(0x2f, 0x2f, 0x35);
@@ -351,6 +352,37 @@ pub(super) fn css_dim(rgb: [u8; 3], css_alpha: f32) -> Color {
     Color::srgba_u8(r, g, b, 0).with_alpha(alpha)
 }
 
+/// How dark a menu sheet reads on screen, in sRGB: what the prototype's light tints sit on.
+const SHEET_SEEN: f32 = 0.1;
+
+/// White at the alpha that lifts a dark sheet as much as CSS's `css_alpha` does. Blended in
+/// linear light, the prototype's alpha alone lifts a near-black three times too far; matched
+/// over the sheet rather than mid-grey because these tints only ever sit on one.
+pub(super) fn css_tint(css_alpha: f32) -> Color {
+    let linear = |srgb: f32| Color::srgb(srgb, srgb, srgb).to_linear().red;
+    let under = linear(SHEET_SEEN);
+    let lifted = linear(css_alpha + (1.0 - css_alpha) * SHEET_SEEN);
+    Color::WHITE.with_alpha((lifted - under) / (1.0 - under))
+}
+
+/// A World tile, and the one under the pointer or focus.
+pub(super) fn slot_fill() -> Color {
+    css_tint(0.04)
+}
+
+pub(super) fn slot_lit() -> Color {
+    css_tint(0.08)
+}
+
+/// A Settings ◀ value ▶ selector or On/Off toggle, and the one under the pointer or focus.
+pub(super) fn choice_fill() -> Color {
+    css_tint(0.05)
+}
+
+pub(super) fn choice_lit() -> Color {
+    css_tint(0.11)
+}
+
 /// The shade over the World or the launcher's backdrop.
 pub(super) fn shade() -> BackgroundGradient {
     let at = |alpha: f32| css_dim(SHADE, alpha);
@@ -453,7 +485,9 @@ pub(super) const POINT_DONE: Color = Color::srgb_u8(0xc0, 0xcf, 0xb2);
 pub(super) const POINT_DONE_INK: Color = Color::srgb_u8(0x1d, 0x23, 0x1a);
 pub(super) const LAYOUT_NOTE: Color = Color::srgb_u8(0xc2, 0xc8, 0xd1);
 pub(super) const LAYOUT_STATUS_INK: Color = Color::srgb_u8(0xc3, 0xcc, 0xb9);
-pub(super) const LAYOUT_ROW_ON: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x0f);
+pub(super) fn layout_row_on() -> Color {
+    css_tint(0.06)
+}
 pub(super) const ITEM_TEXT_TITLE: f32 = 23.0;
 pub(super) const ITEM_TEXT_EYEBROW: f32 = 11.0;
 pub(super) const ITEM_BUTTON_TEXT: f32 = 13.0;
@@ -704,6 +738,40 @@ mod tests {
         };
         assert_dims_like_the_prototype(darkest(&layers[0]), SHADE, 0.48);
         assert_dims_like_the_prototype(darkest(&layers[1]), SHADE, 0.24);
+    }
+
+    /// The prototype's white `css_alpha` over its dark sheet, blended in sRGB, against `tint`
+    /// over the same sheet blended in linear light.
+    fn assert_tints_like_the_prototype(tint: Color, css_alpha: f32) {
+        let (over, under) = (
+            tint.to_linear(),
+            Color::srgb(SHEET_SEEN, SHEET_SEEN, SHEET_SEEN),
+        );
+        let a = over.alpha;
+        let ours = Color::LinearRgba(LinearRgba::rgb(
+            a * over.red + (1.0 - a) * under.to_linear().red,
+            a * over.green + (1.0 - a) * under.to_linear().green,
+            a * over.blue + (1.0 - a) * under.to_linear().blue,
+        ))
+        .to_srgba();
+        let theirs = css_alpha + (1.0 - css_alpha) * SHEET_SEEN;
+        for got in [ours.red, ours.green, ours.blue] {
+            assert!((got - theirs).abs() < 0.004, "{ours:?} vs {theirs}");
+        }
+    }
+
+    #[test]
+    fn light_tints_lift_a_sheet_as_little_as_the_prototypes() {
+        for (tint, css_alpha) in [
+            (slot_fill(), 0.04),
+            (slot_lit(), 0.08),
+            (choice_fill(), 0.05),
+            (choice_lit(), 0.11),
+            (quiet_hover(), 0.08),
+            (layout_row_on(), 0.06),
+        ] {
+            assert_tints_like_the_prototype(tint, css_alpha);
+        }
     }
 
     #[test]

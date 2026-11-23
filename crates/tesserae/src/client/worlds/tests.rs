@@ -516,6 +516,44 @@ fn quit_exits_without_restarting() {
     assert!(app.world().resource::<Switch>().0.is_none());
 }
 
+#[test]
+fn q_on_the_title_quits_as_the_quit_item_does() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    press(&mut app, KeyCode::KeyQ);
+    assert_eq!(exits(&app), 1);
+    assert!(app.world().resource::<Switch>().0.is_none());
+}
+
+#[test]
+fn clicking_the_title_q_prompt_quits() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    let prompt = app
+        .world_mut()
+        .query_filtered::<(Entity, &Act), With<frame::PromptKey>>()
+        .iter(app.world())
+        .find_map(|(e, act)| (*act == Act::Quit).then_some(e))
+        .expect("a Quit prompt");
+    app.world_mut().trigger(Activate { entity: prompt });
+    app.update();
+    assert_eq!(exits(&app), 1);
+}
+
+#[test]
+fn q_elsewhere_in_the_launcher_does_not_quit() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Library);
+    press(&mut app, KeyCode::KeyQ);
+    assert_eq!(exits(&app), 0);
+}
+
 fn controls(app: &mut App, wanted: &Act) -> usize {
     app.world_mut()
         .query::<&Act>()
@@ -537,12 +575,21 @@ fn the_title_is_framed_and_only_it_quits() {
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     app.update();
-    assert_eq!(controls(&mut app, &Act::Quit), 1);
+    assert_eq!(
+        controls(&mut app, &Act::Quit),
+        2,
+        "the item and the Q prompt"
+    );
     assert_eq!(controls(&mut app, &Act::Settings), 1, "in the title's menu");
     assert!(shown(&mut app, &format!("v{}", env!("CARGO_PKG_VERSION"))));
     assert_eq!(
         frame::testing::prompts(&mut app),
-        keys(&[("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")])
+        keys(&[
+            ("Tab", "Navigate"),
+            ("Enter", "Select"),
+            ("Esc", "Back"),
+            ("Q", "Quit")
+        ])
     );
     act(&mut app, Act::Library);
     assert_eq!(controls(&mut app, &Act::Quit), 0, "only the title quits");
@@ -650,16 +697,16 @@ fn the_prompt_bar_shows_controller_buttons_after_controller_input_and_keys_after
             .map(|(cap, _)| cap)
             .collect()
     };
-    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc", "Q"]);
     tap(&mut app, pad, GamepadButton::DPadUp);
     assert_eq!(
         focused_act(&app),
         Some(Act::Worlds),
         "the D-pad moves focus"
     );
-    assert_eq!(caps(&mut app), ["Tab", "A", "B"]);
+    assert_eq!(caps(&mut app), ["Tab", "A", "B", "Q"]);
     key(&mut app, KeyCode::ArrowDown);
-    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc", "Q"]);
     assert_eq!(focused_act(&app), Some(Act::Continue));
     tap(&mut app, pad, GamepadButton::South);
     assert!(
@@ -1594,7 +1641,7 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     act(&mut app, Act::SelectBiome(1));
     slide(&mut app, Knob::Temperature, 0.35);
     slide(&mut app, Knob::Caves, 0.0);
-    act(&mut app, Act::CycleGround(Layer::Surface));
+    pick_ground(&mut app, Layer::Surface, "t:sand");
     type_into(&mut app, Field::Sky, "#0a141e");
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
@@ -1801,7 +1848,7 @@ fn biome_look(app: &mut App, at: usize) -> biomes::Look {
     app.world_mut()
         .query::<&pages::BiomeThumb>()
         .iter(app.world())
-        .find_map(|t| (t.at == at).then(|| t.look.clone()))
+        .find_map(|t| (t.at == at).then_some(t.look))
         .unwrap_or_else(|| panic!("no preview of Biome {at}"))
 }
 
@@ -1854,7 +1901,7 @@ fn an_edited_biome_is_marked_customised_and_its_preview_redraws() {
     assert_eq!(sky.sky, [10, 20, 30]);
     assert_eq!(biome_tag(&mut app, 1), "Customised");
     assert_eq!(biome_tag(&mut app, 0), "Terra", "only the edited Biome");
-    act(&mut app, Act::CycleGround(Layer::Surface));
+    pick_ground(&mut app, Layer::Surface, "t:sand");
     let ground = biome_look(&mut app, 1);
     assert_ne!(ground.surface, sky.surface, "a new surface redraws it");
     slide(&mut app, Knob::Caves, 0.0);
@@ -1914,6 +1961,159 @@ fn a_biome_without_colours_shows_and_resets_to_sky_blue_and_white() {
     act(&mut app, Act::ResetBiome);
     assert_eq!(colours(&app), ["#87ceeb", "#ffffff"]);
     assert_eq!(edited(&app, 1).sky_fog, None);
+}
+
+/// The Materials a Ground dropdown lists, top to bottom, leaving out those its search hides.
+fn ground_options(app: &mut App) -> Vec<String> {
+    app.world_mut()
+        .query::<(&Act, &Node)>()
+        .iter(app.world())
+        .filter(|(_, node)| node.display != Display::None)
+        .filter_map(|(act, _)| match act {
+            Act::PickGround(_, name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_ground_dropdown_lists_every_material_narrows_to_its_search_and_picks_one() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+    act(&mut app, Act::GroundPop(Layer::Surface));
+    assert_eq!(count::<frame::Popup>(&mut app), 1);
+    assert_eq!(
+        ground_options(&mut app),
+        ["t:stone", "t:dirt", "t:grass", "t:sand"]
+    );
+    assert_eq!(
+        count::<pages::GroundSwatch>(&mut app),
+        4 + 3,
+        "a swatch on each row and field"
+    );
+    type_into(&mut app, Field::GroundSearch, "sa");
+    assert_eq!(
+        ground_options(&mut app),
+        ["t:sand"],
+        "the list shrinks to the results"
+    );
+    act(&mut app, Act::PickGround(Layer::Surface, "t:sand".into()));
+    assert_eq!(count::<frame::Popup>(&mut app), 0, "a pick closes it");
+    assert_eq!(edited(&app, 1).ground.unwrap().surface, "t:sand");
+    assert_eq!(focused_act(&app), Some(Act::GroundPop(Layer::Surface)));
+    act(&mut app, Act::GroundPop(Layer::Rock));
+    assert_eq!(
+        ground_options(&mut app).len(),
+        4,
+        "a dropdown opens with its search cleared"
+    );
+}
+
+#[test]
+fn a_ground_dropdown_closes_on_escape_or_a_click_outside_and_enter_picks_the_first_match() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    act(&mut app, Act::GroundPop(Layer::Soil));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+    assert_eq!(
+        count::<pages::ClimateMap>(&mut app),
+        1,
+        "the panel stays open"
+    );
+    assert_eq!(focused_act(&app), Some(Act::GroundPop(Layer::Soil)));
+    act(&mut app, Act::GroundPop(Layer::Soil));
+    frame::testing::click_outside(&mut app);
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+    act(&mut app, Act::GroundPop(Layer::Soil));
+    type_into(&mut app, Field::GroundSearch, "gr");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(edited(&app, 1).ground.unwrap().soil, "t:grass");
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+}
+
+#[test]
+fn opening_a_ground_dropdown_keeps_the_panel_scrolled_to_it() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    let body = |app: &mut App| {
+        app.world_mut()
+            .query_filtered::<&mut ScrollPosition, With<pages::PanelScroll>>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .0
+    };
+    let scrolled = Vec2::new(0.0, 120.0);
+    app.world_mut()
+        .query_filtered::<&mut ScrollPosition, With<pages::PanelScroll>>()
+        .single_mut(app.world_mut())
+        .unwrap()
+        .0 = scrolled;
+    act(&mut app, Act::GroundPop(Layer::Rock));
+    assert_eq!(body(&mut app), scrolled);
+}
+
+#[test]
+fn a_material_name_two_mods_declare_shows_its_mod() {
+    let materials = ["strata:stone", "terra:stone", "terra:dirt"].map(String::from);
+    assert_eq!(
+        biomes::material_title(&materials, "terra:stone"),
+        "Stone \u{00b7} Terra"
+    );
+    assert_eq!(biomes::material_title(&materials, "terra:dirt"), "Dirt");
+}
+
+/// Updates until every Biome's diorama being drawn lands.
+fn dioramas_drawn(app: &mut App) {
+    let start = std::time::Instant::now();
+    app.update();
+    while app.world().resource::<diorama::Dioramas>().drawing() {
+        assert!(start.elapsed().as_secs() < 60, "the dioramas never landed");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.update();
+    }
+    app.update();
+}
+
+/// The pixels Biome `at`'s list picture shows.
+fn diorama(app: &mut App, at: usize) -> Vec<u8> {
+    let handle = app
+        .world_mut()
+        .query::<(&pages::BiomeThumb, &ImageNode)>()
+        .iter(app.world())
+        .find_map(|(t, image)| (t.at == at).then(|| image.image.clone()))
+        .unwrap_or_else(|| panic!("no diorama of Biome {at}"));
+    let image = app
+        .world()
+        .resource::<Assets<Image>>()
+        .get(&handle)
+        .unwrap();
+    image.data.clone().unwrap()
+}
+
+#[test]
+fn each_biome_shows_a_diorama_drawn_off_the_main_thread_and_redrawn_after_an_edit() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    dioramas_drawn(&mut app);
+    let before = diorama(&mut app, 1);
+    assert_eq!(before[..3], [0x87, 0xce, 0xeb], "its sky at the top");
+    assert_ne!(before, diorama(&mut app, 0), "each Biome is its own island");
+    act(&mut app, Act::SelectBiome(1));
+    type_into(&mut app, Field::Sky, "#0a141e");
+    assert!(
+        app.world().resource::<diorama::Dioramas>().drawing(),
+        "an edit redraws on another thread"
+    );
+    dioramas_drawn(&mut app);
+    let after = diorama(&mut app, 1);
+    assert_eq!(after[..3], [10, 20, 30]);
+    assert_eq!(
+        count::<pages::BiomeThumb>(&mut app),
+        3,
+        "the panel's head shows the open Biome's diorama too"
+    );
 }
 
 fn three_biomes(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
@@ -2636,6 +2836,26 @@ fn settings_open_from_the_title_and_take_its_keys_until_closed() {
 }
 
 #[test]
+fn settings_hide_the_title_under_them_until_closed() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    let shown = |app: &mut App| -> Vec<Visibility> {
+        let mut roots = app.world_mut().query_filtered::<&Visibility, With<Root>>();
+        roots.iter(app.world()).copied().collect()
+    };
+    act(&mut app, Act::Settings);
+    app.update();
+    assert_eq!(shown(&mut app), [Visibility::Hidden]);
+    app.world_mut()
+        .resource_mut::<super::super::settings::Settings>()
+        .open = false;
+    app.update();
+    app.update();
+    assert_eq!(shown(&mut app), [Visibility::Inherited]);
+}
+
+#[test]
 fn search_filters_the_worlds_by_name_or_game() {
     let worlds = Directory::new();
     let river = library::create(&worlds.0, &played("River bend", "terra", 30)).unwrap();
@@ -3267,7 +3487,7 @@ fn hovering_a_world_lights_its_slot_and_shows_its_icons() {
     assert_eq!(icons_shown_on(&mut app), [Act::Play(river.clone())]);
     assert_eq!(
         app.world().get::<BackgroundColor>(tile).unwrap().0,
-        pages::SLOT_LIT
+        theme::slot_lit()
     );
     act(&mut app, Act::Edit(river.clone()));
     assert_eq!(
@@ -3668,6 +3888,46 @@ fn new_world_with_these_settings_asks_to_save_an_unsaved_name_or_mode_first() {
 }
 
 #[test]
+fn cancelling_edit_world_asks_before_discarding_an_unsaved_name_or_mode() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Old", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path.clone()));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Worlds, "nothing to lose");
+
+    act(&mut app, Act::Edit(path.clone()));
+    type_into(&mut app, Field::Rename, "Renamed");
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::DiscardEdits(path.clone()));
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(shown(&mut app, "Discard changes?"));
+    assert!(shown(&mut app, "Edit World"), "over the page it asks about");
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::KeepEditing));
+    act(&mut app, Act::KeepEditing);
+    assert_eq!(launcher(&app).screen, Screen::Edit(path.clone()));
+    assert_eq!(launcher(&app).rename, "Renamed", "the edit is kept");
+    press(&mut app, KeyCode::Escape);
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Edit(path.clone()),
+        "Esc keeps editing"
+    );
+
+    act(&mut app, Act::EditMode(GameMode::Survival));
+    press(&mut app, KeyCode::Escape);
+    act(&mut app, Act::DiscardEdits);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    let saved = library::read(&path).unwrap().unwrap();
+    assert_eq!(saved.name, "Old");
+    assert_eq!(saved.mode_changes.default, None);
+}
+
+#[test]
 fn a_mods_summary_line_names_each_kind_it_adds_and_leaves_out_none() {
     let summary = |materials, shapes, fluids| tesserae_mods::Summary {
         materials,
@@ -3775,4 +4035,87 @@ fn left_and_right_change_edit_worlds_game_mode() {
     assert_eq!(focused_act(&app), Some(Act::EditMode(GameMode::Survival)));
     step(&mut app, Act::EditMode(GameMode::Survival), -1);
     assert_eq!(launcher(&app).modes.own, GameMode::Creative);
+}
+
+fn pick_ground(app: &mut App, layer: Layer, name: &str) {
+    act(app, Act::GroundPop(layer));
+    act(app, Act::PickGround(layer, name.into()));
+}
+
+#[test]
+fn the_step_trust_dialog_shows_limits_only_under_details_and_enter_does_not_trust() {
+    let worlds = Directory::new();
+    let (mut app, _) = pad_app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    assert!(shown(&mut app, "RUNS CODE"));
+    assert!(shown(&mut app, "Build "), "each item names its build");
+    assert!(!shown(&mut app, "fuel per call"), "closed by default");
+    assert_eq!(focused_act(&app), Some(Act::Back));
+    key(&mut app, KeyCode::Enter);
+    app.update();
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert!(!app.world().resource::<Installed>().untrusted.is_empty());
+
+    act(&mut app, Act::Next);
+    act(&mut app, Act::TrustDetails);
+    assert!(shown(&mut app, "fuel per call"));
+    assert!(shown(&mut app, "Access files, network or environment."));
+    assert_eq!(focused_act(&app), Some(Act::TrustDetails), "focus stays");
+    act(&mut app, Act::TrustDetails);
+    assert!(!shown(&mut app, "fuel per call"));
+
+    act(&mut app, Act::TrustDetails);
+    act(&mut app, Act::Back);
+    act(&mut app, Act::Next);
+    assert!(!shown(&mut app, "fuel per call"), "reopens closed");
+}
+
+#[test]
+fn the_trust_page_shows_limits_only_under_details() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Play(path));
+    app.update();
+    assert!(shown(&mut app, "Trust this item?"));
+    assert!(!shown(&mut app, "fuel per call"));
+    act(&mut app, Act::TrustDetails);
+    assert!(shown(&mut app, "fuel per call"));
+    act(&mut app, Act::TrustDetails);
+    assert!(!shown(&mut app, "fuel per call"));
+}
+
+#[test]
+fn trust_terms_read_what_an_item_can_do_and_each_kind_of_limit_from_its_prompt() {
+    let prompt = &Installed::fake(None, &["terra"]).untrusted[0].prompt;
+    let terms = pages::trust_terms(prompt);
+    let names: Vec<&str> = terms.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Can", "Cannot", "Time", "Memory", "Commands", "Content"]
+    );
+    assert_eq!(
+        terms[0].1,
+        "Add Materials and Shapes. A Game can change World generation and view distance. \
+         Place and remove Voxels in loaded Chunks in batches."
+    );
+    assert_eq!(terms[1].1, "Access files, network or environment.");
+    assert!(terms[2].1.contains("fuel per call \u{b7} yield every"));
+    let limit = tesserae_mods::ModLimits::HOST.call_fuel;
+    assert!(limit >= 10_000, "a number long enough to group");
+    assert!(!terms[2].1.contains(&limit.to_string()), "{}", terms[2].1);
+    assert!(terms[2].1.contains(','), "{}", terms[2].1);
 }

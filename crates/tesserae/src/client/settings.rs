@@ -68,6 +68,7 @@ pub(super) const KEEP_S: f32 = 10.0;
 /// The preferences a bad value of could leave the screen unusable.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) struct Display {
+    window_mode: super::presentation::WindowMode,
     sync: bool,
     cap: Option<u32>,
     anti_aliasing: super::anti_alias::AntiAliasing,
@@ -76,6 +77,7 @@ pub(super) struct Display {
 impl Display {
     fn of(p: &Preferences) -> Self {
         Self {
+            window_mode: p.window_mode,
             sync: p.display_sync,
             cap: p.fps_cap,
             anti_aliasing: p.anti_aliasing,
@@ -83,6 +85,7 @@ impl Display {
         }
     }
     fn restore(self, p: &mut Preferences) {
+        p.window_mode = self.window_mode;
         p.display_sync = self.sync;
         p.fps_cap = self.cap;
         p.anti_aliasing = self.anti_aliasing;
@@ -146,6 +149,7 @@ pub(super) enum Operation {
     TouchMirror(bool),
     TouchSize(super::profile::TouchSize),
     ScrollDirection(bool),
+    WindowMode(super::presentation::WindowMode),
     Sync(bool),
     Cap(Option<u32>),
     AntiAliasing(super::anti_alias::AntiAliasing),

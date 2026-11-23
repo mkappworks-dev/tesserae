@@ -7,7 +7,7 @@ use super::frame::{self, Cap, Prompt};
 use super::inventory_window::look::{self, Flat, Flavour, Glyph};
 use super::theme;
 use super::{
-    actions::{Action, Actions},
+    actions::{Action, Actions, Bindings, Labels},
     layout::{AXIS_NAMES, Kind, LayoutMode, LayoutPreferences, extent_m, metres, way_name},
     menu_ui as ui,
     pad::PadInput,
@@ -82,13 +82,11 @@ struct Panel;
 #[derive(Component)]
 struct Card;
 
-/// The status card's lines that say what the aim would lay and which keys do
-/// what.
+/// The status card's lines that say what the aim would lay.
 #[derive(Component, Clone, Copy, PartialEq)]
 enum Info {
     Size,
     Body,
-    Hint,
 }
 
 /// A step of point to point on the progress line: A, B or C.
@@ -519,7 +517,7 @@ fn axis_row(
             ..default()
         },
         BackgroundColor(if active {
-            theme::LAYOUT_ROW_ON
+            theme::layout_row_on()
         } else {
             Color::NONE
         }),
@@ -814,9 +812,25 @@ fn prompts(kind: Kind) -> Vec<Prompt<Control>> {
     prompts
 }
 
+/// The first key bound to `action`, as a cap: the card has no room for every
+/// alternative.
+fn card_cap(action: Action, bindings: &Bindings, labels: &Labels) -> String {
+    let all = bindings.label(action, labels);
+    let first = all.split(" / ").next().unwrap_or_default().to_owned();
+    match super::settings::cap_text(first).as_str() {
+        "Backspace" => "⌫".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 /// In play with the menu shut: what is set, what the aim would do and the
-/// keys, as text. It has nothing to click: in play the mouse aims.
-fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
+/// keys as caps. It has nothing to click: in play the mouse aims.
+fn status(
+    parent: &mut ChildSpawnerCommands,
+    layout: &LayoutPreferences,
+    voxel_size: f32,
+    (bindings, labels): (&Bindings, &Labels),
+) {
     let extent = layout
         .lengths
         .map(|count| metres(extent_m(count, layout.gap, voxel_size)));
@@ -856,12 +870,20 @@ fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_s
         ))
         .with_children(|card| {
             card.spawn(theme::ring(theme::RADIUS_MENU));
-            card.spawn(look::label(
-                "Layout ready",
-                theme::TEXT_EYEBROW,
-                theme::REGULAR,
-                theme::LAYOUT_STATUS_INK,
-            ));
+            card.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|title| {
+                ui::icon(title, ui::IconKind::Layout, theme::LAYOUT_STATUS_INK, 18.0);
+                title.spawn(look::label(
+                    "Layout ready",
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::LAYOUT_STATUS_INK,
+                ));
+            });
             card.spawn(look::label(
                 what,
                 theme::TEXT_BODY,
@@ -876,11 +898,7 @@ fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_s
                     theme::muted(),
                 ));
             }
-            for (part, colour) in [
-                (Info::Size, theme::muted()),
-                (Info::Body, theme::INK),
-                (Info::Hint, theme::muted()),
-            ] {
+            for (part, colour) in [(Info::Size, theme::muted()), (Info::Body, theme::INK)] {
                 if part == Info::Size && layout.kind == Kind::Directions {
                     continue;
                 }
@@ -895,6 +913,35 @@ fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_s
                     ),
                 ));
             }
+            card.spawn(Node {
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(14.0),
+                row_gap: Val::Px(6.0),
+                margin: UiRect::top(Val::Px(2.0)),
+                ..default()
+            })
+            .with_children(|keys| {
+                for (action, name) in [
+                    (Action::Layout, "Edit"),
+                    (Action::ClearTool, "Exit"),
+                    (Action::Place, "Place"),
+                ] {
+                    keys.spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    })
+                    .with_children(|key| {
+                        frame::key_cap(key, &card_cap(action, bindings, labels), theme::muted());
+                        key.spawn(look::label(
+                            name,
+                            theme::TEXT_EYEBROW,
+                            theme::REGULAR,
+                            theme::muted(),
+                        ));
+                    });
+                }
+            });
         });
 }
 
@@ -929,11 +976,7 @@ fn update_info(
     hotbar: Res<super::edit::Hotbar>,
     camera: Single<&GlobalTransform, With<super::camera::FlyCamera>>,
     preview: Res<super::layout::Preview>,
-    (bindings, labels, world): (
-        Res<super::actions::Bindings>,
-        Res<super::actions::Labels>,
-        Res<WorldSettings>,
-    ),
+    world: Res<WorldSettings>,
     time: Res<Time>,
     mut text: Query<(&Info, &mut Text), Without<StepLetter>>,
     (mut dots, mut letters, mut captions): Steps,
@@ -944,15 +987,12 @@ fn update_info(
         &hotbar,
         &camera,
         &preview,
-        &bindings,
-        &labels,
         (time.elapsed_secs_f64(), world.voxel_size),
     );
     for (part, mut text) in &mut text {
         let line = match part {
             Info::Size => said.size.clone(),
             Info::Body => said.body.clone(),
-            Info::Hint => said.hint.clone(),
         };
         if text.0 != line {
             text.0 = line;
@@ -998,6 +1038,7 @@ fn render(
     preferences: Res<Preferences>,
     mode: Res<LayoutMode>,
     world: Res<WorldSettings>,
+    (bindings, labels): (Res<Bindings>, Res<Labels>),
 ) {
     let want = if menu.open {
         Some(true)
@@ -1006,8 +1047,10 @@ fn render(
     } else {
         None
     };
-    let rebuild =
-        want != menu.shown || (want == Some(true) && (menu.dirty || preferences.is_changed()));
+    let rebound = bindings.is_changed() || labels.is_changed();
+    let rebuild = want != menu.shown
+        || (want == Some(true) && (menu.dirty || preferences.is_changed()))
+        || (want == Some(false) && rebound);
     if !rebuild {
         return;
     }
@@ -1038,7 +1081,7 @@ fn render(
                 },
                 Pickable::IGNORE,
             ))
-            .with_children(|wrapper| status(wrapper, layout, voxel_size));
+            .with_children(|wrapper| status(wrapper, layout, voxel_size, (&bindings, &labels)));
         return;
     }
     let between = layout.kind == Kind::Between;
@@ -1480,8 +1523,8 @@ mod tests {
         );
         assert_eq!(
             panels(&mut app),
-            (1, 2),
-            "but it still says what the aim does and which keys"
+            (1, 1),
+            "but it still says what the aim does"
         );
         app.world_mut().resource_mut::<LayoutMode>().on = false;
         controls(&mut app);
@@ -1490,6 +1533,39 @@ mod tests {
             (0, 0),
             "the mode is off, so nothing is shown"
         );
+    }
+
+    fn texts(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|text| text.0.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_status_card_names_its_keys_as_caps_under_the_layout_icon() {
+        let mut app = render_app();
+        open(&mut app);
+        press(&mut app, KeyCode::KeyL);
+        controls(&mut app);
+        let texts = texts(&mut app);
+        for word in ["L", "Edit", "⌫", "Exit", "RMB", "Place"] {
+            assert!(texts.iter().any(|t| t == word), "{word} in {texts:?}");
+        }
+        assert!(
+            !texts
+                .iter()
+                .any(|t| t.contains(" · ") && t.contains("exit")),
+            "no sentence of keys: {texts:?}"
+        );
+        let icons: Vec<_> = app
+            .world_mut()
+            .query::<&ui::Icon>()
+            .iter(app.world())
+            .map(|icon| icon.0)
+            .collect();
+        assert_eq!(icons, [ui::IconKind::Layout]);
     }
 
     #[test]

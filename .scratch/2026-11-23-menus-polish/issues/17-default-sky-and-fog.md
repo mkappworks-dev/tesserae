@@ -1,6 +1,6 @@
 # 17: Default sky blue and white fog
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -41,3 +41,10 @@ Follow-up (user decision): a colourless Biome surrounded by Biomes that declare
 colours (a landform such as a mountain) carries on their sky and fog, as before
 this ticket; the default applies only where no Biome in the blend declares
 colours. A World with no Biomes keeps the new sky blue and white.
+
+Follow-up done: `sky_fog_at` blends only the Biomes that declare colours again
+(a landform counts as "of the land's shape" only when it is coloured), and gives
+`SkyFog::DEFAULT` where none in the blend does. The core test
+`a_biome_without_colours_does_not_dilute_the_ones_that_have_them` is back, with
+`a_colourless_landform_biome_carries_on_the_sky_around_it` beside it. The
+Server still sends the default for a World of only colourless Biomes.

@@ -11,7 +11,7 @@
   pointer-events: none;
 }
 /* Newest sits nearest the anchor edge. */
-#toasts:is([data-pos="top-centre"], [data-pos="top-right"]) {
+#toasts[data-pos="top-centre"] {
   flex-direction: column-reverse;
 }
 #toasts:is([data-pos="bottom-centre"], [data-pos="top-centre"]) {
@@ -31,7 +31,7 @@
     transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1),
     grid-template-rows 0.22s ease-in 0.04s;
 }
-#toasts:is([data-pos="top-centre"], [data-pos="top-right"]) .toast-slot {
+#toasts[data-pos="top-centre"] .toast-slot {
   --rise: -8px;
 }
 .toast-slot.show {

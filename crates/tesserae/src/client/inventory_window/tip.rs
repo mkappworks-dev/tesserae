@@ -29,7 +29,6 @@ const TIP_SHAPE_PX: f32 = 24.0;
 const TIP_NEED_ICON_PX: f32 = 18.0;
 const TIP_FILL: Color = Color::srgb_u8(0x16, 0x17, 0x1a);
 const TIP_EDGE: Color = Color::srgb_u8(0x55, 0x56, 0x5e);
-const TIP_SHAPE_FILL: Color = Color::srgba(1.0, 1.0, 1.0, 0.05);
 /// Slots from this column on show their tooltip to their left, inside the panel.
 const FLIP_COLUMN: usize = 5;
 
@@ -225,6 +224,8 @@ pub(super) fn show(
                     Val::ZERO,
                     Val::Px(30.0),
                 ),
+                // The Catalogue and Recipe grids scroll, and their clip would cut it.
+                bevy::ui::OverrideClip,
                 Pickable::IGNORE,
             ))
             .with_children(|tip| lines(tip));
@@ -385,7 +386,7 @@ fn places_as(tip: &mut ChildSpawnerCommands, material: MaterialId, shapes: &[Sha
                     border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
                 },
-                BackgroundColor(TIP_SHAPE_FILL),
+                BackgroundColor(theme::css_tint(0.05)),
             ))
             .with_children(|chip| {
                 item_icon(
@@ -479,6 +480,9 @@ pub(super) fn prompts(
                         .act(sort)
                         .pad(GamepadButton::West),
                 );
+                if !wanted.chest {
+                    slot.push(search());
+                }
                 slot
             }
         };

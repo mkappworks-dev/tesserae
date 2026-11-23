@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::client::menu_ui::Tab;
+use crate::client::presentation::WindowMode;
 use crate::client::theme;
 use crate::server::player::SpeedLevel;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -189,17 +190,6 @@ pub(in crate::client) fn render(
     };
     let (bindings, p) = (&*active.0, &*active.1);
     let index = scroll_slot(settings.tab);
-    let default_help = if settings.tab == Tab::Bindings {
-        RowHelp {
-            title: "Key bindings".into(),
-            text: BINDING_HELP.into(),
-        }
-    } else {
-        RowHelp {
-            title: String::new(),
-            text: String::new(),
-        }
-    };
     let page = commands
         .spawn((
             Panel,
@@ -208,7 +198,6 @@ pub(in crate::client) fn render(
             Node {
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
-                column_gap: Val::Px(28.0),
                 ..default()
             },
         ))
@@ -240,7 +229,6 @@ pub(in crate::client) fn render(
                     game(&distances),
                 );
             });
-            help_panel(root, &default_help);
         })
         .id();
     if settings.modal() {
@@ -338,10 +326,16 @@ pub(super) fn behavior(
     ),
 ) {
     group(list, "MOVEMENT & BUILDING", |card| {
-        setting_row(
+        noted_row(
             card,
             "Sprint speed",
             "Sprint cycles through these and keeps the one you stop on.",
+            match p.speed_level {
+                SpeedLevel::Walk => Some("Walk: no sprint."),
+                SpeedLevel::One => Some("Speed 1: a brisk run."),
+                SpeedLevel::Two => None,
+                SpeedLevel::Three => Some("Speed 3: the fastest; hard to stop on an edge."),
+            },
             |row| {
                 select(
                     row,
@@ -357,10 +351,15 @@ pub(super) fn behavior(
                 )
             },
         );
-        setting_row(
+        noted_row(
             card,
             "Removal activation",
-            "Hold to keep removing, or tap once for a timed removal.",
+            "How Remove starts breaking a Voxel.",
+            Some(if p.tap_remove {
+                "Timed tap: one press starts it; press again to stop."
+            } else {
+                "Hold: keep the binding down until the Voxel breaks."
+            }),
             |row| {
                 select(
                     row,
@@ -412,13 +411,13 @@ pub(super) fn behavior(
         setting_row(
             card,
             "Scroll sensitivity",
-            "How far one wheel step moves.",
+            "How far one wheel notch moves.",
             |row| slider(row, Scalar::Scroll, p.scroll_sensitivity),
         );
         setting_row(
             card,
             "Show quick reference",
-            "List the main bindings under these settings.",
+            "List the main bindings in the corner while you play.",
             |row| toggle(row, settings.show_reference, Operation::Reference),
         );
     });
@@ -470,11 +469,29 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
 
 pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allowed: bool) {
     let map_hint = |text: &'static str| if map_allowed { text } else { UNAVAILABLE };
+    group(list, "WINDOW", |card| {
+        noted_row(
+            card,
+            "Window mode",
+            "Borderless fullscreen covers the screen without changing its mode, so switching away is instant. Fullscreen takes over the display.",
+            (p.window_mode == WindowMode::Fullscreen)
+                .then_some("Fullscreen: switching to another app may flash the screen."),
+            |row| {
+                select(
+                    row,
+                    p.window_mode,
+                    WindowMode::ALL.map(|mode| (mode, mode.label().into())),
+                    Operation::WindowMode,
+                )
+            },
+        );
+    });
     group(list, "FRAME PRESENTATION", |card| {
-        setting_row(
+        noted_row(
             card,
             "Display sync",
             "Match frame presentation to your display. Synced is recommended and free of tearing; with sync off, frames may tear, so set a frame rate limit.",
+            (!p.display_sync).then_some("Sync off: set a frame rate limit too."),
             |row| {
                 select(
                     row,
@@ -484,10 +501,13 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allo
                 )
             },
         );
-        setting_row(
+        noted_row(
             card,
             "Frame rate limit",
             "An optional ceiling, independent of display sync.",
+            p.fps_cap
+                .is_none()
+                .then_some("No limit: the GPU runs flat out, even in menus."),
             |row| {
                 select(
                     row,
@@ -500,10 +520,12 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allo
         );
     });
     group(list, "IMAGE QUALITY", |card| {
-        setting_row(
+        noted_row(
             card,
             "Anti-aliasing",
             "Smooth voxel edges. MSAA costs more.",
+            (p.anti_aliasing == crate::client::anti_alias::AntiAliasing::Off)
+                .then_some("Off: sharpest and cheapest; edges shimmer."),
             |row| {
                 select(
                     row,
@@ -513,10 +535,11 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allo
                 )
             },
         );
-        setting_row(
+        noted_row(
             card,
             "Render scale",
             "Lower values reduce rendering work. Menus stay sharp.",
+            (p.render_scale == 100).then_some("100%: native resolution."),
             |row| {
                 select(
                     row,
@@ -708,6 +731,7 @@ pub(super) fn binding_rows(
             RowHelp {
                 title: action_name(action).into(),
                 text: help.into(),
+                note: "",
             },
             Node {
                 justify_content: JustifyContent::SpaceBetween,
@@ -816,7 +840,7 @@ pub(super) fn controller(
         setting_row(
             card,
             "Invert vertical look",
-            "Pushing the stick up looks down.",
+            "Pushing the right stick up looks down.",
             |row| toggle(row, pad.invert_y, Operation::PadInvert),
         );
         setting_row(
@@ -828,13 +852,15 @@ pub(super) fn controller(
         setting_row(
             card,
             "Look deadzone",
-            "Ignore small look-stick movements.",
+            "Ignore small right-stick movements.",
             |row| slider(row, Scalar::LookDeadzone, pad.look_deadzone),
         );
-        setting_row(
+        noted_row(
             card,
             "Crouch activation",
-            "Hold to crouch, or press once to stay crouched.",
+            "How the crouch button works.",
+            pad.toggle_crouch
+                .then_some("Toggle: press once to crouch, again to stand."),
             |row| {
                 select(
                     row,
@@ -866,7 +892,7 @@ pub(super) fn controller(
                 setting_row(
                     touch_rows,
                     "Layout",
-                    "Mirrored swaps the stick and the buttons.",
+                    "Mirrored puts the movement stick on the right.",
                     |row| {
                         select(
                             row,
@@ -879,7 +905,7 @@ pub(super) fn controller(
                 setting_row(
                     touch_rows,
                     "Control size",
-                    "How large the on-screen controls are.",
+                    "The size of the on-screen buttons.",
                     |row| {
                         use crate::client::profile::TouchSize::*;
                         select(
@@ -897,7 +923,7 @@ pub(super) fn controller(
                 setting_row(
                     touch_rows,
                     "Control opacity",
-                    "How solid the on-screen controls look.",
+                    "How solid the on-screen buttons look.",
                     |row| slider(row, Scalar::TouchOpacity, touch.opacity),
                 );
             },

@@ -349,29 +349,110 @@ fn key_bindings_show_a_cap_per_input_with_mouse_buttons_short() {
     assert!(texts.iter().any(|t| t == "Press a key…"), "the row waits");
 }
 
-#[test]
-fn the_help_panel_explains_the_row_that_holds_focus() {
-    let mut app = page_app(Tab::Display);
-    let help = |app: &mut App| -> String {
-        app.world_mut()
-            .query_filtered::<&Text, With<HelpText>>()
+/// The help strip's name, explanation and value note.
+fn strip(app: &mut App) -> [String; 3] {
+    fn read<M: Component>(app: &mut App) -> String {
+        let (text, children) = app
+            .world_mut()
+            .query_filtered::<(&Text, Option<&Children>), With<M>>()
             .single(app.world())
-            .unwrap()
-            .0
-            .clone()
-    };
-    let aa = app
-        .world_mut()
+            .unwrap();
+        let spans: Vec<Entity> = children.map(|c| c.to_vec()).unwrap_or_default();
+        let mut out = text.0.clone();
+        for span in spans {
+            if let Some(span) = app.world().get::<TextSpan>(span) {
+                out.push_str(&span.0);
+            }
+        }
+        out
+    }
+    [
+        read::<HelpTitle>(app),
+        read::<HelpText>(app),
+        read::<HelpNote>(app),
+    ]
+}
+fn focus_on(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .resource_mut::<bevy::input_focus::InputFocus>()
+        .set(entity, bevy::input_focus::FocusCause::Navigated);
+    app.world_mut()
+        .insert_resource(bevy::input_focus::InputFocusVisible(true));
+    app.update();
+}
+fn choice_for(app: &mut App, wanted: fn(&Operation) -> bool) -> Entity {
+    app.world_mut()
         .query::<(Entity, &Choice)>()
         .iter(app.world())
-        .find(|(_, c)| matches!(c.next(1, true), Some(Operation::AntiAliasing(_))))
+        .find(|(_, c)| c.next(1, true).is_some_and(|o| wanted(&o)))
+        .unwrap()
+        .0
+}
+
+#[test]
+fn the_help_strip_explains_the_focused_row_and_notes_its_value() {
+    let mut app = page_app(Tab::Display);
+    app.world_mut().resource_mut::<Preferences>().anti_aliasing =
+        crate::client::anti_alias::AntiAliasing::Off;
+    app.world_mut().resource_mut::<Settings>().dirty = true;
+    app.update();
+    let aa = choice_for(&mut app, |o| matches!(o, Operation::AntiAliasing(_)));
+    focus_on(&mut app, aa);
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Anti-aliasing".to_owned(),
+            "Smooth voxel edges. MSAA costs more.".to_owned(),
+            "Off: sharpest and cheapest; edges shimmer.".to_owned(),
+        ]
+    );
+    let window = choice_for(&mut app, |o| matches!(o, Operation::WindowMode(_)));
+    focus_on(&mut app, window);
+    assert_eq!(strip(&mut app)[0], "Window mode");
+    assert_eq!(strip(&mut app)[2], "", "Windowed has no note");
+}
+
+#[test]
+fn the_help_strip_describes_the_category_while_no_row_is_focused() {
+    let mut app = page_app(Tab::Behavior);
+    app.world_mut()
+        .insert_resource(bevy::input_focus::InputFocusVisible(false));
+    app.update();
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Behavior".to_owned(),
+            "How moving, building and the mouse feel.".to_owned(),
+            String::new(),
+        ]
+    );
+}
+
+#[test]
+fn the_help_strip_follows_the_row_under_the_pointer() {
+    let mut app = page_app(Tab::Behavior);
+    let row = app
+        .world_mut()
+        .query::<(Entity, &RowHelp)>()
+        .iter(app.world())
+        .find(|(_, help)| help.title == "Removal activation")
         .unwrap()
         .0;
     app.world_mut()
-        .resource_mut::<bevy::input_focus::InputFocus>()
-        .set(aa, bevy::input_focus::FocusCause::Navigated);
+        .entity_mut(row)
+        .insert(bevy::picking::hover::Hovered(true));
     app.update();
-    assert_eq!(help(&mut app), "Smooth voxel edges. MSAA costs more.");
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Removal activation".to_owned(),
+            "How Remove starts breaking a Voxel.".to_owned(),
+            "Hold: keep the binding down until the Voxel breaks.".to_owned(),
+        ]
+    );
+    let ghost = choice_for(&mut app, |o| matches!(o, Operation::Ghost(_)));
+    focus_on(&mut app, ghost);
+    assert_eq!(strip(&mut app)[0], "Placement ghost", "a later focus wins");
 }
 
 #[test]
@@ -1002,4 +1083,54 @@ fn choosing_a_preset_changes_the_rings_the_server_streams() {
     assert_eq!(crate::server::level_count(&high), 6);
     let rings = crate::server::LevelRings::new(high, 32.0, 1);
     assert_eq!(rings.mesh.outer.horizontal, 12);
+}
+
+#[test]
+fn the_window_mode_applies_at_once_steps_and_reverts_unless_kept() {
+    use crate::client::presentation::WindowMode;
+    let mut app = app();
+    app.add_plugins(super::super::actions::test_plugin)
+        .add_systems(PostUpdate, crate::client::presentation::policy);
+    let window = app
+        .world_mut()
+        .spawn((Window::default(), bevy::window::PrimaryWindow))
+        .id();
+    let mode = |app: &App| app.world().get::<Window>(window).unwrap().mode;
+    activate_operation(&mut app, Operation::Navigate(Tab::Display));
+    let selector = spawn_choice(&mut app, |row| {
+        pages::select(
+            row,
+            WindowMode::Windowed,
+            WindowMode::ALL.map(|m| (m, m.label().to_owned())),
+            Operation::WindowMode,
+        )
+    });
+    step_by(&mut app, selector, 1);
+    assert_eq!(
+        app.world().resource::<Preferences>().window_mode,
+        WindowMode::Borderless
+    );
+    assert!(app.world().resource::<Settings>().modal(), "asks to keep");
+    app.update();
+    assert_eq!(
+        mode(&app),
+        bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current),
+        "applied at once"
+    );
+    wait(&mut app, 10.5);
+    assert_eq!(
+        app.world().resource::<Preferences>().window_mode,
+        WindowMode::Windowed,
+        "reverted"
+    );
+    assert_eq!(mode(&app), bevy::window::WindowMode::Windowed);
+
+    activate_operation(&mut app, Operation::WindowMode(WindowMode::Fullscreen));
+    activate_operation(&mut app, Operation::KeepDisplay);
+    wait(&mut app, 11.0);
+    assert_eq!(
+        saved(&mut app).window_mode,
+        WindowMode::Fullscreen,
+        "kept and saved"
+    );
 }

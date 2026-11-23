@@ -2061,7 +2061,7 @@ const prototypeScreens = [
   { value: "vegetation", label: "Vegetation (step 18b)" },
   { value: "map", label: "Map (step 19)" },
   { value: "structures", label: "Structures" },
-  { value: "toasts", label: "Toasts (study)" },
+  { value: "toasts", label: "Toasts" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",

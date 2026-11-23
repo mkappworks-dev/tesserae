@@ -1,6 +1,6 @@
 # 23: Light tints as faint as the mockup's
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -18,9 +18,11 @@ behind the Settings sheet, is hidden as the mockup hides it.
 
 ## Acceptance criteria
 
-- [ ] On-screen captures of the Worlds tiles, Settings selectors and toggles
+- [x] On-screen captures of the Worlds tiles, Settings selectors and toggles
       match the mockup within a few levels
-- [ ] The title menu does not show through the Settings sheet
-- [ ] A theme test pins the tint conversion against the mockup's CSS values
+- [x] The title menu does not show through the Settings sheet
+- [x] A theme test pins the tint conversion against the mockup's CSS values
 
 ## Comments
+
+`theme::css_tint` matches over the sheet as seen on screen (sRGB 0.1), not mid-grey: a tint over near-black lifts far more in linear light. On-screen: unlit World tile 33 = mockup 33, lit New World 40 vs 34, Settings selector 37 vs 44 where the mockup's sheet there is lighter (29 vs 26); over our sheet the CSS blend gives 37.5. Left as they were: the HUD's tints, which sit on the World, and the slot bevel `SLOT_LIFT`.

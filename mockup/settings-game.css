@@ -1,16 +1,18 @@
 /* Game-feel pass for this area; see menus.css for the shared shell. */
+/* The rail's tone, so the strip reads as frame along the sheet's foot. */
 .game .menu-sheet .settings-help {
   flex: none;
-  min-height: calc(64px * var(--text-scale, 1) + 23px);
-  padding: 11px 32px 12px;
+  min-height: calc(64px * var(--text-scale, 1) + 35px);
+  padding: 17px 32px 18px;
+  background: rgb(10 11 12 / 0.9);
   border-top: 1px solid var(--edge);
   font-size: calc(13px * var(--text-scale, 1));
   line-height: 1.45;
 }
-.settings-help b {
+.settings-help > b {
   display: block;
-  font-size: calc(14px * var(--text-scale, 1));
-  font-weight: 600;
+  font-size: calc(15px * var(--text-scale, 1));
+  font-weight: 700;
 }
 .settings-help p {
   margin: 2px 0 0;
@@ -18,8 +20,10 @@
   color: var(--muted);
 }
 .settings-help .settings-note {
-  color: var(--ink);
-  opacity: 0.8;
+  color: var(--leaf);
+}
+.settings-help .settings-note b {
+  font-weight: 700;
 }
 .settings-help .settings-note:empty {
   display: none;

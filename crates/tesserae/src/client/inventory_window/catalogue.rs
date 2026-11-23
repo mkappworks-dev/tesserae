@@ -26,7 +26,8 @@ const TILE_COLUMNS: f32 = 5.0;
 /// The side pane's width: five tiles across, as the backpack is nine.
 pub(super) const PANE_PX: f32 = TILE_COLUMNS * TILE_PX + (TILE_COLUMNS - 1.0) * TILE_GAP_PX;
 const TILE_ICON_PX: f32 = 32.0;
-pub(super) const SEARCH_PX: f32 = 32.0;
+pub(super) const SEARCH_PX: f32 = 34.0;
+const SEARCH_GAP_PX: f32 = 10.0;
 pub(super) const HEAD_PX: f32 = 34.0;
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
@@ -139,7 +140,7 @@ fn drag_start(
     }
 }
 
-/// The side pane's top: the tabs, when there are any, and the search.
+/// The side pane's top: the tabs, or else the title, with the search beneath.
 pub(super) fn head(
     pane: &mut ChildSpawnerCommands,
     title: Option<&str>,
@@ -149,8 +150,6 @@ pub(super) fn head(
     pane.spawn(Node {
         min_height: Val::Px(HEAD_PX),
         align_items: AlignItems::Center,
-        justify_content: JustifyContent::SpaceBetween,
-        column_gap: Val::Px(8.0),
         margin: UiRect::bottom(Val::Px(8.0)),
         ..default()
     })
@@ -165,75 +164,12 @@ pub(super) fn head(
                 theme::INK,
             ));
         }
-        head.spawn((
-            SearchSlot,
-            Node {
-                display: Display::None,
-                flex_grow: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_width: Val::Px(0.0),
-                ..default()
-            },
-        ))
-        .with_children(search);
-        head.spawn((
-            SearchToggle,
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(0),
-            super::Control::Search,
-            Hovered::default(),
-            Node {
-                width: Val::Px(SEARCH_PX),
-                height: Val::Px(SEARCH_PX),
-                flex_shrink: 0.0,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                ..default()
-            },
-            look::slot_focus(),
-        ))
-        .with_children(|toggle| ui::icon(toggle, ui::IconKind::Search, theme::muted(), 16.0));
     });
-}
-
-/// Holds the search field, shown while it is in use.
-#[derive(Component)]
-pub(super) struct SearchSlot;
-
-/// Opens the search, shown while it is not.
-#[derive(Component)]
-pub(super) struct SearchToggle;
-
-/// Search hides behind its icon until wanted, as a game's does: it shows while
-/// it has focus or holds a query. The panel has one side pane, so one search.
-pub(super) fn show_search(
-    searches: Res<Searches>,
-    focus: Option<Res<InputFocus>>,
-    fields: Query<(Entity, Has<SearchBox>), Search>,
-    mut slots: Query<&mut Node, (With<SearchSlot>, Without<SearchToggle>)>,
-    mut toggles: Query<&mut Node, With<SearchToggle>>,
-) {
-    let focused = focus.as_ref().and_then(|f| f.get());
-    let open = fields.iter().any(|(field, catalogue)| {
-        let query = if catalogue {
-            &searches.catalogue
-        } else {
-            &searches.recipes
-        };
-        focused == Some(field) || !query.is_empty()
-    });
-    let shown = |on: bool| if on { Display::Flex } else { Display::None };
-    for mut node in &mut slots {
-        if node.display != shown(open) {
-            node.display = shown(open);
-        }
-    }
-    for mut node in &mut toggles {
-        if node.display != shown(!open) {
-            node.display = shown(!open);
-        }
-    }
+    pane.spawn(Node {
+        margin: UiRect::bottom(Val::Px(SEARCH_GAP_PX)),
+        ..default()
+    })
+    .with_children(search);
 }
 
 /// The pane's frame. Its search box is built once per opening so typing keeps

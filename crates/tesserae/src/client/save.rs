@@ -90,15 +90,21 @@ fn activate(
     event: On<Activate>,
     buttons: Query<&Action>,
     to_list: Query<(), With<ToList>>,
+    choices: Query<&super::menu::Choice>,
     mut relaunch: Option<ResMut<crate::launch::Switch>>,
     mut actions: MessageWriter<SaveAction>,
 ) {
+    let action = if let Ok(super::menu::Choice::SaveQuit) = choices.get(event.entity) {
+        Some(SaveAction::SaveQuit)
+    } else {
+        buttons.get(event.entity).ok().map(|action| action.0)
+    };
     let target = if to_list.contains(event.entity) {
         actions.write(SaveAction::SaveQuit);
         Some(crate::launch::Target::List)
-    } else if let Ok(action) = buttons.get(event.entity) {
-        actions.write(action.0);
-        if !matches!(action.0, SaveAction::SaveQuit) {
+    } else if let Some(action) = action {
+        actions.write(action);
+        if !matches!(action, SaveAction::SaveQuit) {
             return;
         }
         None
