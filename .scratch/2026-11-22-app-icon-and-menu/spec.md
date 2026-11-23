@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # App icon and menu: Tesserae in the Dock and the menu bar
 
