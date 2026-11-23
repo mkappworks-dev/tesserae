@@ -2,10 +2,9 @@
 //! behind it. Its choices apply as they are made and are saved when it closes.
 //!
 //! The panel is for the pointer; the keys in its prompt bar and the controller
-//! make the same changes, so nothing in it takes focus and Enter always builds.
+//! make the same changes, so nothing in it takes focus and Enter always aims.
 use super::frame::{self, Cap, Prompt};
 use super::inventory_window::look::{self, Flat, Flavour, Glyph};
-use super::theme;
 use super::{
     actions::{Action, Actions, Bindings, Labels},
     layout::{AXIS_NAMES, Kind, LayoutMode, LayoutPreferences, extent_m, metres, way_name},
@@ -13,7 +12,7 @@ use super::{
     pad::PadInput,
     profile::{Preferences, Store},
 };
-use crate::client::buttons;
+use super::{theme, tool_panel};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -22,10 +21,6 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::layout::MAX_LAYOUT_VOXELS;
 
-const SIDE_WIDTH: f32 = 300.0;
-const SIDE_INSET_PX: f32 = 24.0;
-const STATUS_WIDTH: f32 = 300.0;
-const STATUS_TOP_PX: f32 = 95.0;
 const SHAPE_PX: f32 = 63.0;
 const AXIS_TAG_PX: f32 = 22.0;
 const POINT_PX: f32 = 27.0;
@@ -69,8 +64,8 @@ enum Control {
     Preset(usize),
     /// Turns the active axis round.
     Reverse,
-    /// Back to play with the layout ready, as the Layout key does.
-    Build,
+    /// Back to aiming with the layout ready, as the Layout key does.
+    Aim,
     /// Out of the mode, as the clear key does.
     Exit,
 }
@@ -105,7 +100,8 @@ pub(super) fn plugin(app: &mut App) {
             (
                 toggle
                     .after(super::menu::toggle)
-                    .before(super::input::resolve),
+                    .before(super::input::resolve)
+                    .before(super::camera::grab_cursor),
                 (keys, render, update_info, persist).chain().after(toggle),
             ),
         );
@@ -125,10 +121,11 @@ type Blockers<'w> = (
     ),
 );
 
-/// The Layout key opens the menu, turning the mode on, and closes it again into
-/// play with the layout ready to place. Escape and the clear key leave the mode.
+/// The Layout key opens the panel full, turning the mode on, and shrinks it again
+/// into play with the layout ready to place. Escape leaves the mode from either,
+/// and the clear key from the full panel; in play [`super::layout`] answers it.
 pub(super) fn toggle(
-    actions: Res<Actions>,
+    mut actions: ResMut<Actions>,
     mut menu: ResMut<LayoutMenu>,
     mut mode: ResMut<LayoutMode>,
     preferences: Res<Preferences>,
@@ -161,9 +158,10 @@ pub(super) fn toggle(
     {
         return;
     }
-    let exit = menu.open
-        && (actions.cancel_requested() || (mode.on && actions.started(Action::ClearTool)));
+    let exit = (mode.on && actions.cancel_requested())
+        || (menu.open && mode.on && actions.started(Action::ClearTool));
     if exit {
+        actions.consume_cancel();
         mode.leave();
         close(&mut menu, &mut cursor);
         return;
@@ -227,7 +225,7 @@ fn apply(
                 layout.negative[axis] ^= true;
             }
         }
-        Control::Build | Control::Exit => {
+        Control::Aim | Control::Exit => {
             if control == Control::Exit {
                 mode.leave();
             }
@@ -269,7 +267,7 @@ fn activate(
 
 /// The keys and controller buttons the prompt bar names but cannot fire
 /// itself: shapes, axis and count, gap on the shoulders, and Enter or A to
-/// build. Letters fire their prompts through the frame.
+/// aim. Letters fire their prompts through the frame.
 fn keys(
     keys: Res<ButtonInput<KeyCode>>,
     pad: Option<Res<PadInput>>,
@@ -298,7 +296,7 @@ fn keys(
     let control = if let Some(at) = shape {
         Some(Control::Preset(at))
     } else if key(&[KeyCode::Enter, KeyCode::NumpadEnter]) || pad(GamepadButton::South) {
-        Some(Control::Build)
+        Some(Control::Aim)
     } else if pad(GamepadButton::LeftTrigger) || pad(GamepadButton::RightTrigger) {
         Some(Control::Gap(if pad(GamepadButton::RightTrigger) {
             1
@@ -378,16 +376,6 @@ fn capitalised(word: &str) -> String {
         .next()
         .map(|first| first.to_uppercase().chain(chars).collect())
         .unwrap_or_default()
-}
-
-pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, title: &str) {
-    parent
-        .spawn(Node {
-            margin: UiRect::bottom(Val::Px(12.0)),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|p| buttons::eyebrow(p, title));
 }
 
 /// A part of the panel under a rule, with an optional small label.
@@ -687,64 +675,6 @@ fn gap_row(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_si
     });
 }
 
-/// A box of label and value rows.
-pub(super) fn totals(
-    body: &mut ChildSpawnerCommands,
-    rows: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    body.spawn((
-        Node {
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-            border: UiRect::all(Val::Px(theme::RULE)),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BackgroundColor(theme::TOTALS),
-        BorderColor::all(theme::TOTALS_EDGE),
-    ))
-    .with_children(rows);
-}
-
-pub(super) fn total_row(parent: &mut ChildSpawnerCommands, term: impl Bundle, value: impl Bundle) {
-    parent
-        .spawn(Node {
-            justify_content: JustifyContent::SpaceBetween,
-            column_gap: Val::Px(12.0),
-            padding: UiRect::vertical(Val::Px(9.0)),
-            ..default()
-        })
-        .with_children(|row| {
-            row.spawn(term);
-            row.spawn(value);
-        });
-}
-
-/// A value with a quieter word after it, in one run of text.
-pub(super) fn value_with(value: impl Into<String>, after: impl Into<String>) -> impl Bundle {
-    (
-        Text::new(value),
-        theme::weighted(theme::TEXT_EYEBROW, theme::LABEL),
-        TextColor(theme::TOTALS_VALUE),
-        Pickable::IGNORE,
-        children![(
-            TextSpan::new(after),
-            theme::weighted(theme::ITEM_TEXT_EYEBROW, theme::LABEL),
-            TextColor(theme::muted()),
-        )],
-    )
-}
-
-pub(super) fn term(value: impl Into<String>) -> impl Bundle {
-    look::label(
-        value,
-        theme::TEXT_EYEBROW,
-        theme::REGULAR,
-        theme::TOTALS_TERM,
-    )
-}
-
 /// The size in metres and the total out of the cap, at the foot of the panel.
 fn total(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
     let extent = layout
@@ -824,149 +754,66 @@ fn prompts(kind: Kind) -> Vec<Prompt<Control>> {
         Prompt::new(Cap::Letter('P'), name)
             .act(Control::Kind(other))
             .pad(GamepadButton::North),
-        Prompt::new(Cap::Enter, "Build").act(Control::Build),
+        Prompt::new(Cap::Enter, "Aim").act(Control::Aim),
         Prompt::new(Cap::Esc, "Exit").act(Control::Exit),
     ]);
     prompts
 }
 
-/// The first key bound to `action`, as a cap: the card has no room for every
-/// alternative.
-fn card_cap(action: Action, bindings: &Bindings, labels: &Labels) -> String {
-    use super::actions::{Binding, Modifier, Trigger};
-    if labels.touch {
-        return bindings.label(action, labels);
-    }
-    match bindings.first(labels.device, action) {
-        Some(Binding {
-            trigger: Trigger::Key(KeyCode::Backspace),
-            modifier: Modifier::None,
-        }) => "⌫".to_owned(),
-        Some(binding) => super::settings::cap_text(labels.binding(binding)),
-        None => "Unbound".to_owned(),
-    }
-}
-
-/// In play with the menu shut: what is set, what the aim would do and the
-/// keys as caps. It has nothing to click: in play the mouse aims.
-fn status(
-    parent: &mut ChildSpawnerCommands,
+/// While aiming: what is set, what the aim would do and the keys as caps.
+fn compact(
+    body: &mut ChildSpawnerCommands,
     layout: &LayoutPreferences,
     voxel_size: f32,
     (bindings, labels): (&Bindings, &Labels),
 ) {
-    let extent = layout
-        .lengths
-        .map(|count| metres(extent_m(count, layout.gap, voxel_size)));
-    let (what, size) = match layout.kind {
+    tool_panel::header(body, "Quick layout", false);
+    let glyph = match shape_name(layout.lengths) {
+        "Line" if layout.kind == Kind::Directions => Glyph::Line,
+        "Plane" if layout.kind == Kind::Directions => Glyph::Plane,
+        _ => Glyph::Box,
+    };
+    let thumb = |thumb: &mut ChildSpawnerCommands| look::glyph(thumb, glyph, theme::INK);
+    match layout.kind {
         Kind::Directions => {
             let total = layout.total(layout.lengths);
-            (
-                format!(
+            let extent = layout
+                .lengths
+                .map(|count| metres(extent_m(count, layout.gap, voxel_size)));
+            let gap = if layout.gap > 0 {
+                format!(" · gap {}", layout.gap)
+            } else {
+                String::new()
+            };
+            tool_panel::selection(
+                body,
+                thumb,
+                tool_panel::title(format!(
                     "{} · {total} Voxel{}",
                     shape_name(layout.lengths),
                     if total == 1 { "" } else { "s" }
-                ),
-                Some(format!("{} m", extent.join(" × "))),
-            )
+                )),
+                tool_panel::sub(format!("{} m{gap}", extent.join(" × "))),
+            );
         }
-        Kind::Between => ("Point to point".to_owned(), None),
-    };
-    parent
-        .spawn((
-            Card,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(theme::SCREEN_PAD_X),
-                top: Val::Px(STATUS_TOP_PX),
-                max_width: Val::Px(STATUS_WIDTH),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(7.0),
-                padding: UiRect::all(Val::Px(14.0)),
-                border: UiRect::all(Val::Px(theme::FRAME)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
-                ..default()
-            },
-            BackgroundColor(theme::LAYOUT_SURFACE),
-            BorderColor::all(theme::GROUT),
-            theme::shadow(),
-            Pickable::IGNORE,
-        ))
-        .with_children(|card| {
-            card.spawn(theme::ring(theme::RADIUS_MENU));
-            card.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                ..default()
-            })
-            .with_children(|title| {
-                ui::icon(title, ui::IconKind::Layout, theme::LAYOUT_STATUS_INK, 18.0);
-                title.spawn(look::label(
-                    "Layout ready",
-                    theme::TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::LAYOUT_STATUS_INK,
-                ));
-            });
-            card.spawn(look::label(
-                what,
-                theme::TEXT_BODY,
-                theme::MEDIUM,
-                theme::INK,
-            ));
-            if let Some(size) = size {
-                card.spawn(look::label(
-                    size,
-                    theme::TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::muted(),
-                ));
-            }
-            for (part, colour) in [(Info::Size, theme::muted()), (Info::Body, theme::INK)] {
-                if part == Info::Size && layout.kind == Kind::Directions {
-                    continue;
-                }
-                card.spawn((
-                    part,
-                    look::paragraph(
-                        "",
-                        theme::TEXT_EYEBROW,
-                        theme::REGULAR,
-                        colour,
-                        theme::LINE_HEIGHT,
-                    ),
-                ));
-            }
-            card.spawn(Node {
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(14.0),
-                row_gap: Val::Px(6.0),
-                margin: UiRect::top(Val::Px(2.0)),
-                ..default()
-            })
-            .with_children(|keys| {
-                for (action, name) in [
-                    (Action::Layout, "Edit"),
-                    (Action::ClearTool, "Exit"),
-                    (Action::Place, "Place"),
-                ] {
-                    keys.spawn(Node {
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    })
-                    .with_children(|key| {
-                        frame::key_cap(key, &card_cap(action, bindings, labels), theme::muted());
-                        key.spawn(look::label(
-                            name,
-                            theme::TEXT_EYEBROW,
-                            theme::REGULAR,
-                            theme::muted(),
-                        ));
-                    });
-                }
-            });
-        });
+        Kind::Between => tool_panel::selection(
+            body,
+            thumb,
+            tool_panel::title("Point to point"),
+            (Info::Size, tool_panel::sub("")),
+        ),
+    }
+    tool_panel::outcome(body, ((), tool_panel::WHOLE_EDGE), Info::Body, 0.0);
+    let cap = |action| tool_panel::cap(action, bindings, labels);
+    tool_panel::foot(
+        body,
+        None::<Option<Control>>,
+        &[
+            (cap(Action::Layout), "Edit"),
+            (cap(Action::ReleaseCursor), "Exit"),
+            (cap(Action::Place), "Place"),
+        ],
+    );
 }
 
 /// The parts of the A, B, C line that change colour as corners are picked.
@@ -1073,7 +920,8 @@ fn render(
     };
     let rebound = bindings.is_changed() || labels.is_changed();
     let rebuild = want != menu.shown
-        || (want == Some(true) && (menu.dirty || preferences.is_changed()))
+        || (want.is_some() && preferences.is_changed())
+        || (want == Some(true) && menu.dirty)
         || (want == Some(false) && rebound);
     if !rebuild {
         return;
@@ -1094,111 +942,56 @@ fn render(
     let layout = &preferences.layout;
     let voxel_size = world.voxel_size;
     if !open {
-        commands
-            .spawn((
-                Panel,
-                Node {
-                    position_type: PositionType::Absolute,
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ))
-            .with_children(|wrapper| status(wrapper, layout, voxel_size, (&bindings, &labels)));
+        tool_panel::spawn(
+            &mut commands,
+            Panel,
+            Card,
+            None::<Vec<Prompt<Control>>>,
+            |body| compact(body, layout, voxel_size, (&bindings, &labels)),
+        );
         return;
     }
     let between = layout.kind == Kind::Between;
     let active = mode.active.min(2);
-    commands
-        .spawn((
-            Panel,
-            frame::Frame,
-            GlobalZIndex(20),
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
+    let cap = |action| tool_panel::cap(action, &bindings, &labels);
+    let caps = [
+        (cap(Action::Layout), "Aim"),
+        (cap(Action::ReleaseCursor), "Exit"),
+    ];
+    tool_panel::spawn(
+        &mut commands,
+        Panel,
+        (Card, ScrollArea, ScrollPosition(scroll)),
+        Some(prompts(layout.kind)),
+        |body| {
+            tool_panel::header(body, "Quick layout", true);
+            method(body, layout.kind);
+            if !menu.notice.is_empty() {
+                cap_note(body, &menu.notice);
+            }
+            if between {
+                points(body);
+            } else {
+                shapes(body, layout.lengths);
+                section(body, Some("Count"), |rows| {
+                    for axis in 0..3 {
+                        axis_row(rows, layout, axis, axis == active);
+                    }
+                });
+            }
+            gap_row(body, layout, voxel_size);
+            if between {
+                body.spawn(Node {
                     flex_grow: 1.0,
-                    min_height: Val::Px(0.0),
                     ..default()
-                },
-                Pickable::IGNORE,
-            ))
-            .with_children(|stage| {
-                stage
-                    .spawn((
-                        Card,
-                        ScrollArea,
-                        ScrollPosition(scroll),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            top: Val::Px(SIDE_INSET_PX),
-                            right: Val::Px(SIDE_INSET_PX),
-                            bottom: Val::Px(SIDE_INSET_PX),
-                            width: Val::Px(SIDE_WIDTH),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect::axes(Val::Px(20.0), Val::Px(22.0)),
-                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        BackgroundColor(theme::LAYOUT_SURFACE),
-                    ))
-                    .with_children(|body| {
-                        body.spawn((
-                            Node {
-                                margin: UiRect::bottom(Val::Px(14.0)),
-                                flex_shrink: 0.0,
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ))
-                        .with_child(look::label(
-                            "Quick layout",
-                            theme::TEXT_DIALOG_TITLE,
-                            theme::SEMIBOLD,
-                            theme::INK,
-                        ));
-                        method(body, layout.kind);
-                        if !menu.notice.is_empty() {
-                            cap_note(body, &menu.notice);
-                        }
-                        if between {
-                            points(body);
-                        } else {
-                            shapes(body, layout.lengths);
-                            section(body, Some("Count"), |rows| {
-                                for axis in 0..3 {
-                                    axis_row(rows, layout, axis, axis == active);
-                                }
-                            });
-                        }
-                        gap_row(body, layout, voxel_size);
-                        if !between {
-                            total(body, layout, voxel_size);
-                        }
-                    });
-            });
-            frame::prompt_bar(root, "", prompts(layout.kind));
-        });
-    // Only the pointer reaches the panel, so Tab never lands on it and Enter
-    // always builds.
-    commands.queue(|world: &mut World| {
-        let mut query = world.query_filtered::<Entity, (With<Control>, With<TabIndex>)>();
-        let found: Vec<Entity> = query.iter(world).collect();
-        for entity in found {
-            world.entity_mut(entity).remove::<TabIndex>();
-        }
-    });
+                });
+            } else {
+                total(body, layout, voxel_size);
+            }
+            tool_panel::foot(body, Some(Some(Control::Aim)), &caps);
+        },
+    );
+    tool_panel::pointer_only::<Control>(&mut commands);
 }
 
 #[cfg(test)]
@@ -1335,7 +1128,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_builds_and_escape_exits() {
+    fn enter_aims_and_escape_exits() {
         let mut app = app();
         open(&mut app);
         menu_key(&mut app, KeyCode::Enter);
@@ -1345,6 +1138,39 @@ mod tests {
         press(&mut app, KeyCode::Escape);
         assert!(!menu(&app).open && !app.world().resource::<LayoutMode>().on);
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
+    /// One frame of input through the pause menu's toggle, then this one, as play runs them.
+    fn press_in_play(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.world_mut().run_schedule(PreUpdate);
+        app.world_mut()
+            .run_system_once(super::super::menu::toggle)
+            .unwrap();
+        app.world_mut().run_system_once(toggle).unwrap();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(key);
+        keys.clear();
+        app.world_mut().run_schedule(PreUpdate);
+    }
+
+    #[test]
+    fn escape_leaves_the_mode_from_the_compact_panel_too_and_opens_no_menu() {
+        let mut app = app();
+        open(&mut app);
+        menu_key(&mut app, KeyCode::Enter);
+        assert!(app.world().resource::<LayoutMode>().on, "aiming");
+        press_in_play(&mut app, KeyCode::Escape);
+        assert!(!app.world().resource::<LayoutMode>().on);
+        assert!(!app.world().resource::<super::super::menu::Menu>().open);
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+        press_in_play(&mut app, KeyCode::Escape);
+        assert!(
+            app.world().resource::<super::super::menu::Menu>().open,
+            "out of the tool, Escape opens the Menu again"
+        );
     }
 
     #[test]
@@ -1476,10 +1302,10 @@ mod tests {
     }
 
     #[test]
-    fn build_goes_back_to_play_with_the_layout_still_ready() {
+    fn aim_goes_back_to_play_with_the_layout_still_ready() {
         let mut app = app();
         open(&mut app);
-        activate_control(&mut app, Control::Build);
+        activate_control(&mut app, Control::Aim);
         assert!(!menu(&app).open && app.world().resource::<LayoutMode>().on);
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
     }
@@ -1604,21 +1430,43 @@ mod tests {
             .collect()
     }
 
+    /// Where the panel's card stands: top, right and bottom.
+    fn docked(app: &mut App) -> (Val, Val, Val) {
+        let mut query = app.world_mut().query_filtered::<&Node, With<Card>>();
+        let node = query.single(app.world()).expect("one card");
+        (node.top, node.right, node.bottom)
+    }
+
     #[test]
-    fn the_status_card_names_its_keys_as_caps_under_the_layout_icon() {
+    fn aiming_the_panel_shrinks_in_place_to_the_selection_its_status_and_key_caps() {
         let mut app = render_app();
         open(&mut app);
+        controls(&mut app);
+        let (top, right, bottom) = docked(&mut app);
         press(&mut app, KeyCode::KeyL);
         controls(&mut app);
+        assert_eq!(
+            docked(&mut app),
+            (top, right, Val::Auto),
+            "same place, as tall as it holds"
+        );
+        assert_ne!(bottom, Val::Auto);
         let texts = texts(&mut app);
-        for word in ["L", "Edit", "⌫", "Exit", "RMB", "Place"] {
+        for word in [
+            "Quick layout",
+            "Line · 4 Voxels",
+            "L",
+            "Edit",
+            "Esc",
+            "Exit",
+            "RMB",
+            "Place",
+        ] {
             assert!(texts.iter().any(|t| t == word), "{word} in {texts:?}");
         }
         assert!(
-            !texts
-                .iter()
-                .any(|t| t.contains(" · ") && t.contains("exit")),
-            "no sentence of keys: {texts:?}"
+            !texts.iter().any(|t| t == "Layout ready"),
+            "no separate card: {texts:?}"
         );
         let icons: Vec<_> = app
             .world_mut()
@@ -1627,6 +1475,18 @@ mod tests {
             .map(|icon| icon.0)
             .collect();
         assert_eq!(icons, [ui::IconKind::Layout]);
+    }
+
+    #[test]
+    fn the_full_panel_ends_in_an_aim_button_and_its_keys() {
+        let mut app = render_app();
+        open(&mut app);
+        assert!(controls(&mut app).contains(&Control::Aim));
+        let texts = texts(&mut app);
+        for word in ["Quick layout", "Aim", "Enter", "L", "Esc", "Exit"] {
+            assert!(texts.iter().any(|t| t == word), "{word} in {texts:?}");
+        }
+        assert!(!texts.iter().any(|t| t == "Edit"), "{texts:?}");
     }
 
     #[test]
@@ -1646,7 +1506,7 @@ mod tests {
         assert_eq!(overflow, OverflowAxis::Scroll);
         assert_eq!(
             bottom,
-            Val::Px(SIDE_INSET_PX),
+            Val::Px(tool_panel::INSET_PX),
             "pinned top and bottom, so never taller than the screen"
         );
         app.world_mut()
@@ -1739,7 +1599,7 @@ mod tests {
             Control::Kind(Kind::Between),
             Control::Preset(0),
             Control::Gap(1),
-            Control::Build,
+            Control::Aim,
             Control::Exit,
             Control::Reverse,
             Control::GapKey,
@@ -1761,7 +1621,7 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_bar_names_every_key_and_enter_builds() {
+    fn the_prompt_bar_names_every_key_and_enter_aims() {
         let mut app = render_app();
         open(&mut app);
         controls(&mut app);
@@ -1773,7 +1633,7 @@ mod tests {
             ("R", "Reverse"),
             ("G", "Gap"),
             ("P", "Point to point"),
-            ("Enter", "Build"),
+            ("Enter", "Aim"),
             ("Esc", "Exit"),
         ]
         .map(|(cap, label)| (cap.to_owned(), label.to_owned()))

@@ -77,6 +77,7 @@ mod structure_menu;
 mod theme;
 mod tile_preview;
 mod tool;
+mod tool_panel;
 mod touch;
 mod underwater;
 mod use_prompt;

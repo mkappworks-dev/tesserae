@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::Button;
 
 use crate::client::cinematic::{self as cine, Kind, Look};
-use crate::client::menu_ui::{self as ui, IconKind};
+use crate::client::menu_ui::{self as ui};
 use crate::client::theme;
 
 pub(in crate::client) fn plugin(app: &mut App) {
@@ -87,10 +87,6 @@ pub(in crate::client) const ROOMY: Size = Size {
     height: theme::CONTROL_HEIGHT,
     ..COMPACT
 };
-pub(in crate::client) const WIDE: Size = Size {
-    text: theme::TEXT_SMALL,
-    ..ROOMY
-};
 
 /// A button in the approved look, painted by [`cine`] like every other.
 pub(in crate::client) fn button(
@@ -146,7 +142,6 @@ pub(in crate::client) enum Flavour {
     Preset,
     /// A stepper's − or +.
     Step,
-    Close,
     /// One of the Layout methods.
     Method,
     /// A quick shape.
@@ -174,7 +169,6 @@ fn flat_colours(flat: Flat) -> (Color, Color, Color) {
         (Flavour::Preset, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
         (Flavour::Preset, true) => (theme::CHIP, theme::CHIP_ON, theme::PRESET_ON_INK),
         (Flavour::Step, _) => (none, none, theme::STEPPER_INK),
-        (Flavour::Close, _) => (none, theme::CLOSE_EDGE, theme::CLOSE_INK),
         (Flavour::Method, false) => (none, none, theme::METHOD_INK),
         (Flavour::Method, true) => (
             theme::SEGMENT_ON,
@@ -330,25 +324,6 @@ pub(in crate::client) fn key_cap(
             marker,
             label(key, theme::TEXT_KEY, theme::SEMIBOLD, theme::KEY_CHIP_INK),
         ));
-}
-
-/// The 40 px close cross in a window's header.
-pub(in crate::client) fn close(parent: &mut ChildSpawnerCommands, act: impl Bundle) -> Entity {
-    flat(
-        parent,
-        act,
-        Flat {
-            flavour: Flavour::Close,
-            selected: false,
-        },
-        Node {
-            width: Val::Px(theme::CLOSE_SIZE),
-            height: Val::Px(theme::CLOSE_SIZE),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-            ..default()
-        },
-        |b, ink| ui::icon(b, IconKind::Close, ink, theme::ICON_SIZE),
-    )
 }
 
 /// A stepper's measurements: the Catalogue's count is smaller than the Layout

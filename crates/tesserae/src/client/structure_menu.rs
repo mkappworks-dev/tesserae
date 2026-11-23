@@ -1,63 +1,52 @@
-//! The place Tool's Template list, docked over the live game so the ghost
-//! stays drawn behind it, and its HUD card in play.
+//! The place Tool's panel, docked right while the Tool is in hand: full over
+//! the live game to pick a Template, so the ghost stays drawn behind it, and
+//! compact in the same place while aiming.
 //!
-//! The list opens on the Server's answer to Use, so Survival hears the same
-//! refusal any Tool's Use gives. Its Templates are the World's own, from the
-//! Catalogue; none is named here.
+//! The panel opens full on the Server's answer to Use, so Survival hears the
+//! same refusal any Tool's Use gives. Its Templates are the World's own, from
+//! the Catalogue; none is named here.
 use bevy::ecs::system::SystemParam;
-use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::actions::{Action, Actions, Bindings, Labels};
 use super::camera::FlyCamera;
-use super::cinematic as cine;
 use super::edit::{Catalogue, Hotbar};
+use super::frame::{self, Cap, Prompt};
 use super::inventory_window::look::{self, Flat, Flavour};
-use super::layout_menu::{eyebrow, term, total_row, totals, value_with};
-use super::menu_ui::IconKind;
 use super::menu_ui::grouped;
-use super::structure::{Ghost, Outcome, PlaceTool, Tint, holding_place, turned_size_m};
-use super::theme;
+use super::pad::PadInput;
+use super::structure::{Ghost, Outcome, PlaceTool, holding_place, turned_size_m};
+use super::{theme, tool_panel};
 use crate::content::ContentCatalogue;
 use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseWith};
 use crate::session::SessionApp;
-use crate::world::WorldSettings;
 use tesserae_core::template::Turn;
 
-const CARD_WIDTH: f32 = 360.0;
-const PANEL_TOP_PX: f32 = 28.0;
-const PANEL_BOTTOM_PX: f32 = 22.0;
-const PAD_X: f32 = 20.0;
-const HUD_WIDTH: f32 = 270.0;
-const HUD_TOP_PX: f32 = 150.0;
-const SWATCH_PX: f32 = 12.0;
+const ROW_PX: f32 = 48.0;
+const ROW_GAP_PX: f32 = 4.0;
+const LIST_MAX_PX: f32 = 264.0;
 const THUMB_PX: f32 = 40.0;
+const COMPACT_THUMB_PX: f32 = 44.0;
 const THUMB_BACKGROUND: Color = Color::srgb_u8(0x14, 0x14, 0x18);
-const ICON_PX: f32 = 18.0;
-/// The prototype's outcome box: its edge and fill for each tone.
-const QUIET_EDGE: Color = Color::srgb_u8(0x5c, 0x5c, 0x65);
-const WHOLE_EDGE: Color = Color::srgb_u8(0x6c, 0x8f, 0x6c);
-const WAIT_EDGE: Color = Color::srgb_u8(0xb0, 0x9a, 0x5a);
-const WAIT_FILL: Color = Color::srgb_u8(0x28, 0x23, 0x0f);
-const REFUSED_EDGE: Color = Color::srgb_u8(0xb0, 0x5a, 0x5a);
-const REFUSED_FILL: Color = Color::srgb_u8(0x2a, 0x17, 0x17);
-const OUTCOME_INK: Color = Color::srgb_u8(0xd9, 0xdd, 0xd2);
+const TURN_STEP_PX: f32 = 30.0;
 
 #[derive(Resource, Default)]
 pub(super) struct StructureList {
     pub(super) open: bool,
     dirty: bool,
-    /// What is up now: the list, the HUD card, or nothing.
+    /// What is up now: the full panel, the compact one, or nothing.
     shown: Option<bool>,
-    /// The Structures key asked to use the place Tool, so its answer opens the list with the
+    /// The Structures key asked to use the place Tool, so its answer opens the panel with the
     /// Tool in hand whatever was held.
     asked: bool,
+    /// A key stepped the choice, so the list scrolls to show it.
+    reveal: bool,
 }
 
 impl StructureList {
-    /// Open, for a capture of the list.
+    /// Open, for a capture of the panel.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub(super) fn show(&mut self) {
         self.open = true;
@@ -70,6 +59,9 @@ impl StructureList {
 pub(super) struct Docked<'w> {
     pub(super) layout: Option<Res<'w, super::layout_menu::LayoutMenu>>,
     pub(super) list: Option<Res<'w, StructureList>>,
+    mode: Option<Res<'w, super::layout::LayoutMode>>,
+    hotbar: Option<Res<'w, Hotbar>>,
+    catalogue: Option<Res<'w, Catalogue>>,
 }
 
 impl Docked<'_> {
@@ -77,21 +69,35 @@ impl Docked<'_> {
         self.layout.as_ref().is_some_and(|menu| menu.open)
             || self.list.as_ref().is_some_and(|list| list.open)
     }
+
+    /// Quick layout or the place Tool is in hand, so its panel shows, full or compact, and
+    /// Escape leaves it rather than opening the Menu.
+    pub(super) fn in_hand(&self) -> bool {
+        self.open()
+            || self.mode.as_ref().is_some_and(|mode| mode.on)
+            || self
+                .hotbar
+                .as_ref()
+                .zip(self.catalogue.as_ref())
+                .is_some_and(|(hotbar, catalogue)| holding_place(hotbar, &catalogue.0))
+    }
 }
 
 #[derive(Component)]
 struct Panel;
 
+/// The Template list, which scrolls inside the full panel.
 #[derive(Component)]
 struct Card;
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
+#[require(frame::PointerOnly = frame::PointerOnly)]
 enum Control {
     Pick(usize),
-    Turn,
-    Close,
-    PlaceHere,
-    PutAway,
+    /// A quarter turn: right for 1, left for -1.
+    Turn(i32),
+    /// Back to aiming with the chosen Template, as the Structures key does.
+    Aim,
 }
 
 /// Each Template's thumbnail at each quarter turn, by its place in the Catalogue.
@@ -106,7 +112,7 @@ impl Thumbs {
     }
 }
 
-/// The placement card's thumbnail, of the chosen Template as it is turned.
+/// The compact panel's thumbnail, of the chosen Template as it is turned.
 #[derive(Component)]
 struct Thumb;
 
@@ -116,10 +122,9 @@ enum Info {
     Title,
     Facing,
     Size,
-    Count(usize),
     Outcome,
-    Key(Action),
-    PlaceKey,
+    Extent,
+    Voxels,
 }
 
 /// The outcome line's box, whose colours follow its tone.
@@ -135,77 +140,14 @@ pub(super) fn plugin(app: &mut App) {
             (
                 toggle
                     .after(super::menu::toggle)
-                    .before(super::input::resolve),
-                (make_thumbs, open_on_use, render, update_info)
+                    .before(super::input::resolve)
+                    .before(super::camera::grab_cursor),
+                (make_thumbs, open_on_use, keys, render, update_info)
                     .chain()
                     .after(toggle)
                     .after(super::structure::track),
             ),
         );
-}
-
-/// The Structures key asks to use the place Tool from play with another hand, as
-/// the Layout key opens its menu; the Server's answer opens the list. With the
-/// Tool in hand it puts it away. With the list open it closes it into play, the
-/// clear key closes it and puts the Tool away, and Escape closes it with the
-/// cursor free, as it does the Layout menu. Putting the Tool down closes it into
-/// play.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn toggle(
-    actions: Res<Actions>,
-    mut list: ResMut<StructureList>,
-    (mut hotbar, catalogue): (ResMut<Hotbar>, Res<Catalogue>),
-    (menu, settings, layout, inventory, map): Blockers,
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
-    mut intents: MessageWriter<UseIntent>,
-    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
-) {
-    let key = actions.started(Action::Structures);
-    // With the place Tool in hand and no preview pinned (a pinned one takes the key first), the
-    // key puts the Tool away, as the clear key does.
-    if !list.open && key && holding_place(&hotbar, &catalogue.0) {
-        hotbar.outside = None;
-        return;
-    }
-    if !list.open {
-        let blocked = menu.open
-            || settings.is_some_and(|s| s.open)
-            || layout.is_some_and(|m| m.open)
-            || inventory.is_some_and(|w| w.open)
-            || map.is_some_and(|w| w.open);
-        let place = catalogue.0.tools.iter().find(|t| t.kind == ToolKind::Place);
-        if key
-            && !blocked
-            && let (Some(place), Some(camera)) = (place, camera.iter().next())
-        {
-            intents.write(UseIntent {
-                with: UseWith::Tool(place.id),
-                origin: camera.translation(),
-                direction: *camera.forward(),
-                expected: None,
-            });
-            list.asked = true;
-        }
-        return;
-    }
-    if !holding_place(&hotbar, &catalogue.0) || key {
-        close(&mut list, &mut cursor, true);
-    } else if actions.started(Action::ClearTool) {
-        hotbar.outside = None;
-        close(&mut list, &mut cursor, true);
-    } else if actions.cancel_requested() {
-        close(&mut list, &mut cursor, false);
-    }
-}
-
-fn close(list: &mut StructureList, cursor: &mut CursorOptions, grab: bool) {
-    list.open = false;
-    cursor.grab_mode = if grab {
-        CursorGrabMode::Locked
-    } else {
-        CursorGrabMode::None
-    };
-    cursor.visible = !grab;
 }
 
 type Blockers<'w> = (
@@ -214,16 +156,103 @@ type Blockers<'w> = (
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
     Option<Res<'w, super::map_window::MapWindow>>,
+    Option<Res<'w, super::layout::LayoutMode>>,
 );
 
-/// The Server allowed the place Tool's Use: the list opens, unless another
+fn blocked((menu, settings, layout, inventory, map, mode): &Blockers) -> bool {
+    menu.open
+        || settings.as_ref().is_some_and(|s| s.open)
+        || layout.as_ref().is_some_and(|m| m.open)
+        || inventory.as_ref().is_some_and(|w| w.open)
+        || map.as_ref().is_some_and(|w| w.open)
+        || mode.as_ref().is_some_and(|m| m.on)
+}
+
+/// The Structures key asks to use the place Tool, which opens the panel full with
+/// it in hand, and with a Template chosen it shrinks the panel into play again.
+/// Escape or the clear key cancels a pinned preview first, then puts the Tool
+/// away from either. A build opens the panel full to pick the next Template.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn toggle(
+    mut actions: ResMut<Actions>,
+    mut list: ResMut<StructureList>,
+    mut tool: ResMut<PlaceTool>,
+    (mut hotbar, catalogue): (ResMut<Hotbar>, Res<Catalogue>),
+    blockers: Blockers,
+    camera: Query<&GlobalTransform, With<FlyCamera>>,
+    mut intents: MessageWriter<UseIntent>,
+    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    let holding = holding_place(&hotbar, &catalogue.0);
+    if !holding && tool.reopen {
+        tool.reopen = false;
+    }
+    if list.open && !holding {
+        close(&mut list, &mut cursor);
+        return;
+    }
+    if !list.open && blocked(&blockers) {
+        return;
+    }
+    if holding && (actions.cancel_requested() || actions.started(Action::ClearTool)) {
+        actions.consume_cancel();
+        actions.cancel(Action::ClearTool);
+        if tool.pinned.is_some() {
+            tool.pinned = None;
+        } else {
+            hotbar.outside = None;
+            if list.open {
+                close(&mut list, &mut cursor);
+            }
+        }
+        return;
+    }
+    let key = actions.started(Action::Structures);
+    if list.open {
+        if key && tool.chosen(&catalogue.0).is_some() {
+            close(&mut list, &mut cursor);
+        }
+        return;
+    }
+    if holding && tool.reopen {
+        tool.reopen = false;
+        open(&mut list, &mut cursor);
+        return;
+    }
+    let place = catalogue.0.tools.iter().find(|t| t.kind == ToolKind::Place);
+    if key && let (Some(place), Some(camera)) = (place, camera.iter().next()) {
+        intents.write(UseIntent {
+            with: UseWith::Tool(place.id),
+            origin: camera.translation(),
+            direction: *camera.forward(),
+            expected: None,
+        });
+        list.asked = true;
+    }
+}
+
+fn open(list: &mut StructureList, cursor: &mut CursorOptions) {
+    list.open = true;
+    list.dirty = true;
+    list.reveal = true;
+    cursor.grab_mode = CursorGrabMode::None;
+    cursor.visible = true;
+}
+
+fn close(list: &mut StructureList, cursor: &mut CursorOptions) {
+    list.open = false;
+    cursor.grab_mode = CursorGrabMode::Locked;
+    cursor.visible = false;
+}
+
+/// The Server allowed the place Tool's Use: the panel opens full, unless another
 /// window opened while the answer was on its way. Asked by the Structures key,
 /// it takes the place Tool into hand.
 fn open_on_use(
     mut outcomes: MessageReader<UseOutcome>,
     mut list: ResMut<StructureList>,
     (mut hotbar, catalogue): (ResMut<Hotbar>, Res<Catalogue>),
-    (menu, settings, layout, inventory, map): Blockers,
+    blockers: Blockers,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let mut answered = false;
@@ -240,151 +269,114 @@ fn open_on_use(
     if !allowed
         || list.open
         || !(by_key || holding_place(&hotbar, &catalogue.0))
-        || menu.open
-        || settings.is_some_and(|s| s.open)
-        || layout.is_some_and(|m| m.open)
-        || inventory.is_some_and(|w| w.open)
-        || map.is_some_and(|w| w.open)
+        || blocked(&blockers)
     {
         return;
     }
     if by_key && let Some(place) = place {
         hotbar.outside = Some(super::edit::Holding::Tool(place.id));
     }
-    list.open = true;
-    list.dirty = true;
-    cursor.grab_mode = CursorGrabMode::None;
-    cursor.visible = true;
+    open(&mut list, &mut cursor);
 }
 
-#[allow(clippy::too_many_arguments)]
+/// One change from a click, a prompt or a key alike.
+fn apply(
+    control: Control,
+    list: &mut StructureList,
+    tool: &mut PlaceTool,
+    catalogue: &ContentCatalogue,
+    cursor: &mut Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    match control {
+        Control::Pick(at) => {
+            if let Some(template) = catalogue.templates.get(at) {
+                tool.choose(&template.name);
+            }
+        }
+        Control::Turn(by) => {
+            tool.turn = Turn::new(tool.turn.quarters() + if by > 0 { 1 } else { 3 });
+        }
+        Control::Aim => {
+            if tool.chosen(catalogue).is_some() {
+                for mut cursor in cursor {
+                    close(list, &mut cursor);
+                }
+            }
+        }
+    }
+    list.dirty = true;
+}
+
 fn activate(
     event: On<Activate>,
     controls: Query<&Control>,
     mut list: ResMut<StructureList>,
     mut tool: ResMut<PlaceTool>,
-    (catalogue, mut hotbar): (Res<Catalogue>, ResMut<Hotbar>),
-    camera: Query<&GlobalTransform, With<FlyCamera>>,
-    (preview, time): (Res<super::structure::Preview>, Res<Time>),
+    catalogue: Res<Catalogue>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     let Ok(&control) = controls.get(event.entity) else {
         return;
     };
+    if list.open {
+        apply(control, &mut list, &mut tool, &catalogue.0, &mut cursor);
+    }
+}
+
+/// The keys and controller buttons the prompt bar names but cannot fire
+/// itself: up and down through the Templates, Enter or A to aim.
+fn keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    pad: Option<Res<PadInput>>,
+    mut list: ResMut<StructureList>,
+    mut tool: ResMut<PlaceTool>,
+    catalogue: Res<Catalogue>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
     if !list.open {
         return;
     }
-    let mut shut = || {
-        for mut cursor in &mut cursor {
-            close(&mut list, &mut cursor, true);
-        }
+    let pad = |button| {
+        pad.as_ref()
+            .is_some_and(|p| p.navigation.just_pressed(button))
     };
-    match control {
-        // Picking closes the list: the ghost follows the aim, ready to pin.
-        Control::Pick(at) => {
-            if let Some(template) = catalogue.0.templates.get(at) {
-                tool.choose(&template.name);
-            }
-            shut();
-        }
-        Control::Turn => tool.turn = tool.turn.next(),
-        Control::Close => shut(),
-        // As Place does: the first step pins the preview, to walk round before building.
-        Control::PlaceHere => {
-            if let Some(camera) = camera.iter().next() {
-                super::structure::pin(
-                    &mut tool,
-                    &preview,
-                    &catalogue.0,
-                    camera,
-                    time.elapsed_secs_f64(),
-                );
-            }
-            shut();
-        }
-        Control::PutAway => {
-            hotbar.outside = None;
-            shut();
-        }
+    let by = i32::from(keys.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown))
+        - i32::from(keys.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp));
+    if by != 0 {
+        tool.step(&catalogue.0, by);
+        list.reveal = true;
+        list.dirty = true;
+    } else if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter])
+        || pad(GamepadButton::South)
+    {
+        apply(
+            Control::Aim,
+            &mut list,
+            &mut tool,
+            &catalogue.0,
+            &mut cursor,
+        );
     }
-    list.dirty = true;
 }
 
-/// The first binding only: a card has no room for every alternative.
-fn key(bindings: &Bindings, labels: &Labels, action: Action) -> String {
-    let all = bindings.label(action, labels);
-    all.split(" / ").next().unwrap_or_default().to_owned()
+fn size_text(size: [f32; 3], decimals: usize) -> String {
+    let [x, y, z] = size.map(|n| format!("{n:.decimals$}"));
+    format!("{x} × {y} × {z} m")
 }
 
-fn small(value: impl Into<String>, color: Color) -> impl Bundle {
-    look::paragraph(
-        value,
-        theme::TEXT_EYEBROW,
-        theme::REGULAR,
-        color,
-        theme::LINE_HEIGHT,
-    )
-}
-
-/// The band at the top: what the tool is, its name and the close cross.
-fn header(card: &mut ChildSpawnerCommands) {
-    card.spawn((
-        Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
-            padding: UiRect::axes(Val::Px(PAD_X), Val::Px(18.0)),
-            border: UiRect::bottom(Val::Px(theme::RULE)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BackgroundColor(theme::sheet_header()),
-        BorderColor::all(theme::LAYOUT_RULE),
-    ))
-    .with_children(|header| {
-        header
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(5.0),
-                ..default()
-            })
-            .with_children(|title| {
-                title.spawn((
-                    look::label(
-                        "PLACE TOOL",
-                        theme::TEXT_KEY,
-                        theme::LABEL,
-                        theme::item_eyebrow(),
-                    ),
-                    bevy::text::LetterSpacing::Px(theme::TOOL_TRACKING),
-                ));
-                title.spawn(look::label(
-                    "Structures",
-                    theme::ITEM_TEXT_TITLE,
-                    theme::MEDIUM,
-                    theme::INK,
-                ));
-            });
-        look::close(header, Control::Close);
-    });
-}
-
-fn size_text(size: [f32; 3]) -> String {
-    format!("{:.1} × {:.1} × {:.1} m", size[0], size[1], size[2])
-}
-
-/// A thumbnail of a Template, as the list's rows and the placement card show it.
-fn thumb(image: Handle<Image>) -> impl Bundle {
+/// A thumbnail of a Template, as the list's rows and the compact panel show it.
+fn thumb(image: Handle<Image>, px: f32) -> impl Bundle {
     (
         ImageNode::new(image),
         Node {
-            width: Val::Px(THUMB_PX),
-            height: Val::Px(THUMB_PX),
+            width: Val::Px(px),
+            height: Val::Px(px),
             flex_shrink: 0.0,
             border_radius: BorderRadius::all(Val::Px(4.0)),
             ..default()
         },
         BackgroundColor(THUMB_BACKGROUND),
+        Pickable::IGNORE,
     )
 }
 
@@ -423,22 +415,53 @@ fn make_thumbs(
         .collect();
 }
 
+/// The World's Templates, one row each, in a list that scrolls on its own.
 fn picks(
     body: &mut ChildSpawnerCommands,
     catalogue: &ContentCatalogue,
     chosen: Option<&str>,
-    thumbs: &Thumbs,
+    (thumbs, scroll): (&Thumbs, Vec2),
 ) {
-    body.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        row_gap: Val::Px(7.0),
-        margin: UiRect::bottom(Val::Px(20.0)),
-        flex_shrink: 0.0,
-        ..default()
-    })
+    let game = catalogue
+        .game
+        .as_deref()
+        .map(|game| format!(" · {}", super::menu_ui::declared_title(game)))
+        .unwrap_or_default();
+    body.spawn((
+        Node {
+            margin: UiRect::bottom(Val::Px(6.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        look::label(
+            format!("Template{game}"),
+            theme::TEXT_EYEBROW,
+            theme::REGULAR,
+            theme::muted(),
+        ),
+    ));
+    body.spawn((
+        Card,
+        ScrollArea,
+        ScrollPosition(scroll),
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(ROW_GAP_PX),
+            max_height: Val::Px(LIST_MAX_PX),
+            margin: UiRect::bottom(Val::Px(14.0)),
+            overflow: Overflow::scroll_y(),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
     .with_children(|list| {
         if catalogue.templates.is_empty() {
-            list.spawn(small("This World declares no Templates.", theme::muted()));
+            list.spawn(look::label(
+                "This World declares no Templates.",
+                theme::TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::muted(),
+            ));
         }
         for (at, template) in catalogue.templates.iter().enumerate() {
             look::flat(
@@ -449,8 +472,14 @@ fn picks(
                     selected: chosen == Some(template.name.as_str()),
                 },
                 Node {
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
-                    border_radius: BorderRadius::all(Val::Px(5.0)),
+                    min_height: Val::Px(ROW_PX),
+                    padding: UiRect {
+                        left: Val::Px(4.0),
+                        right: Val::Px(8.0),
+                        top: Val::Px(4.0),
+                        bottom: Val::Px(4.0),
+                    },
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
                 |pick, _| {
@@ -462,29 +491,23 @@ fn picks(
                         ..default()
                     })
                     .with_children(|row| {
-                        row.spawn(thumb(thumbs.of(at, Turn::NONE)));
+                        row.spawn(thumb(thumbs.of(at, Turn::NONE), THUMB_PX));
                         row.spawn(Node {
                             flex_direction: FlexDirection::Column,
                             align_items: AlignItems::FlexStart,
-                            row_gap: Val::Px(3.0),
+                            row_gap: Val::Px(2.0),
                             ..default()
                         })
                         .with_children(|lines| {
                             lines.spawn(look::label(
                                 super::menu_ui::declared_title(&template.name),
                                 theme::TEXT_SMALL,
-                                theme::MEDIUM,
+                                theme::SEMIBOLD,
                                 theme::INK,
                             ));
                             lines.spawn(look::label(
-                                size_text(template.size_m),
-                                theme::TEXT_EYEBROW,
-                                theme::REGULAR,
-                                theme::PRESET_INK,
-                            ));
-                            lines.spawn(look::label(
-                                template.name.clone(),
-                                theme::TEXT_EYEBROW,
+                                size_text(template.size_m, 0),
+                                theme::TEXT_KEY,
                                 theme::REGULAR,
                                 theme::muted(),
                             ));
@@ -496,329 +519,157 @@ fn picks(
     });
 }
 
-fn turn_row(body: &mut ChildSpawnerCommands, turn_key: &str) {
-    body.spawn(Node {
-        justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(12.0),
-        margin: UiRect::bottom(Val::Px(20.0)),
-        flex_shrink: 0.0,
-        ..default()
-    })
+/// The facing, with a quarter turn either way.
+fn turn_row(body: &mut ChildSpawnerCommands) {
+    body.spawn((
+        Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(14.0)),
+            border: UiRect::vertical(Val::Px(theme::RULE)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BorderColor::all(theme::GAP_RULE),
+    ))
     .with_children(|row| {
-        look::flat_text(
-            row,
-            format!("Turn · {turn_key}"),
-            Control::Turn,
-            Flat {
-                flavour: Flavour::Pick,
-                selected: false,
-            },
+        row.spawn(Node {
+            width: Val::Px(44.0),
+            ..default()
+        })
+        .with_child(look::label(
+            "Turn",
+            theme::TEXT_CAPTION,
+            theme::SEMIBOLD,
+            theme::AXIS_TAG_INK,
+        ));
+        row.spawn((
             Node {
-                min_height: Val::Px(36.0),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-                border_radius: BorderRadius::all(Val::Px(5.0)),
+                flex_grow: 1.0,
                 ..default()
             },
-            (theme::TEXT_EYEBROW + 1.0, theme::REGULAR),
-        );
-        row.spawn((
             Text::new("Facing "),
-            theme::weighted(theme::TEXT_EYEBROW + 1.0, theme::REGULAR),
-            TextColor(theme::PRESET_INK),
+            theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
+            TextColor(theme::muted()),
             Pickable::IGNORE,
             children![(
                 Info::Facing,
                 TextSpan::new(""),
-                theme::weighted(theme::TEXT_EYEBROW + 1.0, theme::STRONG),
-                TextColor(theme::INK),
+                theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
+                TextColor(theme::muted()),
+            )],
+        ));
+        for (by, glyph) in [(-1, "↺"), (1, "↻")] {
+            look::flat_text(
+                row,
+                glyph,
+                Control::Turn(by),
+                Flat {
+                    flavour: Flavour::Preset,
+                    selected: false,
+                },
+                Node {
+                    width: Val::Px(TURN_STEP_PX),
+                    height: Val::Px(TURN_STEP_PX),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                    ..default()
+                },
+                (theme::TEXT_SMALL, theme::REGULAR),
+            );
+        }
+    });
+}
+
+/// The size and the Voxel count, at the foot of the full panel.
+fn total(body: &mut ChildSpawnerCommands, chosen: bool) {
+    body.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        margin: UiRect::top(Val::Auto),
+        padding: UiRect::top(Val::Px(14.0)),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|row| {
+        if !chosen {
+            row.spawn(look::label(
+                "Nothing selected",
+                theme::TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::TOTALS_TERM,
+            ));
+            return;
+        }
+        row.spawn((
+            Info::Extent,
+            look::label("", theme::TEXT_EYEBROW, theme::REGULAR, theme::TOTALS_TERM),
+        ));
+        row.spawn((
+            Info::Voxels,
+            Text::new(""),
+            theme::figures(theme::TEXT_HEADING, theme::SEMIBOLD),
+            TextColor(theme::INK),
+            Pickable::IGNORE,
+            children![(
+                TextSpan::new(" Voxels"),
+                theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
+                TextColor(theme::muted()),
             )],
         ));
     });
 }
 
-/// One row per tint: its colour, what it means and how many Voxels.
-fn legend(parent: &mut ChildSpawnerCommands, gap: f32, margin: f32) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(gap),
-            margin: UiRect::bottom(Val::Px(margin)),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|keys| {
-            for (slot, tint) in Tint::ALL.into_iter().enumerate() {
-                keys.spawn(Node {
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        Node {
-                            width: Val::Px(SWATCH_PX),
-                            height: Val::Px(SWATCH_PX),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(2.0)),
-                            margin: UiRect::right(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(tint.color().with_alpha(1.0)),
-                        BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.53)),
-                    ));
-                    row.spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            ..default()
-                        },
-                        look::label(
-                            tint.label(),
-                            theme::TEXT_EYEBROW,
-                            theme::REGULAR,
-                            theme::PRESET_INK,
-                        ),
-                    ));
-                    row.spawn((
-                        Info::Count(slot),
-                        look::figures("0", theme::TEXT_EYEBROW, theme::MEDIUM, theme::INK),
-                    ));
-                });
-            }
-        });
-}
-
-fn outcome_box(parent: &mut ChildSpawnerCommands, margin: f32) {
-    parent
-        .spawn((
-            OutcomeBox,
-            Node {
-                padding: UiRect::axes(Val::Px(11.0), Val::Px(9.0)),
-                margin: UiRect::bottom(Val::Px(margin)),
-                border: UiRect::all(Val::Px(theme::RULE)),
-                border_radius: BorderRadius::all(Val::Px(5.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            BorderColor::all(QUIET_EDGE),
-        ))
-        .with_child((
-            Info::Outcome,
-            look::paragraph(
-                "",
-                theme::TEXT_EYEBROW + 1.0,
-                theme::REGULAR,
-                OUTCOME_INK,
-                theme::LINE_HEIGHT,
-            ),
-        ));
-}
-
-fn footer(card: &mut ChildSpawnerCommands, hint: String) {
-    card.spawn((
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            padding: UiRect::axes(Val::Px(PAD_X), Val::Px(14.0)),
-            border: UiRect::top(Val::Px(theme::RULE)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BorderColor::all(theme::LAYOUT_RULE),
-    ))
-    .with_children(|foot| {
-        foot.spawn(look::paragraph(
-            hint,
-            theme::ITEM_TEXT_EYEBROW,
-            theme::REGULAR,
-            theme::muted(),
-            theme::LINE_HEIGHT,
-        ));
-        look::button(
-            foot,
-            "Place here",
-            Control::PlaceHere,
-            cine::Kind::Primary,
-            look::WIDE,
-        );
-        look::button(
-            foot,
-            "Put the Tool away",
-            Control::PutAway,
-            cine::Kind::Ghost,
-            look::WIDE,
-        );
-    });
-}
-
-/// In play with the list shut: what is chosen, what the aim would do and the
-/// keys.
-fn hud(parent: &mut ChildSpawnerCommands) {
-    parent
-        .spawn((
-            Card,
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(theme::SCREEN_PAD_X),
-                top: Val::Px(HUD_TOP_PX),
-                width: Val::Px(HUD_WIDTH),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(7.0),
-                padding: UiRect::all(Val::Px(14.0)),
-                border: UiRect::all(Val::Px(theme::FRAME)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
-                ..default()
-            },
-            BackgroundColor(theme::LAYOUT_SURFACE),
-            BorderColor::all(theme::GROUT),
-            theme::shadow(),
-            Pickable::IGNORE,
-        ))
-        .with_children(|card| {
-            card.spawn(theme::ring(theme::RADIUS_MENU));
-            card.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                ..default()
-            })
-            .with_children(|line| {
-                super::menu_ui::icon(line, IconKind::Layout, theme::LAYOUT_STATUS_INK, ICON_PX);
-                line.spawn(look::label(
-                    "Place Tool",
-                    theme::TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::LAYOUT_STATUS_INK,
-                ));
-            });
-            card.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            })
-            .with_children(|head| {
-                head.spawn((Thumb, thumb(Handle::default())));
-                head.spawn((
-                    Info::Title,
-                    look::label("", theme::TEXT_BODY, theme::MEDIUM, theme::INK),
-                ));
-            });
-            card.spawn((Info::Size, small("", theme::muted())));
-            legend(card, 3.0, 0.0);
-            outcome_box(card, 0.0);
-            card.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
-                margin: UiRect::top(Val::Px(4.0)),
-                ..default()
-            })
-            .with_children(|keys| {
-                for (action, what) in [
-                    (Action::Structures, "Templates"),
-                    (Action::TurnStructure, "Turn"),
-                ] {
-                    look::key_cap(keys, "", Info::Key(action));
-                    keys.spawn((
-                        Node {
-                            margin: UiRect::right(Val::Px(6.0)),
-                            ..default()
-                        },
-                        small(what, theme::muted()),
-                    ));
-                }
-            });
-            card.spawn((Info::PlaceKey, small("", theme::muted())));
-        });
-}
-
-#[allow(clippy::too_many_arguments)]
-fn list_panel(
-    commands: &mut Commands,
-    (catalogue, thumbs): (&ContentCatalogue, &Thumbs),
-    tool: &PlaceTool,
-    voxel_size: f32,
-    scroll: Vec2,
+/// The keys the foot names, as caps from the bindings.
+fn caps(
+    (full, chosen, pinned): (bool, bool, bool),
     (bindings, labels): (&Bindings, &Labels),
-) {
-    let game = catalogue
-        .game
-        .as_deref()
-        .map(|game| format!(" · {}", super::menu_ui::declared_title(game).to_uppercase()))
-        .unwrap_or_default();
-    let count = catalogue.templates.len();
-    let chosen = tool.chosen(catalogue).map(|t| t.name.as_str());
-    let keys = |action| key(bindings, labels, action);
-    let hint = format!(
-        "{} opens and closes this list · {} puts the Tool away · {} turns · {} pins a preview; \
-         aimed at it, {} builds it whole and {} cancels it · {} removes it in one step",
-        keys(Action::Structures),
-        keys(Action::ClearTool),
-        keys(Action::TurnStructure),
-        keys(Action::Place),
-        keys(Action::Place),
-        keys(Action::ClearTool),
-        keys(Action::Undo),
-    );
-    commands
-        .spawn((
-            Panel,
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(theme::SCREEN_PAD_X),
-                top: Val::Px(PANEL_TOP_PX),
-                bottom: Val::Px(PANEL_BOTTOM_PX),
-                width: Val::Px(CARD_WIDTH),
-                flex_direction: FlexDirection::Column,
-                border: UiRect::all(Val::Px(theme::FRAME)),
-                border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
-                overflow: Overflow::clip(),
-                ..default()
-            },
-            BackgroundColor(theme::LAYOUT_SURFACE),
-            BorderColor::all(theme::GROUT),
-            theme::shadow(),
-        ))
-        .with_children(|panel| {
-            panel.spawn(theme::ring(theme::ITEM_RADIUS));
-            header(panel);
-            panel
-                .spawn((
-                    Card,
-                    ScrollArea,
-                    ScrollPosition(scroll),
-                    Node {
-                        flex_grow: 1.0,
-                        min_height: Val::Px(0.0),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::axes(Val::Px(PAD_X), Val::Px(17.0)),
-                        overflow: Overflow::scroll_y(),
-                        ..default()
-                    },
-                ))
-                .with_children(|body| {
-                    eyebrow(body, &format!("TEMPLATES{game} · {count}"));
-                    picks(body, catalogue, chosen, thumbs);
-                    eyebrow(body, "TURN");
-                    turn_row(body, &keys(Action::TurnStructure));
-                    eyebrow(body, "WHAT PLACING DOES");
-                    legend(body, 6.0, 14.0);
-                    totals(body, |rows| {
-                        total_row(rows, term("Authored"), value_with("1.0 m", " grid"));
-                        total_row(
-                            rows,
-                            term("This World"),
-                            value_with(format!("{voxel_size} m"), " Voxels"),
-                        );
-                    });
-                    body.spawn(Node {
-                        height: Val::Px(18.0),
-                        flex_shrink: 0.0,
-                        ..default()
-                    });
-                    outcome_box(body, 18.0);
-                });
-            footer(panel, hint);
-        });
+) -> Vec<(String, &'static str)> {
+    let cap = |action| tool_panel::cap(action, bindings, labels);
+    let edit = if full { "Aim" } else { "Edit" };
+    if pinned {
+        vec![
+            (cap(Action::Use), "Build"),
+            (cap(Action::ReleaseCursor), "Cancel"),
+            (cap(Action::Structures), edit),
+        ]
+    } else if !full {
+        vec![
+            (cap(Action::Structures), edit),
+            (cap(Action::ReleaseCursor), "Exit"),
+            (cap(Action::Place), "Place"),
+        ]
+    } else if chosen {
+        vec![
+            (cap(Action::Structures), edit),
+            (cap(Action::ReleaseCursor), "Exit"),
+        ]
+    } else {
+        vec![(cap(Action::ReleaseCursor), "Exit")]
+    }
+}
+
+/// The full panel's keys; letters fire their prompt, the rest are read by [`keys`].
+fn prompts(chosen: bool, pinned: bool) -> Vec<Prompt<Control>> {
+    let mut prompts = vec![Prompt::new(Cap::Text("↑ ↓"), "Template")];
+    if chosen {
+        prompts.extend([
+            Prompt::new(Cap::Letter('R'), "Turn")
+                .act(Control::Turn(1))
+                .pad(GamepadButton::West),
+            Prompt::new(Cap::Enter, "Aim").act(Control::Aim),
+        ]);
+    }
+    prompts.push(Prompt::new(
+        Cap::Esc,
+        if pinned { "Cancel" } else { "Exit" },
+    ));
+    prompts
+}
+
+/// Where the list must scroll to show row `at`, from `scroll`.
+fn revealed(scroll: f32, at: usize) -> f32 {
+    let top = at as f32 * (ROW_PX + ROW_GAP_PX);
+    scroll.clamp((top + ROW_PX - LIST_MAX_PX).max(0.0), top)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -826,10 +677,9 @@ fn render(
     mut commands: Commands,
     mut list: ResMut<StructureList>,
     panels: Query<Entity, With<Panel>>,
-    (controls, cards): (Query<&Control>, Query<&ScrollPosition, With<Card>>),
+    cards: Query<&ScrollPosition, With<Card>>,
     (tool, hotbar, catalogue): (Res<PlaceTool>, Res<Hotbar>, Res<Catalogue>),
-    (bindings, labels, world): (Res<Bindings>, Res<Labels>, Res<WorldSettings>),
-    (focus, thumbs): (Res<InputFocus>, Res<Thumbs>),
+    (bindings, labels, thumbs): (Res<Bindings>, Res<Labels>, Res<Thumbs>),
 ) {
     let want = if list.open {
         Some(true)
@@ -839,75 +689,90 @@ fn render(
         None
     };
     let rebuild = want != list.shown
-        || (want == Some(true)
+        || (want.is_some()
             && (list.dirty
                 || tool.is_changed()
                 || catalogue.is_changed()
+                || bindings.is_changed()
                 || labels.is_changed()
                 || thumbs.is_changed()));
     if !rebuild {
         return;
     }
+    let chosen = tool.chosen(&catalogue.0);
+    let at = catalogue.0.templates.iter().position(|t| Some(t) == chosen);
     // A rebuild must not throw the Player back to the top of a long list.
-    let scroll = match (list.shown, want) {
+    let mut scroll = match (list.shown, want) {
         (Some(true), Some(true)) => cards.iter().next().map_or(Vec2::ZERO, |s| s.0),
         _ => Vec2::ZERO,
     };
+    if std::mem::take(&mut list.reveal)
+        && let Some(at) = at
+    {
+        scroll.y = revealed(scroll.y, at);
+    }
     list.dirty = false;
     list.shown = want;
-    let focused = focus
-        .get()
-        .and_then(|entity| controls.get(entity).ok())
-        .copied();
     for panel in &panels {
         commands.entity(panel).despawn();
     }
-    match want {
-        None => {}
-        Some(false) => {
-            commands
-                .spawn((
-                    Panel,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        ..default()
+    let Some(full) = want else {
+        return;
+    };
+    let pinned = tool.pinned.is_some();
+    let caps = caps((full, chosen.is_some(), pinned), (&bindings, &labels));
+    if !full {
+        tool_panel::spawn(
+            &mut commands,
+            Panel,
+            (),
+            None::<Vec<Prompt<Control>>>,
+            |body| {
+                tool_panel::header(body, "Place Tool", false);
+                tool_panel::selection(
+                    body,
+                    |frame| {
+                        frame.spawn((Thumb, thumb(Handle::default(), COMPACT_THUMB_PX)));
                     },
-                    Pickable::IGNORE,
-                ))
-                .with_children(hud);
-        }
-        Some(true) => {
-            list_panel(
-                &mut commands,
-                (&catalogue.0, &thumbs),
-                &tool,
-                world.voxel_size,
-                scroll,
-                (&bindings, &labels),
-            );
-            let chosen = catalogue
-                .0
-                .templates
-                .iter()
-                .position(|t| Some(t) == tool.chosen(&catalogue.0));
-            let target = focused
-                .or(chosen.map(Control::Pick))
-                .unwrap_or(Control::Close);
-            commands.queue(move |world: &mut World| {
-                let mut query = world.query::<(Entity, &Control)>();
-                let found = query
-                    .iter(world)
-                    .find_map(|(entity, control)| (*control == target).then_some(entity));
-                if let Some(entity) = found {
-                    world
-                        .resource_mut::<InputFocus>()
-                        .set(entity, FocusCause::Auto);
-                }
-            });
-        }
+                    (Info::Title, tool_panel::title("")),
+                    (Info::Size, tool_panel::sub("")),
+                );
+                tool_panel::outcome(
+                    body,
+                    (OutcomeBox, tool_panel::QUIET_EDGE),
+                    Info::Outcome,
+                    0.0,
+                );
+                tool_panel::foot(body, None::<Option<Control>>, &caps);
+            },
+        );
+        return;
     }
+    tool_panel::spawn(
+        &mut commands,
+        Panel,
+        (),
+        Some(prompts(chosen.is_some(), pinned)),
+        |body| {
+            tool_panel::header(body, "Place Tool", true);
+            picks(
+                body,
+                &catalogue.0,
+                chosen.map(|t| t.name.as_str()),
+                (&thumbs, scroll),
+            );
+            turn_row(body);
+            tool_panel::outcome(
+                body,
+                (OutcomeBox, tool_panel::QUIET_EDGE),
+                Info::Outcome,
+                14.0,
+            );
+            total(body, chosen.is_some());
+            tool_panel::foot(body, Some(chosen.map(|_| Control::Aim)), &caps);
+        },
+    );
+    tool_panel::pointer_only::<Control>(&mut commands);
 }
 
 /// What each frame says about the choice and the aim, wherever it is shown.
@@ -928,40 +793,44 @@ fn update_info(
             node.image = image.clone();
         }
     }
-    let keys = |action| key(&bindings, &labels, action);
+    let cap = |action| tool_panel::cap(action, &bindings, &labels);
+    let pinned = tool.pinned.is_some();
+    let voxels: usize = ghost.tally.iter().sum();
     let line = |part: Info| -> String {
+        let Some(chosen) = chosen else {
+            return match part {
+                Info::Title => "Nothing selected".to_owned(),
+                Info::Facing => tool.facing().to_owned(),
+                Info::Outcome => format!(
+                    "Pick the next Template, or {} to put the Tool away.",
+                    cap(Action::ReleaseCursor)
+                ),
+                Info::Size | Info::Extent | Info::Voxels => String::new(),
+            };
+        };
+        let size = turned_size_m(chosen, tool.turn);
         match part {
-            Info::Title => chosen.map_or("No Templates".to_owned(), |t| {
-                format!(
-                    "{} · facing {}",
-                    super::menu_ui::declared_title(&t.name),
-                    tool.facing()
-                )
-            }),
+            Info::Title => format!(
+                "{} · facing {}",
+                super::menu_ui::declared_title(&chosen.name),
+                tool.facing()
+            ),
             Info::Facing => tool.facing().to_owned(),
-            Info::Size => {
-                let size = chosen.map(|t| size_text(turned_size_m(t, tool.turn)));
-                match (size, ghost.outcome) {
-                    (Some(size), Some(Outcome::Whole(n))) => {
-                        format!("{size} · {} Voxels", grouped(n as u64))
-                    }
-                    (Some(size), _) => size,
-                    (None, _) => String::new(),
+            Info::Size => match ghost.outcome {
+                Some(Outcome::Whole(n)) => {
+                    format!("{} · {} Voxels", size_text(size, 1), grouped(n as u64))
                 }
-            }
-            Info::Count(slot) => grouped(ghost.tally[slot] as u64),
+                _ => size_text(size, 1),
+            },
+            Info::Extent => size_text(size, 0),
+            Info::Voxels => grouped(voxels as u64),
+            Info::Outcome if pinned => format!(
+                "Preview pinned. Come close: {} builds it whole.",
+                cap(Action::Use)
+            ),
             Info::Outcome => ghost
                 .outcome
                 .map_or("Aim at a surface to place it.".to_owned(), Outcome::text),
-            Info::Key(action) => keys(action),
-            Info::PlaceKey => match tool.pinned {
-                Some(_) => format!(
-                    "Preview pinned. Aim at it: {} builds it whole, {} cancels it",
-                    keys(Action::Place),
-                    keys(Action::ClearTool)
-                ),
-                None => format!("{} pins a preview to walk round", keys(Action::Place)),
-            },
         }
     };
     for (part, mut text) in &mut texts {
@@ -976,11 +845,11 @@ fn update_info(
             span.0 = value;
         }
     }
-    let (fill, edge) = match ghost.outcome {
-        None => (Color::NONE, QUIET_EDGE),
-        Some(Outcome::Whole(_)) => (Color::NONE, WHOLE_EDGE),
-        Some(Outcome::Waiting) => (WAIT_FILL, WAIT_EDGE),
-        Some(Outcome::Refused(_)) => (REFUSED_FILL, REFUSED_EDGE),
+    let (fill, edge) = match (chosen.is_some(), pinned, ghost.outcome) {
+        (false, ..) | (_, false, None) => (Color::NONE, tool_panel::QUIET_EDGE),
+        (_, true, _) | (_, _, Some(Outcome::Whole(_))) => (Color::NONE, tool_panel::WHOLE_EDGE),
+        (_, _, Some(Outcome::Waiting)) => (tool_panel::WAIT_FILL, tool_panel::WAIT_EDGE),
+        (_, _, Some(Outcome::Refused(_))) => (tool_panel::REFUSED_FILL, tool_panel::REFUSED_EDGE),
     };
     for (mut background, mut border) in &mut boxes {
         background.set_if_neq(BackgroundColor(fill));
@@ -1000,27 +869,42 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<StructureList>()
             .init_resource::<super::super::menu::Menu>()
+            .init_resource::<PlaceTool>()
             .add_message::<UseOutcome>()
             .add_message::<UseIntent>()
-            .add_systems(Update, (toggle, open_on_use).chain());
+            .add_observer(activate)
+            .add_systems(
+                Update,
+                (super::super::menu::toggle, toggle, open_on_use, keys).chain(),
+            );
         app.insert_resource(Catalogue(ContentCatalogue {
             tools: vec![CatalogueTool {
                 id: ToolId(0),
                 name: "terra:place".into(),
                 kind: ToolKind::Place,
             }],
-            templates: vec![CatalogueTemplate {
-                name: "terra:cottage".into(),
-                size_m: [7.0, 8.0, 5.0],
-                thumbnails: Default::default(),
-            }],
+            templates: vec![
+                CatalogueTemplate {
+                    name: "terra:cottage".into(),
+                    size_m: [7.0, 8.0, 5.0],
+                    thumbnails: Default::default(),
+                },
+                CatalogueTemplate {
+                    name: "terra:well".into(),
+                    size_m: [3.0, 4.0, 3.0],
+                    thumbnails: Default::default(),
+                },
+            ],
             ..default()
         }));
         let mut hotbar = Hotbar::default();
         hotbar.outside = Some(held);
         app.insert_resource(hotbar);
         app.world_mut().spawn((
-            Window::default(),
+            Window {
+                focused: true,
+                ..default()
+            },
             PrimaryWindow,
             CursorOptions {
                 grab_mode: CursorGrabMode::Locked,
@@ -1075,6 +959,18 @@ mod tests {
     }
 
     #[test]
+    fn k_does_nothing_with_quick_layout_on() {
+        let mut app = app(super::super::edit::Holding::Empty);
+        let mut mode = super::super::layout::LayoutMode::default();
+        mode.on = true;
+        app.insert_resource(mode);
+        assert!(press(&mut app, KeyCode::KeyK).is_empty());
+        answered(&mut app);
+        assert!(!app.world().resource::<StructureList>().open);
+        assert_eq!(held(&app), Some(super::super::edit::Holding::Empty));
+    }
+
+    #[test]
     fn k_closes_the_list_into_play_and_backspace_puts_the_tool_away() {
         let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
         answered(&mut app);
@@ -1104,33 +1000,137 @@ mod tests {
             .grab_mode
     }
 
-    #[test]
-    fn k_with_the_place_tool_in_hand_and_the_list_shut_puts_it_away() {
-        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
-        assert!(press(&mut app, KeyCode::KeyK).is_empty(), "asks nothing");
-        assert_eq!(held(&app), None);
-        assert!(!app.world().resource::<StructureList>().open);
+    fn open(app: &App) -> bool {
+        app.world().resource::<StructureList>().open
+    }
+
+    fn menu_open(app: &App) -> bool {
+        app.world().resource::<super::super::menu::Menu>().open
+    }
+
+    fn chosen(app: &App) -> Option<String> {
+        let catalogue = app.world().resource::<Catalogue>().0.clone();
+        app.world()
+            .resource::<PlaceTool>()
+            .chosen(&catalogue)
+            .map(|t| t.name.clone())
+    }
+
+    fn pin(app: &mut App) {
+        app.world_mut().resource_mut::<PlaceTool>().pinned = Some(([1, 2, 3], Vec3::NEG_Z));
     }
 
     #[test]
-    fn picking_a_template_closes_the_list_into_play() {
+    fn k_while_aiming_opens_the_panel_full_again_with_the_tool_still_in_hand() {
         let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
-        app.init_resource::<PlaceTool>()
-            .init_resource::<super::super::structure::Preview>()
-            .add_observer(activate);
+        assert_eq!(press(&mut app, KeyCode::KeyK).len(), 1, "asks, as Use does");
         answered(&mut app);
-        let pick = app.world_mut().spawn(Control::Pick(0)).id();
+        assert!(open(&app));
+        assert_eq!(
+            held(&app),
+            Some(super::super::edit::Holding::Tool(ToolId(0)))
+        );
+    }
+
+    #[test]
+    fn picking_a_template_keeps_the_panel_open_and_aim_returns_to_play() {
+        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+        answered(&mut app);
+        let pick = app.world_mut().spawn(Control::Pick(1)).id();
         app.world_mut().trigger(Activate { entity: pick });
         app.update();
-        assert!(!app.world().resource::<StructureList>().open);
+        assert!(open(&app));
+        assert_eq!(chosen(&app).as_deref(), Some("terra:well"));
+        let aim = app.world_mut().spawn(Control::Aim).id();
+        app.world_mut().trigger(Activate { entity: aim });
+        app.update();
+        assert!(!open(&app));
         assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
-        let catalogue = app.world().resource::<Catalogue>().0.clone();
-        let chosen = app
-            .world()
-            .resource::<PlaceTool>()
-            .chosen(&catalogue)
-            .map(|t| t.name.clone());
-        assert_eq!(chosen.as_deref(), Some("terra:cottage"));
+    }
+
+    #[test]
+    fn up_and_down_step_through_the_templates_and_enter_aims() {
+        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+        answered(&mut app);
+        press(&mut app, KeyCode::ArrowDown);
+        assert_eq!(chosen(&app).as_deref(), Some("terra:well"));
+        press(&mut app, KeyCode::ArrowDown);
+        assert_eq!(chosen(&app).as_deref(), Some("terra:cottage"), "round");
+        press(&mut app, KeyCode::ArrowUp);
+        assert_eq!(chosen(&app).as_deref(), Some("terra:well"));
+        assert!(open(&app));
+        press(&mut app, KeyCode::Enter);
+        assert!(!open(&app));
+        assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
+    }
+
+    #[test]
+    fn escape_puts_the_tool_away_from_either_panel_and_opens_no_menu() {
+        for full in [true, false] {
+            let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+            if full {
+                answered(&mut app);
+            }
+            press(&mut app, KeyCode::Escape);
+            assert_eq!(held(&app), None, "full: {full}");
+            assert!(!open(&app) && !menu_open(&app), "full: {full}");
+            assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
+            press(&mut app, KeyCode::Escape);
+            assert!(menu_open(&app), "out of the tool, Escape opens the Menu");
+        }
+    }
+
+    #[test]
+    fn with_a_preview_pinned_the_first_escape_only_cancels_it() {
+        for full in [true, false] {
+            let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+            if full {
+                answered(&mut app);
+            }
+            pin(&mut app);
+            press(&mut app, KeyCode::Escape);
+            assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+            assert_eq!(
+                held(&app),
+                Some(super::super::edit::Holding::Tool(ToolId(0))),
+                "full: {full}"
+            );
+            assert_eq!(open(&app), full);
+            assert!(!menu_open(&app));
+            press(&mut app, KeyCode::Escape);
+            assert_eq!(held(&app), None, "then it leaves");
+        }
+    }
+
+    #[test]
+    fn k_with_a_preview_pinned_opens_the_panel_and_keeps_the_pin() {
+        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+        pin(&mut app);
+        assert_eq!(press(&mut app, KeyCode::KeyK).len(), 1);
+        answered(&mut app);
+        assert!(open(&app));
+        assert!(app.world().resource::<PlaceTool>().pinned.is_some());
+    }
+
+    #[test]
+    fn after_a_build_the_panel_opens_full_and_enter_and_k_wait_for_a_pick() {
+        let mut app = app(super::super::edit::Holding::Tool(ToolId(0)));
+        {
+            let mut tool = app.world_mut().resource_mut::<PlaceTool>();
+            tool.choose("terra:cottage");
+            tool.spend();
+        }
+        app.update();
+        assert!(open(&app), "opened to pick the next");
+        assert_eq!(cursor(&mut app), CursorGrabMode::None);
+        assert_eq!(chosen(&app), None);
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::KeyK);
+        assert!(open(&app), "nothing to aim with");
+        press(&mut app, KeyCode::ArrowDown);
+        assert_eq!(chosen(&app).as_deref(), Some("terra:well"), "the next one");
+        press(&mut app, KeyCode::KeyK);
+        assert!(!open(&app));
     }
 
     #[test]
@@ -1160,5 +1160,100 @@ mod tests {
             .write_message(UseOutcome(Ok(UseResult::TemplateList)));
         app.update();
         assert!(!app.world().resource::<StructureList>().open);
+    }
+
+    fn render_app(held: super::super::edit::Holding) -> App {
+        let mut app = app(held);
+        app.init_resource::<Labels>()
+            .init_resource::<Thumbs>()
+            .init_resource::<Ghost>()
+            .init_resource::<bevy::input_focus::InputFocus>()
+            .init_resource::<super::super::menu_ui::Searches>()
+            .init_resource::<super::super::edit::Notice>()
+            .init_resource::<super::super::input::UiInput>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Font>>()
+            .add_plugins(super::super::menu_ui::plugin);
+        app
+    }
+
+    /// Draws the panel as it is now; its texts, and whether it holds an Aim to press.
+    fn drawn(app: &mut App) -> (Vec<String>, bool) {
+        use bevy::ecs::system::RunSystemOnce;
+        app.world_mut().run_system_once(render).unwrap();
+        app.world_mut().flush();
+        app.world_mut().run_system_once(update_info).unwrap();
+        let texts = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|text| text.0.clone())
+            .collect();
+        let aim = app
+            .world_mut()
+            .query_filtered::<&Control, With<bevy::ui_widgets::Button>>()
+            .iter(app.world())
+            .any(|control| *control == Control::Aim);
+        (texts, aim)
+    }
+
+    fn has(texts: &[String], words: &[&str]) {
+        for word in words {
+            assert!(texts.iter().any(|t| t == word), "{word} in {texts:?}");
+        }
+    }
+
+    #[test]
+    fn aiming_the_panel_names_the_template_its_facing_and_the_keys() {
+        let mut app = render_app(super::super::edit::Holding::Tool(ToolId(0)));
+        let (texts, aim) = drawn(&mut app);
+        has(
+            &texts,
+            &[
+                "Place Tool",
+                "Cottage · facing South",
+                "K",
+                "Edit",
+                "Esc",
+                "Exit",
+                "RMB",
+                "Place",
+            ],
+        );
+        assert!(!aim, "nothing to press while aiming");
+        pin(&mut app);
+        let (texts, _) = drawn(&mut app);
+        has(
+            &texts,
+            &[
+                "G",
+                "Build",
+                "Cancel",
+                "Edit",
+                "Preview pinned. Come close: G builds it whole.",
+            ],
+        );
+    }
+
+    #[test]
+    fn after_a_build_the_full_panel_asks_for_the_next_template_and_offers_no_aim() {
+        let mut app = render_app(super::super::edit::Holding::Tool(ToolId(0)));
+        app.world_mut().resource_mut::<StructureList>().open = true;
+        let (texts, aim) = drawn(&mut app);
+        has(
+            &texts,
+            &["Place Tool", "Template", "Cottage", "Well", "Aim", "Exit"],
+        );
+        assert!(aim);
+        app.world_mut().resource_mut::<PlaceTool>().spend();
+        let (texts, aim) = drawn(&mut app);
+        has(
+            &texts,
+            &[
+                "Pick the next Template, or Esc to put the Tool away.",
+                "Nothing selected",
+            ],
+        );
+        assert!(!aim, "Aim waits for a pick");
     }
 }
