@@ -59,6 +59,8 @@ pub struct BiomePreview {
     pub ground: Option<tesserae_core::biome_edits::GroundNames>,
     /// The solid Materials a Biome's ground may be made of, by name.
     pub materials: Vec<String>,
+    /// What the terrain preview draws from; `None` in tests that draw none.
+    pub source: Option<std::sync::Arc<tesserae_core::terrain_preview::Source>>,
 }
 
 /// Where the session ends: set before a quit that is not to desktop.

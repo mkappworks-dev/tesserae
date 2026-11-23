@@ -1613,91 +1613,184 @@ fn form(
     let mut focus = None;
     step_frame(main, l, installed, Step::World, scroll, |col| {
         problem(col, f.problem.as_ref());
-        focus = Some(field(
-            col,
-            "World name",
-            Field::Name,
-            &f.name,
-            "Give it a name you\u{2019}ll want to come back to.",
-            "New World",
-        ));
-        mode_picks(
-            col,
-            "Game mode",
-            "Every Player starts in this mode. You can change it later in Edit World.",
-            f.game_mode,
-            Act::Mode,
-            false,
-        );
-        gap(col, 8.0);
         col.spawn(Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
+            column_gap: Val::Px(32.0),
+            align_items: AlignItems::FlexStart,
             flex_shrink: 0.0,
             ..default()
         })
-        .with_children(|r| {
-            section(r, |s| section_text(s, "World seed"));
-            buttons::button(
-                r,
-                "Randomize",
-                Act::Randomize,
-                ButtonStyle::Small { kind: Kind::Ghost },
-            );
-        });
-        field(
-            col,
-            "Words or a number",
-            Field::Seed,
-            &f.seed,
-            "Starts with a random seed. Type words or a number to choose your own: the same seed and generation settings create the same terrain.",
-            "",
-        );
-        gap(col, 18.0);
-        col.spawn(Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|r| {
-            r.spawn((
-                Resolved,
-                Text::new(f.seed_label()),
-                ui::font(theme::TEXT_SMALL),
-                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                TextColor(theme::muted()),
-                Pickable::IGNORE,
-            ));
-            buttons::button(
-                r,
-                "Copy",
-                Act::CopyResolved,
-                ButtonStyle::Small { kind: Kind::Ghost },
-            );
-        });
-        disclosure(col, "More World options", f.more, Act::More, |c| {
-            label(c, "Voxel size (metres)");
-            gap(c, 8.0);
-            row(c, 7.0, |r| {
-                for (size, _) in VOXEL_SIZES {
-                    buttons::button(
-                        r,
-                        size.to_string(),
-                        Act::Voxel(size),
-                        ButtonStyle::Choice {
-                            selected: f.voxel_size_m == size,
-                        },
-                    );
-                }
-            });
-            let mut lines: Vec<&str> = VOXEL_SIZES.iter().map(|(_, cost)| *cost).collect();
-            lines.push("This choice is fixed when the World is created.");
-            notice(c, lines.join("\n"));
+        .with_children(|split| {
+            split
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_width: Val::Px(0.0),
+                    ..default()
+                })
+                .with_children(|fields| focus = Some(world_fields(fields, f)));
+            terrain_aside(split);
         });
     });
     focus
+}
+
+/// The World step's fields; returns the name field, which takes the focus.
+fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
+    let name = field(
+        col,
+        "World name",
+        Field::Name,
+        &f.name,
+        "Give it a name you\u{2019}ll want to come back to.",
+        "New World",
+    );
+    mode_picks(
+        col,
+        "Game mode",
+        "Every Player starts in this mode. You can change it later in Edit World.",
+        f.game_mode,
+        Act::Mode,
+        false,
+    );
+    gap(col, 24.0);
+    label(col, "World seed");
+    gap(col, 8.0);
+    seed_field(col, &f.seed);
+    gap(col, 6.0);
+    col.spawn((
+        Resolved,
+        Text::new(f.seed_label()),
+        ui::font(theme::TEXT_SMALL),
+        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+        TextColor(theme::muted()),
+        Pickable::IGNORE,
+    ));
+    gap(col, 24.0);
+    label(col, "Voxel size \u{00b7} fixed at creation");
+    gap(col, 8.0);
+    row(col, 7.0, |r| {
+        for (size, _) in VOXEL_SIZES {
+            buttons::button(
+                r,
+                size.to_string(),
+                Act::Voxel(size),
+                ButtonStyle::Choice {
+                    selected: f.voxel_size_m == size,
+                },
+            );
+        }
+    });
+    gap(col, 6.0);
+    let cost = VOXEL_SIZES
+        .iter()
+        .find(|(size, _)| *size == f.voxel_size_m)
+        .map_or("", |(_, cost)| cost);
+    ui::paragraph(col, cost, theme::TEXT_SMALL, theme::muted());
+    if let Some(climate) = &f.climate {
+        gap(col, 24.0);
+        label(col, "Climate scale \u{00b7} fixed at creation");
+        gap(col, 8.0);
+        columns(col, 16.0, |cols| {
+            for (field_id, title, at) in [
+                (Field::TemperatureSize, "Temperature (m)", 0),
+                (Field::HumiditySize, "Humidity (m)", 1),
+            ] {
+                field(cols, title, field_id, &climate.sizes[at], "", "");
+            }
+        });
+        gap(col, 6.0);
+        ui::paragraph(
+            col,
+            "Larger values create broader climate regions.",
+            theme::TEXT_SMALL,
+            theme::muted(),
+        );
+    }
+    name
+}
+
+/// The side of one icon button inside a field.
+const FIELD_ACTION: f32 = 32.0;
+
+/// The seed field, with Randomize and Copy as icons inside its right end.
+fn seed_field(col: &mut ChildSpawnerCommands, value: &str) {
+    col.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|wrap| {
+        let seed = text_field(wrap, Field::Seed, value, "", "Words or a number");
+        // Typed text stops short of the icons rather than running under them.
+        wrap.commands().entity(seed).insert(Node {
+            flex_grow: 1.0,
+            height: Val::Px(20.0),
+            margin: UiRect::right(Val::Px(2.0 * FIELD_ACTION)),
+            ..default()
+        });
+        wrap.spawn(Node {
+            position_type: PositionType::Absolute,
+            right: Val::Px(4.0),
+            top: Val::Px((theme::CONTROL_HEIGHT - FIELD_ACTION) / 2.0),
+            column_gap: Val::Px(2.0),
+            ..default()
+        })
+        .with_children(|icons| {
+            for (kind, act) in [
+                (IconKind::Shuffle, Act::Randomize),
+                (IconKind::Copy, Act::CopyResolved),
+            ] {
+                icons
+                    .spawn((
+                        bevy::ui_widgets::Button,
+                        TabIndex(0),
+                        act,
+                        Pick {
+                            fill: Color::NONE,
+                            edge: Color::NONE,
+                            hover: Some((theme::CARD_HOVER, Color::NONE)),
+                        },
+                        Node {
+                            width: Val::Px(FIELD_ACTION),
+                            height: Val::Px(FIELD_ACTION),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|b| ui::icon(b, kind, theme::muted(), 16.0));
+            }
+        });
+    });
+}
+
+/// The terrain preview beside the World step's fields: 16:9, filled in once it is drawn.
+fn terrain_aside(split: &mut ChildSpawnerCommands) {
+    split
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            width: Val::Px(260.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|aside| {
+            label(aside, "Terrain preview");
+            gap(aside, 8.0);
+            aside.spawn((
+                super::terrain::TerrainPicture,
+                BackgroundColor(theme::FIELD),
+                BorderColor::all(theme::edge()),
+                Node {
+                    width: Val::Px(260.0),
+                    aspect_ratio: Some(16.0 / 9.0),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    ..default()
+                },
+            ));
+        });
 }
 
 fn row(
@@ -3127,13 +3220,18 @@ fn review(
                 ui::paragraph(
                     card,
                     format!(
-                        "{}\nClimate size: {} m temperature / {} m humidity",
+                        "{}{}",
                         on.iter()
                             .map(|c| ui::declared_title(&c.name))
                             .collect::<Vec<_>>()
                             .join(" \u{00b7} "),
-                        draft.climate.temperature_size_m,
-                        draft.climate.humidity_size_m
+                        f.climate
+                            .as_ref()
+                            .and_then(ClimateDraft::params)
+                            .map_or_else(String::new, |c| format!(
+                                "\nClimate size: {} m temperature / {} m humidity",
+                                c.temperature_size_m, c.humidity_size_m
+                            )),
                     ),
                     theme::TEXT_SMALL,
                     theme::muted(),
@@ -3353,29 +3451,6 @@ fn biomes_page(
                 ))
                 .with_children(|editor| biome_editor(editor, l, draft));
         });
-        disclosure(
-            col,
-            "World climate scale",
-            l.open(Disclosure::ClimateScale),
-            Act::Disclose(Disclosure::ClimateScale),
-            |c| {
-                columns(c, 16.0, |cols| {
-                    for (field_id, title, at) in [
-                        (Field::TemperatureSize, "Temperature size (m)", 0),
-                        (Field::HumiditySize, "Humidity size (m)", 1),
-                    ] {
-                        field(cols, title, field_id, &draft.sizes[at], "", "");
-                    }
-                });
-                gap(c, 21.0);
-                ui::paragraph(
-                    c,
-                    "Larger values create broader climate regions. These settings are saved with the World.",
-                    theme::TEXT_SMALL,
-                    theme::muted(),
-                );
-            },
-        );
     })
 }
 

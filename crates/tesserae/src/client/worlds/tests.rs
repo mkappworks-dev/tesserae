@@ -165,7 +165,6 @@ fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
     new_world(&mut app);
     type_into(&mut app, Field::Name, "  Ridge ");
     type_into(&mut app, Field::Seed, "-1");
-    act(&mut app, Act::More);
     act(&mut app, Act::Voxel(0.25));
     finish(&mut app);
     let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
@@ -498,7 +497,6 @@ fn rename_changes_the_listed_name_and_recreate_copies_the_settings() {
     assert_eq!(form.name, "New name (copy)");
     assert_eq!(form.seed, "42");
     assert_eq!(form.voxel_size_m, 0.5);
-    assert!(form.more);
 }
 
 #[test]
@@ -1448,6 +1446,7 @@ fn fake_preview(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
         materials: ["t:stone", "t:dirt", "t:grass", "t:sand"]
             .map(String::from)
             .to_vec(),
+        source: None,
     })
 }
 
@@ -1481,7 +1480,6 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     act(&mut app, Act::Disclose(Disclosure::Ground));
     act(&mut app, Act::CycleGround(Layer::Surface));
     type_into(&mut app, Field::Sky, "#0a141e");
-    type_into(&mut app, Field::TemperatureSize, "800");
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
     assert!(shown(&mut app, "1 enabled"));
@@ -1511,11 +1509,8 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
         ]
     );
     assert_eq!(
-        edits.climate,
-        Some(ClimateParams {
-            temperature_size_m: 800.0,
-            humidity_size_m: 512.0,
-        })
+        edits.climate, None,
+        "the Game's Climate sizes are not an edit"
     );
 }
 
@@ -1578,7 +1573,7 @@ fn modal_groups(app: &mut App) -> usize {
 }
 
 #[test]
-fn no_biome_left_or_a_bad_climate_size_holds_the_biomes_step() {
+fn no_biome_left_holds_the_biomes_step() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
     act(&mut app, Act::ToggleBiome(0));
     act(&mut app, Act::ToggleBiome(1));
@@ -1586,12 +1581,126 @@ fn no_biome_left_or_a_bad_climate_size_holds_the_biomes_step() {
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
     assert!(launcher(&app).form.problem.is_some());
     act(&mut app, Act::ToggleBiome(1));
-    type_into(&mut app, Field::HumiditySize, "0");
-    act(&mut app, Act::Next);
-    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
-    type_into(&mut app, Field::HumiditySize, "300");
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+}
+
+#[test]
+fn climate_sizes_are_edited_on_the_world_step_and_go_with_the_world() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    assert!(shown(&mut app, "Climate scale \u{00b7} fixed at creation"));
+    assert!(shown(&mut app, "Voxel size \u{00b7} fixed at creation"));
+    type_into(&mut app, Field::HumiditySize, "0");
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+    assert_eq!(
+        launcher(&app).form.problem.as_deref(),
+        Some("Climate sizes must be from 1 to 100000 m.")
+    );
+    type_into(&mut app, Field::HumiditySize, "300");
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+    finish(&mut app);
+    assert_eq!(
+        created(&app).biomes.and_then(|e| e.climate),
+        Some(ClimateParams {
+            temperature_size_m: 512.0,
+            humidity_size_m: 300.0,
+        })
+    );
+}
+
+#[test]
+fn reading_the_games_climate_sizes_is_not_a_change_to_discard() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    act(&mut app, Act::Back);
+    act(&mut app, Act::Back);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+}
+
+/// The fixture World's Generator, as a Game's declarations would give it.
+fn fake_terrain(installed: &Installed, ids: &[String]) -> Result<BiomePreview, String> {
+    let f = tesserae_core::testgen::fixtures();
+    let materials = [
+        ("t:stone", f.ground.rock, [110, 110, 116, 255]),
+        ("t:dirt", f.ground.soil, [120, 90, 60, 255]),
+        ("t:grass", f.ground.surface, [90, 140, 70, 255]),
+        ("t:water", f.water, [50, 90, 160, 255]),
+    ];
+    Ok(BiomePreview {
+        source: Some(std::sync::Arc::new(
+            tesserae_core::terrain_preview::Source {
+                params: tesserae_core::testgen::world_params(),
+                materials: materials.map(|(n, id, _)| (n.to_owned(), id)).into(),
+                colours: materials.map(|(_, id, c)| (id, c)).into(),
+                templates: vec![],
+                settlements: vec![],
+            },
+        )),
+        ..fake_preview(installed, ids)?
+    })
+}
+
+/// The terrain preview's pixels, once one is shown.
+fn terrain_shown(app: &mut App) -> Option<Vec<u8>> {
+    let handle = app
+        .world_mut()
+        .query_filtered::<&ImageNode, With<terrain::TerrainPicture>>()
+        .iter(app.world())
+        .next()?
+        .image
+        .clone();
+    let image = app.world().resource::<Assets<Image>>().get(&handle)?;
+    assert_eq!(image.size(), UVec2::new(320, 180));
+    image.data.clone()
+}
+
+/// Updates until the preview being drawn lands.
+fn drawn(app: &mut App) {
+    let start = std::time::Instant::now();
+    while app.world().resource::<terrain::TerrainPreview>().drawing() {
+        assert!(start.elapsed().as_secs() < 120, "the preview never landed");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.update();
+    }
+    app.update();
+}
+
+#[test]
+fn the_world_step_draws_the_terrain_preview_and_redraws_it_off_the_main_thread_for_a_new_seed() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    app.insert_resource(Previewer(fake_terrain));
+    app.update();
+    new_world(&mut app);
+    assert!(shown(&mut app, "Terrain preview"));
+    type_into(&mut app, Field::Seed, "7");
+    drawn(&mut app);
+    let first = terrain_shown(&mut app).expect("a preview is shown");
+    type_into(&mut app, Field::Seed, "8");
+    assert!(
+        app.world().resource::<terrain::TerrainPreview>().drawing(),
+        "the new seed is drawn on another thread"
+    );
+    assert_eq!(launcher(&app).form.seed, "8", "typing went on meanwhile");
+    assert_eq!(terrain_shown(&mut app).as_ref(), Some(&first));
+    drawn(&mut app);
+    let second = terrain_shown(&mut app).unwrap();
+    assert_ne!(second, first, "another seed draws other terrain");
+    type_into(&mut app, Field::Seed, "7");
+    drawn(&mut app);
+    assert_eq!(
+        terrain_shown(&mut app),
+        Some(first),
+        "the same seed draws the same picture"
+    );
 }
 
 #[test]
@@ -1792,7 +1901,10 @@ fn create_from_these_settings_prefills_every_step() {
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
     let draft = launcher(&app).form.biomes.clone().unwrap();
     assert!(!draft.choices[0].enabled, "the Biome stays off");
-    assert_eq!(draft.climate.temperature_size_m, 800.0);
+    assert_eq!(
+        launcher(&app).form.climate.as_ref().unwrap().sizes[0],
+        "800"
+    );
     act(&mut app, Act::Next);
     act(&mut app, Act::Create);
     let copy = created(&app);

@@ -7,6 +7,7 @@ mod edit_world;
 mod mods;
 mod open;
 pub(super) mod pages;
+mod terrain;
 
 use create::*;
 use edit_world::*;
@@ -161,7 +162,8 @@ struct Form {
     /// Used when the seed is left blank, so it can be shown and copied first.
     random_seed: u64,
     voxel_size_m: f32,
-    more: bool,
+    /// `None` until the chosen Game's declarations are read.
+    climate: Option<ClimateDraft>,
     game_mode: GameMode,
     problem: Option<String>,
     /// The chosen Game's id; `None` until the form opens on an installed one.
@@ -182,12 +184,59 @@ struct BiomesDraft {
     ids: Vec<String>,
     declared: BiomePreview,
     choices: Vec<BiomeChoice>,
-    climate: ClimateParams,
     selected: usize,
     resetting: bool,
-    /// Typed text, kept while it does not parse: Climate sizes, then sky and fog.
-    sizes: [String; 2],
+    /// Typed text, kept while it does not parse: sky, then fog.
     colours: [String; 2],
+}
+
+/// The World step's Climate sizes: the Game's, and the player's typed text.
+#[derive(Clone, Debug, PartialEq)]
+struct ClimateDraft {
+    declared: ClimateParams,
+    /// Temperature, then humidity, kept while it does not parse.
+    sizes: [String; 2],
+}
+
+impl ClimateDraft {
+    fn new(declared: ClimateParams) -> Self {
+        let mut draft = Self {
+            declared,
+            sizes: Default::default(),
+        };
+        draft.set(declared);
+        draft
+    }
+
+    fn set(&mut self, climate: ClimateParams) {
+        self.sizes = [climate.temperature_size_m, climate.humidity_size_m].map(|m| m.to_string());
+    }
+
+    /// The typed sizes, or `None` while either is not one a player may choose.
+    fn params(&self) -> Option<ClimateParams> {
+        let [temperature_size_m, humidity_size_m] = [0, 1].map(|at| {
+            self.sizes[at]
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|m| CLIMATE_SIZES_M.contains(m))
+        });
+        Some(ClimateParams {
+            temperature_size_m: temperature_size_m?,
+            humidity_size_m: humidity_size_m?,
+        })
+    }
+
+    /// What differs from the Game's, for the World's Biome edits.
+    fn edit(&self) -> Option<ClimateParams> {
+        self.params().filter(|p| *p != self.declared)
+    }
+
+    fn problem(&self) -> Option<String> {
+        self.params()
+            .is_none()
+            .then(|| "Climate sizes must be from 1 to 100000 m.".into())
+    }
 }
 
 impl BiomesDraft {
@@ -195,11 +244,9 @@ impl BiomesDraft {
         let mut draft = Self {
             ids,
             choices: declared.biomes.clone(),
-            climate: declared.climate,
             declared,
             selected: 0,
             resetting: false,
-            sizes: Default::default(),
             colours: Default::default(),
         };
         draft.reset();
@@ -208,12 +255,7 @@ impl BiomesDraft {
 
     fn reset(&mut self) {
         self.choices = self.declared.biomes.clone();
-        self.climate = self.declared.climate;
         self.resetting = false;
-        self.sizes = [
-            self.climate.temperature_size_m.to_string(),
-            self.climate.humidity_size_m.to_string(),
-        ];
         self.select(self.selected);
     }
 
@@ -223,13 +265,6 @@ impl BiomesDraft {
             if let Some(seeded) = edits.biomes.iter().find(|e| e.name == choice.name) {
                 *choice = seeded.clone();
             }
-        }
-        if let Some(climate) = edits.climate {
-            self.climate = climate;
-            self.sizes = [
-                climate.temperature_size_m.to_string(),
-                climate.humidity_size_m.to_string(),
-            ];
         }
         self.select(self.selected);
     }
@@ -243,31 +278,19 @@ impl BiomesDraft {
         ];
     }
 
-    /// What differs from the declarations, or `None` for a World made as declared.
-    fn edits(&self) -> Option<BiomeEdits> {
-        let biomes: Vec<_> = self
-            .choices
+    /// The Biomes that differ from the declarations.
+    fn changed(&self) -> Vec<BiomeChoice> {
+        self.choices
             .iter()
             .zip(&self.declared.biomes)
             .filter(|(choice, declared)| choice != declared)
             .map(|(choice, _)| choice.clone())
-            .collect();
-        let climate = (self.climate != self.declared.climate).then_some(self.climate);
-        (!biomes.is_empty() || climate.is_some()).then_some(BiomeEdits { biomes, climate })
+            .collect()
     }
 
     fn problem(&self) -> Option<String> {
         if !self.choices.is_empty() && self.choices.iter().all(|c| !c.enabled) {
             return Some("Turn on at least one Biome to continue.".into());
-        }
-        let size = |text: &str| {
-            text.trim()
-                .parse::<f32>()
-                .ok()
-                .filter(|m| CLIMATE_SIZES_M.contains(m))
-        };
-        if self.sizes.iter().any(|text| size(text).is_none()) {
-            return Some("Climate sizes must be from 1 to 100000 m.".into());
         }
         if self
             .colours
@@ -316,7 +339,7 @@ impl Default for Form {
             seed: String::new(),
             random_seed: tesserae_core::seed::random(),
             voxel_size_m: 1.0,
-            more: false,
+            climate: None,
             game_mode: GameMode::Creative,
             problem: None,
             game: None,
@@ -369,6 +392,11 @@ struct Launcher {
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
+    /// The terrain preview's source and the Game and Mods it was read for.
+    terrain: Option<(
+        Vec<String>,
+        std::sync::Arc<tesserae_core::terrain_preview::Source>,
+    )>,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
@@ -378,21 +406,14 @@ struct Launcher {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Disclosure {
     Ground,
-    ClimateScale,
     BiomeParameters,
     WorldInformation,
     ManageWorld,
 }
 
-impl Disclosure {
-    fn starts_open(self) -> bool {
-        self == Disclosure::ClimateScale
-    }
-}
-
 impl Launcher {
     fn open(&self, row: Disclosure) -> bool {
-        row.starts_open() != self.flipped.contains(&row)
+        self.flipped.contains(&row)
     }
 
     fn entry(&self, path: &Path) -> Option<&Entry> {
@@ -467,7 +488,6 @@ pub(super) enum Act {
     Create,
     Randomize,
     CopyResolved,
-    More,
     Next,
     Step(Step),
     KeepEditing,
@@ -628,7 +648,6 @@ fn review_capture(
                     continue;
                 }
                 "new" => Act::New,
-                "more" => Act::More,
                 "edit" => Act::Edit(first.clone()),
                 "delete" => Act::Delete,
                 "recreate" => Act::ReCreate,
@@ -696,6 +715,7 @@ fn logic(app: &mut App) {
         .init_resource::<Returning>()
         .init_resource::<InputFocus>()
         .init_resource::<Thumbnails>()
+        .init_resource::<terrain::TerrainPreview>()
         .add_observer(activate)
         .add_observer(slide)
         .add_observer(open_settings)
@@ -708,7 +728,9 @@ fn logic(app: &mut App) {
                 highlight,
                 handle,
                 load_thumbnails,
+                terrain::draw,
                 render,
+                terrain::show,
                 show_filter,
                 filter,
                 pages::paint_bulk,
@@ -848,6 +870,7 @@ fn start(
         problem: None,
         clashes: Default::default(),
         version: 0,
+        terrain: None,
         from_list: false,
         opening_frames: 0,
     };
@@ -958,11 +981,17 @@ fn sync_fields(
             Field::Name => launcher.form.name = value,
             Field::Seed => launcher.form.seed = value,
             Field::Rename => launcher.rename = value,
-            Field::Sky | Field::Fog | Field::TemperatureSize | Field::HumiditySize => {
+            Field::Sky | Field::Fog => {
                 // The page keeps the field; rebuilding it would take the focus.
                 let launcher = launcher.bypass_change_detection();
                 if let Some(draft) = launcher.form.biomes.as_mut() {
                     typed(draft, *field, value);
+                }
+            }
+            Field::TemperatureSize | Field::HumiditySize => {
+                let launcher = launcher.bypass_change_detection();
+                if let Some(climate) = launcher.form.climate.as_mut() {
+                    climate.sizes[usize::from(*field == Field::HumiditySize)] = value;
                 }
             }
             // Typing filters the cards in place; a rebuild would take the field's focus.
@@ -1037,40 +1066,36 @@ fn placeholders(
     }
 }
 
-/// What typing in one of the Biomes step's fields changes.
+/// What typing in one of the Biomes step's colour fields changes.
 fn typed(draft: &mut BiomesDraft, field: Field, value: String) {
-    match field {
-        Field::TemperatureSize | Field::HumiditySize => {
-            let at = usize::from(field == Field::HumiditySize);
-            if let Ok(metres) = value.trim().parse::<f32>() {
-                if at == 0 {
-                    draft.climate.temperature_size_m = metres;
-                } else {
-                    draft.climate.humidity_size_m = metres;
-                }
-            }
-            draft.sizes[at] = value;
+    let at = usize::from(field == Field::Fog);
+    let parsed = colour(&value);
+    draft.colours[at] = value;
+    let selected = draft.selected;
+    if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
+        // A Biome carries both colours or neither, so the other starts equal.
+        let mut pair = choice.sky_fog.unwrap_or(SkyFog { sky: rgb, fog: rgb });
+        if at == 0 {
+            pair.sky = rgb;
+        } else {
+            pair.fog = rgb;
         }
-        _ => {
-            let at = usize::from(field == Field::Fog);
-            let parsed = colour(&value);
-            draft.colours[at] = value;
-            let selected = draft.selected;
-            if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
-                // A Biome carries both colours or neither, so the other starts equal.
-                let mut pair = choice.sky_fog.unwrap_or(SkyFog { sky: rgb, fog: rgb });
-                if at == 0 {
-                    pair.sky = rgb;
-                } else {
-                    pair.fog = rgb;
-                }
-                choice.sky_fog = Some(pair);
-            }
-        }
+        choice.sky_fog = Some(pair);
     }
 }
 
 impl Form {
+    /// What the World keeps of the Biomes and Climate steps, or `None` for one made as declared.
+    fn edits(&self) -> Option<BiomeEdits> {
+        let biomes = self
+            .biomes
+            .as_ref()
+            .map(BiomesDraft::changed)
+            .unwrap_or_default();
+        let climate = self.climate.as_ref().and_then(ClimateDraft::edit);
+        (!biomes.is_empty() || climate.is_some()).then_some(BiomeEdits { biomes, climate })
+    }
+
     fn seed(&self) -> Result<u64, String> {
         tesserae_core::seed::resolve(&self.seed)
             .map(|seed| seed.unwrap_or(self.random_seed))
@@ -1139,7 +1164,6 @@ fn handle(
             | Act::ReCreate
             | Act::CopyResolved
             | Act::Randomize
-            | Act::More
             | Act::PickGame(..)
             | Act::ToggleMod(..)
             | Act::Next

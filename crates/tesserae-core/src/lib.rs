@@ -41,6 +41,7 @@ pub mod survival;
 pub mod tables;
 pub mod template;
 pub mod terrain;
+pub mod terrain_preview;
 pub mod testgen;
 pub mod underground;
 pub mod usable;
