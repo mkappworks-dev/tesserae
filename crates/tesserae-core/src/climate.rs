@@ -320,8 +320,8 @@ impl ClimateField {
         Some(BiomeId(i as u8))
     }
 
-    /// Continuous in position, so colour never steps where [`Self::biome_at`] does. `None` where no
-    /// Biome has colours.
+    /// Continuous in position, so colour never steps where [`Self::biome_at`] does. A Biome that
+    /// declares no colours has [`SkyFog::DEFAULT`]. `None` where no Biome is considered.
     #[allow(
         clippy::disallowed_methods,
         reason = "display only: the sky and fog blend is not generation"
@@ -336,9 +336,7 @@ impl ClimateField {
         let selectors = biomes.selectors();
         // Among the Biomes `biome_at` chooses from there: those of the land's shape that admit the
         // column, else the rest, so the sky over a mountain is its own.
-        let ranged_here = biomes.as_slice().iter().enumerate().any(|(i, b)| {
-            b.sky_fog.is_some() && selectors[i].is_ranged() && selectors[i].admits(&site)
-        });
+        let ranged_here = selectors.iter().any(|s| s.is_ranged() && s.admits(&site));
         let considered = |i: usize| {
             if ranged_here {
                 selectors[i].is_ranged() && selectors[i].admits(&site)
@@ -352,7 +350,7 @@ impl ClimateField {
                 .iter()
                 .enumerate()
                 .filter(move |&(i, _)| considered(i))
-                .filter_map(|(_, b)| Some((b, b.sky_fog?)))
+                .map(|(_, b)| (b, b.sky_fog.unwrap_or(SkyFog::DEFAULT)))
         };
         // Unwarped: the warp varies fast to roughen a border, and the air would shimmer with it.
         let mut c = self.at(x_m, z_m);
@@ -1220,12 +1218,20 @@ impl SurfaceFeatures {
 /// sRGB bytes. A pair, so a Biome carries both or neither.
 ///
 /// `fog` is what the shader fogs toward and the tonemapper darkens, so it is a little lighter than
-/// `sky` (`render::fog::HAZE_FOG_SRGB`).
+/// `sky` (`render::fog::TONEMAP_DARKENING_SRGB`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkyFog {
     pub sky: [u8; 3],
     pub fog: [u8; 3],
+}
+
+impl SkyFog {
+    /// A Biome that declares none has these, and so does a World with no Biomes.
+    pub const DEFAULT: SkyFog = SkyFog {
+        sky: [0x87, 0xce, 0xeb],
+        fog: [0xff, 0xff, 0xff],
+    };
 }
 
 /// sRGB in `[0, 1]`, as the Client's fog settings hold it.

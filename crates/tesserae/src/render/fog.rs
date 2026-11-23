@@ -13,6 +13,8 @@
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
+use tesserae_core::SkyFog;
+
 use crate::session::SessionApp;
 
 use crate::server::quality::DeclaredStreaming;
@@ -29,14 +31,10 @@ const MAX_REACH_OPACITY: f32 = 1.0 - f32::EPSILON;
 /// Player could choose a farther curve.
 const LOW_REACH_OPACITY: f32 = 0.88;
 
-/// The haze a fully fogged surface shows, as sRGB bytes.
-const HAZE_SKY_SRGB: [u8; 3] = [126, 146, 168];
-
-/// What the shader fogs toward so that a fully fogged surface comes out as
-/// [`HAZE_SKY_SRGB`]: the tonemapper runs after the fog and the clear colour
-/// skips it, and it darkens this colour by (10, 15, 21). Measured offscreen
-/// to within 1/255; re-measure if the tonemapper or the exposure changes.
-const HAZE_FOG_SRGB: [u8; 3] = [136, 160, 190];
+/// How much the tonemapper darkens the fog colour, which runs after the fog
+/// while the clear colour skips it. Measured offscreen to within 1/255 on a
+/// grey-blue haze; re-measure if the tonemapper or the exposure changes.
+const TONEMAP_DARKENING_SRGB: [u8; 3] = [10, 14, 22];
 
 fn srgb(bytes: [u8; 3]) -> [f32; 3] {
     bytes.map(|b| f32::from(b) / 255.0)
@@ -46,7 +44,7 @@ fn srgb(bytes: [u8; 3]) -> [f32; 3] {
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct FogSettings {
     /// sRGB, what the shader fogs toward. Not the colour the fog is seen as:
-    /// see [`HAZE_FOG_SRGB`].
+    /// see [`TONEMAP_DARKENING_SRGB`].
     pub color: [f32; 3],
     /// sRGB, the clear colour. A pack that changes `color` must change this
     /// with it, or the terrain ends in a visible edge against the sky.
@@ -61,8 +59,8 @@ pub struct FogSettings {
 impl Default for FogSettings {
     fn default() -> Self {
         FogSettings {
-            color: srgb(HAZE_FOG_SRGB),
-            sky: srgb(HAZE_SKY_SRGB),
+            color: srgb(SkyFog::DEFAULT.fog),
+            sky: srgb(SkyFog::DEFAULT.sky),
             // At 0.88 and below a farther reach's square edge shows against the sky.
             reach_opacity: 0.95,
         }
@@ -176,9 +174,9 @@ pub fn streamed_fog(
 }
 
 /// What the shader fogs toward so that a surface fully fogged comes out as
-/// `seen` (sRGB): the tonemapper darkens the fog colour, see [`HAZE_FOG_SRGB`].
+/// `seen` (sRGB): the tonemapper darkens the fog colour, see [`TONEMAP_DARKENING_SRGB`].
 pub fn fog_toward(seen: [f32; 3]) -> [f32; 3] {
-    let lift = |i: usize| f32::from(HAZE_FOG_SRGB[i] - HAZE_SKY_SRGB[i]) / 255.0;
+    let lift = |i: usize| f32::from(TONEMAP_DARKENING_SRGB[i]) / 255.0;
     [0, 1, 2].map(|i| (seen[i] + lift(i)).min(1.0))
 }
 
@@ -359,14 +357,10 @@ mod tests {
     }
 
     #[test]
-    fn the_default_fog_colour_is_the_sky_lifted_by_the_tonemapper_darkening() {
+    fn with_no_biome_colours_the_haze_is_the_default_sky_blue_and_white() {
         let FogSettings { color, sky, .. } = FogSettings::default();
-        assert_eq!(color, srgb(HAZE_FOG_SRGB));
-        assert_eq!(sky, srgb(HAZE_SKY_SRGB));
-        // The tonemapper only darkens a colour this bright, so equal values are the mistake.
-        for (fog, sky) in HAZE_FOG_SRGB.into_iter().zip(HAZE_SKY_SRGB) {
-            assert!(fog > sky, "fog {fog} against sky {sky}");
-        }
+        assert_eq!(color, srgb([0xff, 0xff, 0xff]));
+        assert_eq!(sky, srgb([0x87, 0xce, 0xeb]));
     }
 
     #[test]
