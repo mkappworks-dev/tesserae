@@ -137,14 +137,9 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 l.show(Screen::Worlds);
             }
         }
-        Act::VoxelStep(by) => {
-            let at = VOXEL_SIZES
-                .iter()
-                .position(|(size, _)| *size == l.form.voxel_size_m)
-                .unwrap_or(0);
-            let next = (at as i32 + by).rem_euclid(VOXEL_SIZES.len() as i32) as usize;
-            l.form.voxel_size_m = VOXEL_SIZES[next].0;
-            l.refocus = Some(Act::VoxelStep(1));
+        Act::VoxelSize(size) => {
+            l.form.voxel_size_m = size;
+            l.refocus = Some(Act::VoxelSize(size));
             l.version += 1;
         }
         Act::Mode(mode) => {
