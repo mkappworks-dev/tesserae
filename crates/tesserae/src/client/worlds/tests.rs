@@ -796,8 +796,15 @@ fn the_rail_cannot_skip_trust_on_the_mods_step() {
     act(&mut app, Act::ToggleMod(0));
     for target in [Step::Biomes, Step::Review] {
         act(&mut app, Act::Step(target));
-        assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
-        assert!(launcher(&app).trust_asked, "the panel explains why");
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::StepTrust {
+                on: Step::Mods,
+                to: target
+            },
+            "the dialog explains why"
+        );
+        act(&mut app, Act::Back);
     }
     assert!(
         launcher(&app).form.mods.contains("lamps"),
@@ -1466,48 +1473,79 @@ fn app_with_previewer(worlds: &Directory) -> App {
 }
 
 #[test]
-fn next_on_mods_asks_for_trust_in_place_and_then_shows_the_biomes() {
+fn next_on_mods_asks_for_trust_in_a_dialog_and_then_shows_the_biomes() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
         Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
-    app.insert_resource(Previewer(fake_preview));
     app.update();
     new_world(&mut app);
     act(&mut app, Act::Next);
     untrust(&mut app, &["lamps"]);
     act(&mut app, Act::ToggleMod(0));
     act(&mut app, Act::Next);
-    assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
-    assert!(launcher(&app).trust_asked);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::StepTrust {
+            on: Step::Mods,
+            to: Step::Biomes
+        }
+    );
     assert!(shown(&mut app, "Trust this item to continue"));
-    assert!(shown(&mut app, "Trust it and continue"));
-    act(&mut app, Act::TrustMods);
+    assert_eq!(
+        focused_act(&app),
+        Some(Act::Back),
+        "Cancel is the safe default"
+    );
+    act(&mut app, Act::TrustStep);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
-    assert!(!launcher(&app).trust_asked);
     assert!(shown(&mut app, "Meadow"));
 }
 
 #[test]
-fn changing_the_mods_hides_the_trust_panel_until_next_asks_again() {
+fn cancelling_the_mods_trust_dialog_stays_on_the_mods_step_with_the_picks() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
         Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
-    app.insert_resource(Previewer(fake_preview));
     app.update();
     new_world(&mut app);
     act(&mut app, Act::Next);
     untrust(&mut app, &["lamps"]);
-    act(&mut app, Act::Next);
-    assert!(launcher(&app).trust_asked);
     act(&mut app, Act::ToggleMod(0));
-    assert!(!launcher(&app).trust_asked);
     act(&mut app, Act::Next);
-    assert!(launcher(&app).trust_asked);
+    act(&mut app, Act::Back);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+    assert!(launcher(&app).form.mods.contains("lamps"));
+}
+
+#[test]
+fn changing_the_mods_after_trusting_asks_again_on_continue() {
+    let worlds = Directory::new();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &[])
+            .with_mod("lamps", &[])
+            .with_mod("strata", &[]),
+    );
+    app.update();
+    new_world(&mut app);
+    act(&mut app, Act::Next);
+    untrust(&mut app, &["lamps"]);
+    act(&mut app, Act::ToggleMod(0));
+    act(&mut app, Act::Next);
+    act(&mut app, Act::TrustStep);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    act(&mut app, Act::Back);
+    untrust(&mut app, &["strata"]);
+    act(&mut app, Act::ToggleMod(1));
+    act(&mut app, Act::Next);
+    assert!(matches!(
+        launcher(&app).screen,
+        Screen::StepTrust { on: Step::Mods, .. }
+    ));
 }
 
 #[test]

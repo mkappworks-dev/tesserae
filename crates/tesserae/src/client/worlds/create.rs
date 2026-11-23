@@ -76,7 +76,6 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             l.form.game = Some(game.id.clone());
             // Each Game starts from the Mods it suggests; picks made for another do not carry over.
             l.form.mods = cx.installed.suggested(&game.id);
-            l.trust_asked = false;
             l.version += 1;
         }
         Act::ToggleMod(index) => {
@@ -102,25 +101,7 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 }
             }
             l.clashes = cx.installed.clashes(&game, &l.form.mods);
-            // The panel lists the old picks; Next asks again for the new ones.
-            l.trust_asked = false;
             l.version += 1;
-        }
-        Act::TrustMods => {
-            if l.screen != Screen::Create(Step::Mods) {
-                return;
-            }
-            let ids = chosen_ids(&l.form, cx.installed);
-            let granted = cx
-                .installed
-                .prepare_trust(&ids)
-                .and_then(|()| cx.installed.grant_all());
-            if let Err(e) = granted {
-                l.form.problem = Some(format!("Could not record Trust: {e}"));
-                l.version += 1;
-                return;
-            }
-            go(l, cx.installed, cx.previewer, Step::Biomes);
         }
         Act::TrustStep => {
             let Screen::StepTrust { on, to } = l.screen else {
@@ -214,7 +195,7 @@ pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Preview
         return;
     }
     // Biomes is gated by `read_biomes`, which also covers a jump there from Review.
-    if current <= Step::Mods && target > Step::Biomes && !mods_trusted(l, installed) {
+    if current <= Step::Mods && target > Step::Biomes && !mods_trusted(l, installed, target) {
         return;
     }
     if target == Step::Biomes && !read_biomes(l, installed, previewer) {
@@ -240,8 +221,8 @@ fn game_trusted(l: &mut Launcher, installed: &mut Installed, to: Step) -> bool {
 }
 
 /// Whether the chosen Game and Mods may run. Leaving the Mods step reads their Biomes, which runs
-/// them, so Trust comes first; when it is missing the player stays on Mods with the Trust panel.
-fn mods_trusted(l: &mut Launcher, installed: &mut Installed) -> bool {
+/// them, so Trust comes first; when it is missing a dialog over the Mods step asks for it.
+fn mods_trusted(l: &mut Launcher, installed: &mut Installed, to: Step) -> bool {
     let ids = chosen_ids(&l.form, installed);
     if let Err(e) = installed.prepare_trust(&ids) {
         l.form.problem = Some(format!("Could not check Trust: {e}"));
@@ -251,8 +232,7 @@ fn mods_trusted(l: &mut Launcher, installed: &mut Installed) -> bool {
     if installed.untrusted.is_empty() {
         return true;
     }
-    l.show(Screen::Create(Step::Mods));
-    l.trust_asked = true;
+    l.show(Screen::StepTrust { on: Step::Mods, to });
     false
 }
 
@@ -268,7 +248,7 @@ pub(super) fn read_biomes(
         return true;
     }
     // Reached from Review or Biomes this skips `go`'s check, so Trust revoked since is caught here.
-    if !mods_trusted(l, installed) {
+    if !mods_trusted(l, installed, Step::Biomes) {
         return false;
     }
     match (previewer.0)(installed, &ids) {

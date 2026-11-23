@@ -117,7 +117,7 @@ pub(super) fn spawn(
         match &l.screen {
             Screen::Delete(path) => focus = delete(root, l, path),
             Screen::Discard(_) => focus = discard(root),
-            Screen::StepTrust { .. } => focus = step_trust(root, installed),
+            Screen::StepTrust { on, .. } => focus = step_trust(root, installed, *on),
             _ if resetting => focus = reset(root),
             _ => {}
         }
@@ -2067,9 +2067,6 @@ fn mods_page(
             theme::TEXT_SMALL,
             theme::muted(),
         );
-        if l.trust_asked && !installed.untrusted.is_empty() {
-            trust_panel(col, installed);
-        }
     })
 }
 
@@ -2459,52 +2456,6 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
         });
 }
 
-/// The Mods step's Trust panel: what the next step would run, to grant before leaving.
-fn trust_panel(col: &mut ChildSpawnerCommands, installed: &Installed) {
-    let items = &installed.untrusted;
-    col.spawn((
-        BackgroundColor(theme::TRUST_PANEL),
-        BorderColor::all(theme::edge()),
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            margin: UiRect::top(Val::Px(8.0)),
-            padding: UiRect::all(Val::Px(16.0)),
-            border: UiRect::all(Val::Px(theme::RULE)),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-    ))
-    .with_children(|panel| {
-        ui::weighted_text(
-            panel,
-            if items.len() == 1 {
-                "Trust this item to continue".to_owned()
-            } else {
-                format!("Trust {} items to continue", items.len())
-            },
-            theme::TEXT_BODY,
-            theme::LABEL,
-            theme::INK,
-        );
-        ui::paragraph(
-            panel,
-            "The next step reads the Biomes these items declare, which runs them. Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
-                .to_owned(),
-            theme::TEXT_SMALL,
-            theme::muted(),
-        );
-        trust_rows(panel, items);
-        ui::paragraph(
-            panel,
-            "Trust is for these exact files.".to_owned(),
-            theme::TEXT_CAPTION,
-            theme::muted(),
-        );
-    });
-}
-
 /// Trust for the whole set on one scrolling page, with its buttons in the footer so they stay
 /// in view however many items there are.
 fn trust(
@@ -2618,16 +2569,7 @@ fn step_frame(
     // Only the Game step explains itself: a Game is the one unfamiliar idea.
     let subtitle =
         (step == Step::Game).then_some("It shapes the land, its biomes and what you can build.");
-    let trusting = step == Step::Mods && l.trust_asked && !installed.untrusted.is_empty();
     let primary = match step.next() {
-        Some(_) if trusting => (
-            if installed.untrusted.len() == 1 {
-                "Trust it and continue".to_owned()
-            } else {
-                format!("Trust {} and continue", installed.untrusted.len())
-            },
-            Act::TrustMods,
-        ),
         Some(next) => (format!("Next: {}", next.label()), Act::Next),
         None => ("Create World".to_owned(), Act::Create),
     };
@@ -3726,7 +3668,7 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
 }
 
 /// Trust before a step that runs the chosen items; Cancel is focused, so Enter alone never grants.
-fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed) -> Option<Entity> {
+fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed, on: Step) -> Option<Entity> {
     let items = &installed.untrusted;
     let title = if items.len() == 1 {
         "Trust this item to continue?".to_owned()
@@ -3739,7 +3681,11 @@ fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed) -> Option<
         |d| {
             cine::dialog_text(
                 d,
-                "The next steps preview what these items make, which runs them. Only trust ones you know.",
+                if on == Step::Mods {
+                    "The next step reads what these items declare, which runs them. Only trust ones you know."
+                } else {
+                    "The next steps preview what these items make, which runs them. Only trust ones you know."
+                },
                 theme::muted(),
             );
             trust_rows(d, items);

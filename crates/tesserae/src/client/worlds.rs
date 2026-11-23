@@ -143,8 +143,8 @@ impl Step {
     }
 }
 
-/// What runs once every Mod it needs is trusted. Create World's Mods step asks for Trust inline
-/// instead, see [`Launcher::trust_asked`].
+/// What runs once every Mod it needs is trusted. Create World's steps ask in a
+/// [`Screen::StepTrust`] dialog instead.
 #[derive(Clone, Debug, PartialEq)]
 enum Next {
     Open(PathBuf),
@@ -366,9 +366,6 @@ struct Launcher {
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
-    /// The Mods step shows its Trust panel: leaving it runs the chosen Game and Mods to read their
-    /// Biomes. Cleared by every screen change and by every change to the picks it lists.
-    trust_asked: bool,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
@@ -420,7 +417,6 @@ impl Launcher {
     fn show(&mut self, screen: Screen) {
         self.screen = screen;
         self.problem = None;
-        self.trust_asked = false;
         self.version += 1;
     }
 
@@ -486,8 +482,6 @@ pub(super) enum Act {
     SaveName,
     ConfirmDelete,
     Trust,
-    /// The Mods step's primary button: trusts what the panel lists, then shows the Biomes.
-    TrustMods,
     /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
     TrustStep,
     Dismiss,
@@ -837,7 +831,6 @@ fn start(
         problem: None,
         clashes: Default::default(),
         version: 0,
-        trust_asked: false,
         from_list: false,
         opening_frames: 0,
     };
@@ -1136,7 +1129,6 @@ fn handle(
             | Act::DiscardSetup
             | Act::Voxel(..)
             | Act::Mode(..)
-            | Act::TrustMods
             | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
             Act::Home
