@@ -523,6 +523,7 @@ pub(super) fn create(
                 saved::draw(path.clone(), std::sync::Arc::clone(source), &sidecar);
             }
             relaunch.0 = Some(Target::World(path));
+            l.opening_game = sidecar.game.as_ref().map(|g| game_title(Some(g)));
             l.show(Screen::Opening(name));
         }
         Err(e) => {

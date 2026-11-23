@@ -73,6 +73,10 @@ pub(super) fn play(
 
 pub(super) fn open(l: &mut Launcher, relaunch: &mut Switch, path: PathBuf) {
     let name = l.display_name(&path);
+    l.opening_game = l
+        .entry(&path)
+        .and_then(Entry::details)
+        .map(|d| game_title(d.game.as_ref()));
     relaunch.0 = Some(Target::World(path));
     l.show(Screen::Opening(name));
 }
@@ -100,6 +104,9 @@ pub(super) fn opening(
             what: What::Folder(folder),
             name: Some(name),
             from_list: true,
+        });
+        commands.insert_resource(super::super::loading::Heading {
+            game: l.opening_game.clone(),
         });
         next.set(AppState::Loading);
     }

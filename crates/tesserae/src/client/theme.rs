@@ -135,7 +135,6 @@ pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
 pub(super) const SLOT_ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
 pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x40);
 
-pub(super) const TEXT_PANEL_TITLE: f32 = 31.0;
 pub(super) const TEXT_TITLE: f32 = 28.0;
 pub(super) const TEXT_DIALOG_TITLE: f32 = 22.0;
 pub(super) const TEXT_HEADING: f32 = 19.0;

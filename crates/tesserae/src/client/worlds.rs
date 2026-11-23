@@ -401,6 +401,8 @@ struct Launcher {
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
+    /// The Game of the World being opened, as the Opening and loading screens name it.
+    opening_game: Option<String>,
 }
 
 /// A row that shows or hides the settings under it.
@@ -665,6 +667,10 @@ fn review_capture(
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {
                         let name = l.display_name(&first);
+                        l.opening_game = l
+                            .entry(&first)
+                            .and_then(Entry::details)
+                            .map(|d| game_title(d.game.as_ref()));
                         l.show(Screen::Opening(name));
                     }
                     continue;
@@ -875,6 +881,7 @@ fn start(
         terrain: None,
         from_list: false,
         opening_frames: 0,
+        opening_game: None,
     };
     launcher.refresh(&worlds.0);
     if let Some(failure) = &failure.0 {

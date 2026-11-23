@@ -189,6 +189,14 @@ fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
     assert_eq!(request.name.as_deref(), Some("Ridge"));
     assert!(request.from_list);
     assert_eq!(
+        app.world()
+            .resource::<super::super::loading::Heading>()
+            .game
+            .as_deref(),
+        Some("Terra"),
+        "the loading screen names the Game"
+    );
+    assert_eq!(
         *app.world().resource::<State<AppState>>().get(),
         AppState::Loading
     );
