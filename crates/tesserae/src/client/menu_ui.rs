@@ -12,6 +12,8 @@ use bevy::{
 use super::theme;
 
 mod toast;
+#[cfg(test)]
+pub(super) use toast::showing;
 pub(super) use toast::{Tone, notify, notify_for};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]

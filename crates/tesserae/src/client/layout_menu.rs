@@ -1685,6 +1685,7 @@ mod tests {
         app.init_resource::<super::super::edit::Hotbar>()
             .init_resource::<super::super::input::UiInput>()
             .init_resource::<Time>()
+            .init_resource::<layout::Preview>()
             .add_message::<LayoutIntent>()
             .add_systems(
                 Update,
