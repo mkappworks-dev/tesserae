@@ -129,9 +129,27 @@ pub(super) fn toggle(
     mut mode: ResMut<LayoutMode>,
     preferences: Res<Preferences>,
     (catalogue, settings, ui, save, inventory, map, list): Blockers,
+    held: (
+        Option<Res<super::edit::Hotbar>>,
+        Option<Res<super::edit::Catalogue>>,
+    ),
     window: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
+    // The place Tool and Quick layout are two ways to place: only one at a time.
+    let placing = held
+        .0
+        .zip(held.1)
+        .is_some_and(|(hotbar, tools)| super::structure::holding_place(&hotbar, &tools.0));
+    if placing {
+        if mode.on {
+            mode.leave();
+        }
+        if menu.open {
+            close(&mut menu, &mut cursor);
+        }
+        return;
+    }
     if !window.focused
         || catalogue.open
         || settings.is_some_and(|settings| settings.open)
@@ -1374,6 +1392,43 @@ mod tests {
                 "{blocker}"
             );
         }
+    }
+
+    fn hold_the_place_tool(app: &mut App) {
+        use crate::content::{CatalogueTool, ContentCatalogue};
+        use crate::server::tool::{ToolId, ToolKind};
+        let place = ToolId(1);
+        app.insert_resource(super::super::edit::Catalogue(ContentCatalogue {
+            tools: vec![CatalogueTool {
+                id: place,
+                name: "terra:place".into(),
+                kind: ToolKind::Place,
+            }],
+            ..default()
+        }));
+        let mut hotbar = super::super::edit::Hotbar::default();
+        hotbar.outside = Some(super::super::edit::Holding::Tool(place));
+        app.insert_resource(hotbar);
+    }
+
+    #[test]
+    fn the_layout_key_does_nothing_with_the_place_tool_in_hand() {
+        let mut app = app();
+        hold_the_place_tool(&mut app);
+        press(&mut app, KeyCode::KeyL);
+        assert!(!menu(&app).open && !app.world().resource::<LayoutMode>().on);
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
+    #[test]
+    fn taking_the_place_tool_in_hand_leaves_layout_mode() {
+        let mut app = app();
+        open(&mut app);
+        press(&mut app, KeyCode::KeyL);
+        assert!(app.world().resource::<LayoutMode>().on, "ready to place");
+        hold_the_place_tool(&mut app);
+        app.world_mut().run_system_once(toggle).unwrap();
+        assert!(!app.world().resource::<LayoutMode>().on);
     }
 
     #[test]
