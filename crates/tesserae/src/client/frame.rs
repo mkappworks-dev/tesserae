@@ -924,6 +924,15 @@ pub(super) mod testing {
             .is_some_and(|t| t.scale.x < 1.0)
     }
 
+    /// Whether an open [`Popup`] covers the screen, swallowing a press outside it.
+    pub(in crate::client) fn covered(app: &mut App) -> bool {
+        app.world_mut()
+            .query_filtered::<(), With<Scrim>>()
+            .iter(app.world())
+            .next()
+            .is_some()
+    }
+
     /// Presses outside every open [`Popup`], where the pointer meets its scrim.
     pub(in crate::client) fn click_outside(app: &mut App) {
         use bevy::picking::backend::HitData;

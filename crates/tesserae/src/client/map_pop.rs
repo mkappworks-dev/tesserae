@@ -15,7 +15,6 @@ use tesserae_core::marker::MAX_NAME_CHARS;
 use super::actions::Actions;
 use super::buttons::{self, ButtonStyle};
 use super::cinematic::Kind;
-use super::frame;
 use super::map_cache::MapCache;
 use super::map_window::{MapView, MapWindow, ViewBox, toggle};
 use super::menu_ui as ui;
@@ -87,7 +86,6 @@ pub(super) enum Side {
 
 pub(super) fn plugin(app: &mut App) {
     app.add_observer(activate)
-        .add_observer(dismissed)
         .add_observer(clicked)
         .add_observer(pressed)
         .add_session_systems(
@@ -216,18 +214,6 @@ fn activate(
             window.pop = None;
             window.then_edit = true;
         }
-    }
-}
-
-fn dismissed(
-    dismiss: On<frame::Dismiss>,
-    roots: Query<(), With<PopRoot>>,
-    window: Option<ResMut<MapWindow>>,
-) {
-    if let Some(mut window) = window
-        && roots.contains(dismiss.entity)
-    {
-        window.pop = None;
     }
 }
 
@@ -505,9 +491,9 @@ fn spawn_pop(
     marks: &Marks,
     images: &mut Assets<Image>,
 ) {
+    // Not a `frame::Popup`: a click on the Map moves the add point or opens another marker.
     view.spawn((
         PopRoot,
-        frame::Popup,
         Visibility::Hidden,
         GlobalZIndex(21),
         Node {
