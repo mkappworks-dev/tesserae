@@ -23,3 +23,9 @@ list the mockup gives the same toolbar.
       under the toolbar
 
 ## Comments
+
+- Mockup pages with a sticky toolbar: `/worlds/new/mods`, `/worlds/new/biomes`
+  (the plain list and the list beside the open Biome panel), `/worlds` once its
+  search appears, and the `/map` legend tabs. The select-all row moved out of
+  the re-rendered results into the toolbar node, so one node is sticky. `/mods`
+  and `/inventory` need nothing.
