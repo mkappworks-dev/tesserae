@@ -11,6 +11,9 @@ use bevy::{
 
 use super::theme;
 
+mod toast;
+pub(super) use toast::{Tone, notify, notify_for};
+
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(super) enum Tab {
     Catalogue,
@@ -161,8 +164,8 @@ pub(super) fn plugin(app: &mut App) {
             (style, button_label_colors)
                 .chain()
                 .after(super::settings::render),
-        )
-        .add_systems(Update, age_notifications.after(button_label_colors));
+        );
+    toast::plugin(app);
     use crate::session::in_menus;
     app.init_session_state::<Searches>()
         .add_observer(clear_search)
@@ -887,10 +890,14 @@ pub(super) enum IconKind {
     Copy,
     /// The Inventory's Catalogue tab.
     Grid,
+    /// A toast's tones, in the toast's heavier 2.2-unit stroke.
+    Info,
+    Done,
+    Warning,
 }
-const ICONS: usize = 32;
+const ICONS: usize = 35;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 29] = [
+const DRAWN: [IconKind; 32] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -920,6 +927,9 @@ const DRAWN: [IconKind; 29] = [
     IconKind::Shuffle,
     IconKind::Copy,
     IconKind::Grid,
+    IconKind::Info,
+    IconKind::Done,
+    IconKind::Warning,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1026,6 +1036,7 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
             .fold(f32::MAX, f32::min)
     };
     let stroke = |distance: f32| ((0.85 - distance) / UNITS_PER_PIXEL + 0.5).clamp(0.0, 1.0);
+    let bold = |distance: f32| ((1.1 - distance) / UNITS_PER_PIXEL + 0.5).clamp(0.0, 1.0);
     let fill = |signed: f32| (0.5 - signed / UNITS_PER_PIXEL).clamp(0.0, 1.0);
     let cubic = |a: Vec2, b: Vec2, c: Vec2, d: Vec2| -> Vec<Vec2> {
         (0..=16)
@@ -1319,6 +1330,17 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
             .min(segment(v(12.0, 13.0), v(12.0, 22.0))),
         ),
         IconKind::Check => stroke(path(&[v(5.0, 12.0), v(9.0, 16.0), v(19.0, 6.0)])),
+        IconKind::Info => bold(
+            ring(v(12.0, 12.0), 9.0)
+                .min(segment(v(12.0, 11.0), v(12.0, 17.0)))
+                .min(dots(&[v(12.0, 7.0)])),
+        ),
+        IconKind::Done => bold(path(&[v(5.0, 12.5), v(9.5, 17.0), v(19.0, 7.5)])),
+        IconKind::Warning => bold(
+            path(&[v(12.0, 3.0), v(2.5, 20.0), v(21.5, 20.0), v(12.0, 3.0)])
+                .min(segment(v(12.0, 10.0), v(12.0, 14.5)))
+                .min(dots(&[v(12.0, 17.5)])),
+        ),
         _ => {
             let d = p - v(12.0, 12.0);
             let teeth = (d.y.atan2(d.x) * 8.0).cos();
@@ -1410,125 +1432,6 @@ fn button_label_colors(
     }
 }
 
-#[derive(Component)]
-struct Notification(Timer);
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Tone {
-    /// Something the Player asked for took effect.
-    Change,
-    /// Something was refused or failed.
-    Alert,
-}
-impl Tone {
-    fn accent(self) -> Color {
-        match self {
-            Self::Change => theme::ACCENT,
-            Self::Alert => theme::WARN,
-        }
-    }
-}
-const NOTICE_INSET_PX: f32 = 16.0;
-const NOTICE_SLIDE_S: f32 = 0.22;
-/// Past the widest card, so the slide starts fully off screen.
-const NOTICE_OFFSCREEN_PX: f32 = -460.0;
-
-/// The card's right offset: eases in from off screen, rests, then eases back out.
-fn notice_right_px(elapsed_s: f32, lifetime_s: f32) -> f32 {
-    let shown = (elapsed_s.min(lifetime_s - elapsed_s) / NOTICE_SLIDE_S).clamp(0.0, 1.0);
-    let eased = 1.0 - (1.0 - shown).powi(3);
-    NOTICE_OFFSCREEN_PX + (NOTICE_INSET_PX - NOTICE_OFFSCREEN_PX) * eased
-}
-pub(super) fn notify(commands: &mut Commands, message: &str, tone: Tone) {
-    notify_for(commands, message, tone, 2.6);
-}
-pub(super) fn notify_for(commands: &mut Commands, message: &str, tone: Tone, seconds: f32) {
-    let accent = tone.accent();
-    commands.queue(|world: &mut World| {
-        let previous: Vec<_> = world
-            .query_filtered::<Entity, With<Notification>>()
-            .iter(world)
-            .collect();
-        for entity in previous {
-            world.despawn(entity);
-        }
-    });
-    commands
-        .spawn((
-            Notification(Timer::from_seconds(seconds, TimerMode::Once)),
-            GlobalZIndex(40),
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(NOTICE_OFFSCREEN_PX),
-                top: Val::Px(NOTICE_INSET_PX),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .with_children(|root| {
-            root.spawn((
-                BackgroundColor(theme::notice_card()),
-                BorderColor {
-                    left: accent,
-                    ..BorderColor::all(theme::GROUT)
-                },
-                BoxShadow::new(
-                    Color::BLACK.with_alpha(0.53),
-                    Val::Px(0.0),
-                    Val::Px(10.0),
-                    Val::Px(0.0),
-                    Val::Px(30.0),
-                ),
-                Node {
-                    max_width: Val::Px(360.0),
-                    padding: UiRect::axes(Val::Px(16.0), Val::Px(11.0)),
-                    border: UiRect {
-                        left: Val::Px(4.0),
-                        ..UiRect::all(Val::Px(theme::FRAME))
-                    },
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ))
-            .with_children(|card| {
-                card.spawn(theme::ring(theme::RADIUS_MENU));
-                paragraph(card, message, theme::TEXT_CAPTION, theme::NOTICE_CARD_INK);
-            });
-        });
-}
-fn age_notifications(
-    mut commands: Commands,
-    time: Option<Res<Time>>,
-    mut notifications: Query<(Entity, &mut Notification, &mut Node)>,
-    preferences: Option<Res<super::profile::Preferences>>,
-    dead: Option<Res<super::death::Dead>>,
-) {
-    let Some(time) = time else {
-        return;
-    };
-    let still = preferences.is_some_and(|p| p.reduced_motion);
-    let display = if super::death::alive(dead) {
-        Display::Flex
-    } else {
-        Display::None
-    };
-    for (entity, mut notice, mut node) in &mut notifications {
-        if node.display != display {
-            node.display = display;
-        }
-        if notice.0.tick(time.delta()).is_finished() {
-            commands.entity(entity).despawn();
-        } else if still {
-            node.right = Val::Px(NOTICE_INSET_PX);
-        } else {
-            node.right = Val::Px(notice_right_px(
-                notice.0.elapsed_secs(),
-                notice.0.duration().as_secs_f32(),
-            ));
-        }
-    }
-}
-
 pub(super) fn paragraph(
     parent: &mut ChildSpawnerCommands,
     value: impl Into<String>,
@@ -1561,100 +1464,6 @@ fn dashed_border_colors(
 }
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn notifications_slide_in_from_the_right_and_back_out() {
-        use super::{NOTICE_INSET_PX, NOTICE_OFFSCREEN_PX, NOTICE_SLIDE_S, notice_right_px};
-        assert_eq!(notice_right_px(0.0, 2.6), NOTICE_OFFSCREEN_PX);
-        let entering = notice_right_px(NOTICE_SLIDE_S / 2.0, 2.6);
-        assert!(NOTICE_OFFSCREEN_PX < entering && entering < NOTICE_INSET_PX);
-        assert_eq!(notice_right_px(NOTICE_SLIDE_S, 2.6), NOTICE_INSET_PX);
-        assert_eq!(notice_right_px(1.3, 2.6), NOTICE_INSET_PX);
-        assert_eq!(notice_right_px(2.6, 2.6), NOTICE_OFFSCREEN_PX);
-    }
-
-    #[test]
-    fn alerts_and_changes_carry_distinct_accents() {
-        for (tone, accent) in [
-            (super::Tone::Change, theme::ACCENT),
-            (super::Tone::Alert, theme::WARN),
-        ] {
-            let mut app = App::new();
-            super::notify(&mut app.world_mut().commands(), "Notice", tone);
-            app.world_mut().flush();
-            assert!(
-                app.world_mut()
-                    .query::<&BorderColor>()
-                    .iter(app.world())
-                    .any(|color| color.left == accent)
-            );
-        }
-    }
-
-    #[test]
-    fn reduced_motion_shows_a_notice_in_place_without_sliding() {
-        let mut app = App::new();
-        app.init_resource::<Time>()
-            .insert_resource(super::super::profile::Preferences {
-                reduced_motion: true,
-                ..default()
-            })
-            .add_systems(Update, super::age_notifications);
-        super::notify(
-            &mut app.world_mut().commands(),
-            "Saved",
-            super::Tone::Change,
-        );
-        app.world_mut().flush();
-        app.update();
-        let right = app
-            .world_mut()
-            .query_filtered::<&Node, With<super::Notification>>()
-            .single(app.world())
-            .unwrap()
-            .right;
-        assert_eq!(right, Val::Px(super::NOTICE_INSET_PX));
-    }
-
-    #[test]
-    fn notifications_replace_previous_messages_and_expire() {
-        let mut app = App::new();
-        app.init_resource::<Time>()
-            .add_systems(Update, super::age_notifications);
-        super::notify(
-            &mut app.world_mut().commands(),
-            "Physics mode",
-            super::Tone::Change,
-        );
-        super::notify(
-            &mut app.world_mut().commands(),
-            "Free flight mode",
-            super::Tone::Change,
-        );
-        app.world_mut().flush();
-        assert_eq!(
-            app.world_mut()
-                .query_filtered::<Entity, With<super::Notification>>()
-                .iter(app.world())
-                .count(),
-            1
-        );
-        let messages: Vec<_> = app
-            .world_mut()
-            .query::<&Text>()
-            .iter(app.world())
-            .map(|text| text.0.as_str())
-            .collect();
-        assert_eq!(messages, ["Free flight mode"]);
-        app.world_mut()
-            .resource_mut::<Time>()
-            .advance_by(std::time::Duration::from_secs(3));
-        app.update();
-        assert_eq!(
-            app.world_mut().query::<&Text>().iter(app.world()).count(),
-            0
-        );
-    }
-
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     fn app() -> App {

@@ -335,7 +335,7 @@ fn persist(
         && let Err(error) = store.save(&bindings, &preferences)
     {
         warn!("Could not save the layout: {error}");
-        ui::notify(&mut commands, "Could not save the layout", ui::Tone::Alert);
+        ui::notify(&mut commands, "Could not save the layout", ui::Tone::Error);
     }
 }
 

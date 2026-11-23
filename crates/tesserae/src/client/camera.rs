@@ -336,7 +336,7 @@ fn fly(
         let level = preferences.speed_level.next();
         preferences.speed_level = level;
         pending.0 = Some(super::view::SAVE_AFTER_S);
-        super::menu_ui::notify(&mut commands, level.label(), super::menu_ui::Tone::Change);
+        super::menu_ui::notify(&mut commands, level.label(), super::menu_ui::Tone::Info);
     }
     intents.write(MovementIntent {
         cancelled: !playing || actions.started(Action::Respawn),
