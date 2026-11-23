@@ -197,7 +197,7 @@ pub(super) type Look = tesserae_core::diorama::Scene;
 pub(super) fn look(l: &Launcher, at: usize) -> Option<Look> {
     let draft = l.form.biomes.as_ref()?;
     let choice = draft.choices.get(at)?;
-    let sky_fog = choice.sky_fog.unwrap_or(SkyFog::DEFAULT);
+    let sky_fog = draft.shown_sky_fog(at);
     let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
     let source = l.terrain.as_ref().map(|(_, source)| source.as_ref());
     let colour = |name: Option<&String>| name.map_or([96, 88, 80], |n| material(source, n));

@@ -20,8 +20,11 @@ it to its Game's colours, or to these defaults when it declares none.
 
 - [x] In a World, standing in a biome with no declared sky and fog shows a sky
       blue sky and white fog
-- [x] The Biomes step shows `#87ceeb` and `#ffffff` for such a biome, and Reset
-      returns to them
+- [x] Where no Biome declares colours, the Biomes step shows `#87ceeb` and
+      `#ffffff` for a colourless one, and Reset returns to them; beside coloured
+      Biomes, a colourless one's Sky and Fog fields are empty with the
+      placeholder "Same as the land around it", its diorama shows their blend,
+      and Reset returns to that
 - [x] A biome that declares its own colours is unchanged
 - [x] The defaults are defined in one place
 
@@ -48,3 +51,10 @@ Follow-up done: `sky_fog_at` blends only the Biomes that declare colours again
 `a_biome_without_colours_does_not_dilute_the_ones_that_have_them` is back, with
 `a_colourless_landform_biome_carries_on_the_sky_around_it` beside it. The
 Server still sends the default for a World of only colourless Biomes.
+
+Biomes step agrees with the World: `BiomesDraft::land_around` blends the other
+turned-on coloured Biomes at the colourless one's climate point with
+`tesserae_core::climate::blend_sky_fog`, the weighting `sky_fog_at` uses; it
+ignores landform ranges, which the step does not show. Typing one colour on such
+a Biome keeps the other at the blend, though its field still shows the
+placeholder until the panel is rebuilt.

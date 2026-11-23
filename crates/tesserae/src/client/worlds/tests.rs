@@ -2058,6 +2058,44 @@ fn a_biome_without_colours_shows_and_resets_to_sky_blue_and_white() {
     assert_eq!(edited(&app, 1).sky_fog, None);
 }
 
+const ASH: SkyFog = SkyFog {
+    sky: [0x30, 0x20, 0x10],
+    fog: [0x60, 0x50, 0x40],
+};
+
+fn coloured_ash_preview(installed: &Installed, ids: &[String]) -> Result<BiomePreview, String> {
+    let mut preview = fake_preview(installed, ids)?;
+    preview.biomes[0].sky_fog = Some(ASH);
+    Ok(preview)
+}
+
+#[test]
+fn beside_coloured_biomes_a_colourless_one_shows_the_land_around_it() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.insert_resource(Previewer(coloured_ash_preview));
+    app.update();
+    new_world(&mut app);
+    act(&mut app, Act::Next);
+    act(&mut app, Act::Next);
+    let colours = |app: &App| launcher(app).form.biomes.as_ref().unwrap().colours.clone();
+    let look = biome_look(&mut app, 1);
+    assert_eq!((look.sky, look.fog), (ASH.sky, ASH.fog), "the diorama");
+
+    act(&mut app, Act::SelectBiome(1));
+    assert_eq!(colours(&app), ["", ""]);
+    assert!(shown(&mut app, "Same as the land around it"));
+    type_into(&mut app, Field::Sky, "#0a141e");
+    assert_eq!(
+        edited(&app, 1).sky_fog.map(|s| s.fog),
+        Some(ASH.fog),
+        "the untyped half keeps the land's"
+    );
+    act(&mut app, Act::ResetBiome);
+    assert_eq!(colours(&app), ["", ""]);
+    assert_eq!(edited(&app, 1).sky_fog, None);
+}
+
 /// The Materials a Ground dropdown lists, top to bottom, leaving out those its search hides.
 fn ground_options(app: &mut App) -> Vec<String> {
     app.world_mut()

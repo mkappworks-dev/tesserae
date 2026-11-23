@@ -3967,10 +3967,15 @@ fn biome_settings(
             }
         });
     }
+    let placeholder = if choice.sky_fog.is_none() && draft.land_around(draft.selected).is_some() {
+        "Same as the land around it"
+    } else {
+        "#rrggbb"
+    };
     panel_section(body, "Atmosphere", true, |s| {
         for (title, field_id, at) in [("Sky", Field::Sky, 0), ("Fog", Field::Fog, 1)] {
             panel_row(s, title, |r| {
-                text_field(r, field_id, &draft.colours[at], "", "#rrggbb");
+                text_field(r, field_id, &draft.colours[at], "", placeholder);
             });
         }
     });
