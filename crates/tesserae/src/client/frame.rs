@@ -34,11 +34,14 @@ pub(super) struct Autofocus;
 /// Sent once for every press of a control in a [`Frame`], by key, click or
 /// controller, as the action runs; the click sound and rumble hang off it.
 #[derive(Event, Clone, Copy, Debug)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the screens that move onto the frame use it")
-)]
 pub(super) struct Press {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the click and rumble do not depend on which control"
+        )
+    )]
     pub entity: Entity,
     /// Made on a controller, so it rumbles.
     pub pad: bool,
