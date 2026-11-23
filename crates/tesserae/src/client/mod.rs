@@ -14,6 +14,7 @@ mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
 mod cinematic;
+mod click;
 mod compass;
 mod death;
 pub mod drawn_mask;
@@ -151,6 +152,7 @@ pub fn plugin(app: &mut App) {
     ));
     app.add_plugins((
         sound::plugin,
+        click::plugin,
         soundscape::plugin,
         map_cache::plugin,
         compass::plugin,

@@ -1,37 +1,33 @@
-//! The Layout menu: a panel docked over the live game, so the preview stays
-//! drawn behind it. Its choices apply as they are made and are saved when it
-//! closes.
+//! Quick layout: a side panel over the live game, so the preview stays drawn
+//! behind it. Its choices apply as they are made and are saved when it closes.
 //!
-//! It is its own input context beside the Catalogue and the settings: the
-//! cursor is released and the pad navigates it, and gameplay input waits.
+//! The panel is for the pointer; the keys in its prompt bar and the controller
+//! make the same changes, so nothing in it takes focus and Enter always builds.
+use super::frame::{self, Cap, Prompt};
 use super::inventory_window::look::{self, Flat, Flavour, Glyph};
 use super::theme;
 use super::{
     actions::{Action, Actions},
-    cinematic as cine,
     layout::{AXIS_NAMES, Kind, LayoutMode, LayoutPreferences, extent_m, metres, way_name},
     menu_ui as ui,
+    pad::PadInput,
     profile::{Preferences, Store},
 };
 use crate::client::buttons::{self, Eyebrow};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
-use bevy::input_focus::{FocusCause, InputFocus};
+use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::layout::MAX_LAYOUT_VOXELS;
 
-const CARD_WIDTH: f32 = 360.0;
+const SIDE_WIDTH: f32 = 300.0;
+const SIDE_INSET_PX: f32 = 24.0;
 const STATUS_WIDTH: f32 = 300.0;
-const PANEL_TOP_PX: f32 = 28.0;
-/// The prototype's 22 px over its in-play footer; play has no footer.
-const PANEL_BOTTOM_PX: f32 = 22.0;
 const STATUS_TOP_PX: f32 = 95.0;
-const PAD_X: f32 = 20.0;
-const METHOD_PX: f32 = 42.0;
-const PRESET_PX: f32 = 63.0;
-const AXIS_MARGIN_PX: f32 = 11.0;
+const SHAPE_PX: f32 = 63.0;
+const AXIS_TAG_PX: f32 = 22.0;
 const POINT_PX: f32 = 27.0;
 const NOTE_LINE_HEIGHT: f32 = 1.7;
 const CAP_NOTE: &str = "One layout can contain at most 256 Voxels. Each axis needs at least one.";
@@ -39,8 +35,6 @@ const CAP_NOTE: &str = "One layout can contain at most 256 Voxels. Each axis nee
 #[derive(Resource, Default)]
 pub(super) struct LayoutMenu {
     pub(super) open: bool,
-    /// Digits typed into an axis count, and which axis.
-    typed: Option<(usize, String)>,
     notice: String,
     dirty: bool,
     /// What the panel is now: the menu, the status card, or nothing.
@@ -62,17 +56,21 @@ impl LayoutMenu {
 }
 
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
+#[require(frame::PointerOnly = frame::PointerOnly)]
 enum Control {
     Kind(Kind),
     /// Which way an axis grows: false for the positive side, true for the negative.
     Way(usize, bool),
     Count(usize, i32),
     Gap(i32),
+    /// The gap key: more, or less with Shift.
+    GapKey,
     /// A quick shape: Line, Plane or Box.
     Preset(usize),
+    /// Turns the active axis round.
+    Reverse,
     /// Back to play with the layout ready, as the Layout key does.
-    Close,
-    Ready,
+    Build,
     /// Out of the mode, as the clear key does.
     Exit,
 }
@@ -80,15 +78,14 @@ enum Control {
 #[derive(Component)]
 struct Panel;
 
-/// The card itself, which scrolls when it is taller than the screen.
+/// The side panel itself, which scrolls when it is taller than the screen.
 #[derive(Component)]
 struct Card;
 
-/// The lines that say what the aim would lay, what to do next and which keys do
+/// The status card's lines that say what the aim would lay and which keys do
 /// what.
 #[derive(Component, Clone, Copy, PartialEq)]
 enum Info {
-    Count,
     Size,
     Body,
     Hint,
@@ -111,9 +108,7 @@ pub(super) fn plugin(app: &mut App) {
                 toggle
                     .after(super::menu::toggle)
                     .before(super::input::resolve),
-                (type_count, render, update_info, persist)
-                    .chain()
-                    .after(toggle),
+                (keys, render, update_info, persist).chain().after(toggle),
             ),
         );
 }
@@ -129,8 +124,7 @@ type Blockers<'w> = (
 );
 
 /// The Layout key opens the menu, turning the mode on, and closes it again into
-/// play with the layout ready to place. Escape closes it too. The mode is left
-/// with the clear key or Remove, as a tool is put away.
+/// play with the layout ready to place. Escape and the clear key leave the mode.
 pub(super) fn toggle(
     actions: Res<Actions>,
     mut menu: ResMut<LayoutMenu>,
@@ -151,24 +145,22 @@ pub(super) fn toggle(
     {
         return;
     }
-    let key = actions.started(Action::Layout);
-    let escape = menu.open && actions.cancel_requested();
-    // The clear key leaves the mode from the menu as it does from play.
-    if menu.open && mode.on && actions.started(Action::ClearTool) {
+    let exit = menu.open
+        && (actions.cancel_requested() || (mode.on && actions.started(Action::ClearTool)));
+    if exit {
         mode.leave();
-        close(&mut menu, &mut cursor, true);
+        close(&mut menu, &mut cursor);
         return;
     }
-    if !key && !escape {
+    if !actions.started(Action::Layout) {
         return;
     }
     if menu.open {
-        close(&mut menu, &mut cursor, key);
-    } else if key {
+        close(&mut menu, &mut cursor);
+    } else {
         mode.on = true;
         menu.open = true;
         menu.dirty = true;
-        menu.typed = None;
         menu.notice.clear();
         menu.opened_with = Some(preferences.layout.clone());
         cursor.grab_mode = CursorGrabMode::None;
@@ -176,23 +168,68 @@ pub(super) fn toggle(
     }
 }
 
-/// Closes the menu: the Layout key goes back to play, Escape leaves the cursor
-/// free as it does from the Catalogue.
-fn close(menu: &mut LayoutMenu, cursor: &mut CursorOptions, grab: bool) {
+/// Closes the menu back into play.
+fn close(menu: &mut LayoutMenu, cursor: &mut CursorOptions) {
     menu.open = false;
-    menu.typed = None;
-    cursor.grab_mode = if grab {
-        CursorGrabMode::Locked
-    } else {
-        CursorGrabMode::None
-    };
-    cursor.visible = !grab;
+    cursor.grab_mode = CursorGrabMode::Locked;
+    cursor.visible = false;
 }
 
-#[allow(clippy::too_many_arguments)]
+/// One change to the layout, from a click, a prompt or a key alike.
+fn apply(
+    control: Control,
+    shift: bool,
+    (menu, mode, preferences): (&mut LayoutMenu, &mut LayoutMode, &mut Preferences),
+    cursor: &mut Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    let mut layout = preferences.layout.clone();
+    menu.notice.clear();
+    match control {
+        Control::Kind(kind) => {
+            layout.kind = kind;
+            mode.points.clear();
+        }
+        Control::Way(axis, negative) => {
+            layout.negative[axis] = negative;
+            mode.active = axis;
+        }
+        Control::Count(axis, by) => {
+            mode.active = axis;
+            if layout.bump(axis, by) {
+                menu.notice = CAP_NOTE.to_owned();
+            }
+        }
+        Control::Gap(by) => layout.set_gap(by),
+        Control::GapKey => layout.set_gap(if shift { -1 } else { 1 }),
+        Control::Preset(at) => {
+            layout.kind = Kind::Directions;
+            layout.lengths = PRESETS[at].2;
+        }
+        Control::Reverse => {
+            if layout.kind == Kind::Directions {
+                let axis = mode.active.min(2);
+                layout.negative[axis] ^= true;
+            }
+        }
+        Control::Build | Control::Exit => {
+            if control == Control::Exit {
+                mode.leave();
+            }
+            for mut cursor in cursor {
+                close(menu, &mut cursor);
+            }
+        }
+    }
+    menu.dirty = true;
+    if layout != preferences.layout {
+        preferences.layout = layout;
+    }
+}
+
 fn activate(
     event: On<Activate>,
     controls: Query<&Control>,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
     mut menu: ResMut<LayoutMenu>,
     mut mode: ResMut<LayoutMode>,
     mut preferences: ResMut<Preferences>,
@@ -204,114 +241,76 @@ fn activate(
     if !menu.open {
         return;
     }
-    let mut layout = preferences.layout.clone();
-    menu.notice.clear();
-    match control {
-        Control::Kind(kind) => layout.kind = kind,
-        Control::Way(axis, negative) => {
-            layout.negative[axis] = negative;
-            mode.active = axis;
-            menu.typed = None;
-        }
-        Control::Count(axis, by) => {
-            mode.active = axis;
-            menu.typed = None;
-            if layout.bump(axis, by) {
-                menu.notice = CAP_NOTE.to_owned();
-            }
-        }
-        Control::Gap(by) => layout.set_gap(by),
-        Control::Preset(at) => {
-            layout.kind = Kind::Directions;
-            layout.lengths = PRESETS[at].2;
-            menu.typed = None;
-        }
-        Control::Close | Control::Ready => {
-            for mut cursor in &mut cursor {
-                close(&mut menu, &mut cursor, true);
-            }
-        }
-        Control::Exit => {
-            mode.leave();
-            for mut cursor in &mut cursor {
-                close(&mut menu, &mut cursor, true);
-            }
-        }
-    }
-    menu.dirty = true;
-    if layout != preferences.layout {
-        preferences.layout = layout;
-    }
+    let shift =
+        keys.is_some_and(|keys| keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]));
+    apply(
+        control,
+        shift,
+        (&mut menu, &mut mode, &mut preferences),
+        &mut cursor,
+    );
 }
 
-const DIGITS: [(KeyCode, u32); 20] = [
-    (KeyCode::Digit0, 0),
-    (KeyCode::Digit1, 1),
-    (KeyCode::Digit2, 2),
-    (KeyCode::Digit3, 3),
-    (KeyCode::Digit4, 4),
-    (KeyCode::Digit5, 5),
-    (KeyCode::Digit6, 6),
-    (KeyCode::Digit7, 7),
-    (KeyCode::Digit8, 8),
-    (KeyCode::Digit9, 9),
-    (KeyCode::Numpad0, 0),
-    (KeyCode::Numpad1, 1),
-    (KeyCode::Numpad2, 2),
-    (KeyCode::Numpad3, 3),
-    (KeyCode::Numpad4, 4),
-    (KeyCode::Numpad5, 5),
-    (KeyCode::Numpad6, 6),
-    (KeyCode::Numpad7, 7),
-    (KeyCode::Numpad8, 8),
-    (KeyCode::Numpad9, 9),
-];
-
-/// Types a count into the active axis: digits append, Backspace removes one and
-/// Enter ends it. A pad has the steppers instead.
-fn type_count(
+/// The keys and controller buttons the prompt bar names but cannot fire
+/// itself: shapes, axis and count, gap on the shoulders, and Enter or A to
+/// build. Letters fire their prompts through the frame.
+fn keys(
     keys: Res<ButtonInput<KeyCode>>,
-    mode: Res<LayoutMode>,
+    pad: Option<Res<PadInput>>,
     mut menu: ResMut<LayoutMenu>,
+    mut mode: ResMut<LayoutMode>,
     mut preferences: ResMut<Preferences>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !menu.open {
         return;
     }
+    let pad = |button| {
+        pad.as_ref()
+            .is_some_and(|p| p.navigation.just_pressed(button))
+    };
+    let key = |codes: &[KeyCode]| keys.any_just_pressed(codes.iter().copied());
+    let directions = preferences.layout.kind == Kind::Directions;
     let axis = mode.active.min(2);
-    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
-        menu.typed = None;
-        menu.dirty = true;
-        return;
-    }
-    let mut digits = menu
-        .typed
-        .as_ref()
-        .filter(|(typed_axis, _)| *typed_axis == axis)
-        .map(|(_, digits)| digits.clone())
-        .unwrap_or_default();
-    let mut changed = keys.just_pressed(KeyCode::Backspace) && digits.pop().is_some();
-    for (key, digit) in DIGITS {
-        if keys.just_pressed(key) && digits.len() < 3 {
-            digits.push(char::from_digit(digit, 10).expect("a digit"));
-            changed = true;
+    let shape = [
+        [KeyCode::Digit1, KeyCode::Numpad1],
+        [KeyCode::Digit2, KeyCode::Numpad2],
+        [KeyCode::Digit3, KeyCode::Numpad3],
+    ]
+    .iter()
+    .position(|codes| key(codes));
+    let control = if let Some(at) = shape {
+        Some(Control::Preset(at))
+    } else if key(&[KeyCode::Enter, KeyCode::NumpadEnter]) || pad(GamepadButton::South) {
+        Some(Control::Build)
+    } else if pad(GamepadButton::LeftTrigger) || pad(GamepadButton::RightTrigger) {
+        Some(Control::Gap(if pad(GamepadButton::RightTrigger) {
+            1
+        } else {
+            -1
+        }))
+    } else if !directions {
+        None
+    } else if key(&[KeyCode::ArrowUp]) || pad(GamepadButton::DPadUp) {
+        Some(Control::Count(axis, 1))
+    } else if key(&[KeyCode::ArrowDown]) || pad(GamepadButton::DPadDown) {
+        Some(Control::Count(axis, -1))
+    } else {
+        let by = i32::from(key(&[KeyCode::ArrowRight]) || pad(GamepadButton::DPadRight))
+            - i32::from(key(&[KeyCode::ArrowLeft]) || pad(GamepadButton::DPadLeft));
+        if by != 0 {
+            mode.active = (axis as i32 + by).rem_euclid(3) as usize;
+            menu.dirty = true;
         }
-    }
-    if !changed {
-        return;
-    }
-    menu.typed = Some((axis, digits.clone()));
-    menu.dirty = true;
-    menu.notice.clear();
-    if let Ok(count) = digits.parse::<u32>()
-        && count > 0
-    {
-        let mut layout = preferences.layout.clone();
-        if layout.set_count(axis, count) {
-            menu.notice = CAP_NOTE.to_owned();
-        } else if layout != preferences.layout {
-            preferences.layout = layout;
-        }
+        None
+    };
+    if let Some(control) = control {
+        apply(
+            control,
+            false,
+            (&mut menu, &mut mode, &mut preferences),
+            &mut cursor,
+        );
     }
 }
 
@@ -375,56 +374,42 @@ pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, title: &str) {
         .with_children(|p| buttons::eyebrow(p, title, Eyebrow::Inventory));
 }
 
-/// The band at the top: what the tool is, its name and the close cross.
-fn header(card: &mut ChildSpawnerCommands) {
-    card.spawn((
+/// A part of the panel under a rule, with an optional small label.
+fn section(
+    body: &mut ChildSpawnerCommands,
+    label: Option<&str>,
+    content: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    body.spawn((
         Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
-            padding: UiRect::axes(Val::Px(PAD_X), Val::Px(18.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(6.0),
+            padding: UiRect::vertical(Val::Px(14.0)),
             border: UiRect::bottom(Val::Px(theme::RULE)),
             flex_shrink: 0.0,
             ..default()
         },
-        BackgroundColor(theme::sheet_header()),
-        BorderColor::all(theme::LAYOUT_RULE),
+        BorderColor::all(theme::GAP_RULE),
     ))
-    .with_children(|header| {
-        header
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(5.0),
-                ..default()
-            })
-            .with_children(|title| {
-                title.spawn((
-                    look::label(
-                        "BUILDING TOOL",
-                        theme::TEXT_KEY,
-                        theme::LABEL,
-                        theme::item_eyebrow(),
-                    ),
-                    bevy::text::LetterSpacing::Px(theme::TOOL_TRACKING),
-                ));
-                title.spawn(look::label(
-                    "Quick layout",
-                    theme::ITEM_TEXT_TITLE,
-                    theme::MEDIUM,
-                    theme::INK,
-                ));
-            });
-        look::close(header, Control::Close);
+    .with_children(|section| {
+        if let Some(label) = label {
+            section.spawn(look::label(
+                label,
+                theme::TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::muted(),
+            ));
+        }
+        content(section);
     });
 }
 
-/// Direction & count or point to point, as one full-width track.
+/// Count or point to point, as one full-width track.
 fn method(body: &mut ChildSpawnerCommands, kind: Kind) {
     body.spawn((
         Node {
             column_gap: Val::Px(5.0),
             padding: UiRect::all(Val::Px(4.0)),
-            margin: UiRect::bottom(Val::Px(20.0)),
             border: UiRect::all(Val::Px(theme::RULE)),
             border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
             flex_shrink: 0.0,
@@ -435,7 +420,7 @@ fn method(body: &mut ChildSpawnerCommands, kind: Kind) {
     ))
     .with_children(|track| {
         for (choice, name) in [
-            (Kind::Directions, "Direction & count"),
+            (Kind::Directions, "Count"),
             (Kind::Between, "Point to point"),
         ] {
             look::flat_text(
@@ -449,7 +434,7 @@ fn method(body: &mut ChildSpawnerCommands, kind: Kind) {
                 Node {
                     flex_grow: 1.0,
                     flex_basis: Val::ZERO,
-                    min_height: Val::Px(METHOD_PX),
+                    min_height: Val::Px(36.0),
                     padding: UiRect::all(Val::Px(7.0)),
                     border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                     ..default()
@@ -460,113 +445,120 @@ fn method(body: &mut ChildSpawnerCommands, kind: Kind) {
     });
 }
 
-fn presets(body: &mut ChildSpawnerCommands, lengths: [u32; 3]) {
-    eyebrow(body, "QUICK SHAPES");
-    body.spawn(Node {
-        column_gap: Val::Px(7.0),
-        margin: UiRect::bottom(Val::Px(22.0)),
-        flex_shrink: 0.0,
-        ..default()
-    })
-    .with_children(|row| {
-        let current = shape_name(lengths);
-        for (at, (name, shape, _)) in PRESETS.into_iter().enumerate() {
-            look::flat(
-                row,
-                Control::Preset(at),
-                Flat {
-                    flavour: Flavour::Shape,
-                    selected: current == name,
-                },
-                Node {
-                    flex_grow: 1.0,
-                    flex_basis: Val::ZERO,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(5.0),
-                    min_height: Val::Px(PRESET_PX),
-                    padding: UiRect::all(Val::Px(9.0)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                    ..default()
-                },
-                |b, ink| {
-                    look::glyph(b, shape, ink);
-                    b.spawn((
-                        look::FlatInk,
-                        look::label(name, theme::TEXT_EYEBROW, theme::REGULAR, ink),
-                    ));
-                },
-            );
-        }
+/// Line, Plane and Box, each with the digit that picks it.
+fn shapes(body: &mut ChildSpawnerCommands, lengths: [u32; 3]) {
+    section(body, Some("Shape"), |section| {
+        section
+            .spawn(Node {
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|row| {
+                let current = shape_name(lengths);
+                for (at, (name, shape, _)) in PRESETS.into_iter().enumerate() {
+                    look::flat(
+                        row,
+                        Control::Preset(at),
+                        Flat {
+                            flavour: Flavour::Shape,
+                            selected: current == name,
+                        },
+                        Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::ZERO,
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                            min_height: Val::Px(SHAPE_PX),
+                            padding: UiRect::new(
+                                Val::Px(4.0),
+                                Val::Px(4.0),
+                                Val::Px(10.0),
+                                Val::Px(8.0),
+                            ),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+                            ..default()
+                        },
+                        |b, ink| {
+                            look::glyph(b, shape, ink);
+                            b.spawn((
+                                look::FlatInk,
+                                look::label(name, theme::TEXT_EYEBROW, theme::REGULAR, ink),
+                            ));
+                            b.spawn(Node {
+                                position_type: PositionType::Absolute,
+                                top: Val::Px(4.0),
+                                right: Val::Px(4.0),
+                                ..default()
+                            })
+                            .with_children(|corner| {
+                                look::key_cap(corner, (at + 1).to_string(), ());
+                            });
+                        },
+                    );
+                }
+            });
     });
 }
 
 /// One world axis on one line: its letter, the way it grows as a button that
-/// turns it round, and its count.
-fn axis_line(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: usize) {
+/// turns it round, and its count. The axis the keys act on is lit.
+fn axis_row(
+    body: &mut ChildSpawnerCommands,
+    layout: &LayoutPreferences,
+    axis: usize,
+    active: bool,
+) {
     let negative = layout.negative[axis];
-    body.spawn(Node {
-        justify_content: JustifyContent::SpaceBetween,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(12.0),
-        margin: UiRect::vertical(Val::Px(AXIS_MARGIN_PX)),
-        flex_shrink: 0.0,
-        ..default()
-    })
-    .with_children(|line| {
-        line.spawn(Node {
+    body.spawn((
+        Node {
             align_items: AlignItems::Center,
-            column_gap: Val::Px(9.0),
+            column_gap: Val::Px(6.0),
+            min_height: Val::Px(38.0),
+            padding: UiRect::horizontal(Val::Px(6.0)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+            ..default()
+        },
+        BackgroundColor(if active {
+            theme::LAYOUT_ROW_ON
+        } else {
+            Color::NONE
+        }),
+    ))
+    .with_children(|row| {
+        row.spawn(Node {
+            width: Val::Px(AXIS_TAG_PX),
             ..default()
         })
-        .with_children(|name| {
-            name.spawn((
-                Node {
-                    padding: UiRect::all(Val::Px(7.0)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
-                    ..default()
-                },
-                BackgroundColor(theme::AXIS_TAG),
-                Pickable::IGNORE,
-            ))
-            .with_child(look::label(
-                AXIS_NAMES[axis],
-                theme::TEXT_CAPTION,
-                theme::SEMIBOLD,
-                theme::AXIS_TAG_INK,
-            ));
-            look::flat(
-                name,
+        .with_child(look::label(
+            AXIS_NAMES[axis],
+            theme::TEXT_CAPTION,
+            theme::SEMIBOLD,
+            theme::AXIS_TAG_INK,
+        ));
+        row.spawn(Node {
+            flex_grow: 1.0,
+            ..default()
+        })
+        .with_children(|way| {
+            look::flat_text(
+                way,
+                capitalised(way_name(axis, negative)),
                 Control::Way(axis, !negative),
                 Flat {
                     flavour: Flavour::Way,
                     selected: false,
                 },
                 Node {
-                    column_gap: Val::Px(8.0),
-                    padding: UiRect::axes(Val::Px(4.0), Val::Px(8.0)),
+                    padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                     border: UiRect::ZERO,
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                     ..default()
                 },
-                |b, ink| {
-                    b.spawn((
-                        look::FlatInk,
-                        look::label(
-                            capitalised(way_name(axis, negative)),
-                            theme::TEXT_CAPTION,
-                            theme::REGULAR,
-                            ink,
-                        ),
-                    ));
-                    // Inter has no ⇆, the prototype's two-way arrow.
-                    b.spawn((
-                        look::FlatInk,
-                        look::label("↔", theme::TEXT_SMALL, theme::REGULAR, ink),
-                    ));
-                },
+                (theme::TEXT_EYEBROW, theme::REGULAR),
             );
         });
         look::stepper(
-            line,
+            row,
             (Control::Count(axis, -1), Control::Count(axis, 1)),
             layout.lengths[axis].to_string(),
             (look::LAYOUT_STEPPER, true),
@@ -576,110 +568,106 @@ fn axis_line(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: 
 
 /// A, B and C as circles that fill in as the corners are picked.
 fn points(body: &mut ChildSpawnerCommands) {
-    body.spawn(Node {
-        column_gap: Val::Px(7.0),
-        margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(12.0), Val::Px(18.0)),
-        flex_shrink: 0.0,
-        ..default()
-    })
-    .with_children(|line| {
-        for (i, caption) in ["A · Start", "B · Plane", "C · Depth"]
-            .into_iter()
-            .enumerate()
-        {
-            line.spawn(Node {
-                flex_grow: 1.0,
-                flex_basis: Val::ZERO,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(8.0),
+    section(body, None, |section| {
+        section
+            .spawn(Node {
+                column_gap: Val::Px(7.0),
+                margin: UiRect::bottom(Val::Px(12.0)),
                 ..default()
             })
-            .with_children(|step| {
-                step.spawn((
-                    StepDot(i),
-                    Node {
-                        width: Val::Px(POINT_PX),
-                        height: Val::Px(POINT_PX),
-                        border: UiRect::all(Val::Px(theme::RULE)),
-                        border_radius: BorderRadius::all(Val::Percent(50.0)),
+            .with_children(|line| {
+                for (i, caption) in ["A · Start", "B · Plane", "C · Depth"]
+                    .into_iter()
+                    .enumerate()
+                {
+                    line.spawn(Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::ZERO,
+                        flex_direction: FlexDirection::Column,
                         align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
+                        row_gap: Val::Px(8.0),
                         ..default()
-                    },
-                    BackgroundColor(Color::NONE),
-                    BorderColor::all(theme::POINT_EDGE),
-                    Pickable::IGNORE,
-                ))
-                .with_child((
-                    StepLetter(i),
-                    look::figures(
-                        (i + 1).to_string(),
-                        theme::TEXT_EYEBROW,
-                        theme::REGULAR,
-                        theme::POINT_INK,
-                    ),
-                ));
-                step.spawn((
-                    StepCaption(i),
-                    look::label(caption, theme::TEXT_KEY, theme::REGULAR, theme::POINT_INK),
-                ));
+                    })
+                    .with_children(|step| {
+                        step.spawn((
+                            StepDot(i),
+                            Node {
+                                width: Val::Px(POINT_PX),
+                                height: Val::Px(POINT_PX),
+                                border: UiRect::all(Val::Px(theme::RULE)),
+                                border_radius: BorderRadius::all(Val::Percent(50.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(Color::NONE),
+                            BorderColor::all(theme::POINT_EDGE),
+                            Pickable::IGNORE,
+                        ))
+                        .with_child((
+                            StepLetter(i),
+                            look::figures(
+                                (i + 1).to_string(),
+                                theme::TEXT_EYEBROW,
+                                theme::REGULAR,
+                                theme::POINT_INK,
+                            ),
+                        ));
+                        step.spawn((
+                            StepCaption(i),
+                            look::label(caption, theme::TEXT_KEY, theme::REGULAR, theme::POINT_INK),
+                        ));
+                    });
+                }
             });
-        }
+        section.spawn(look::paragraph(
+            "Set A, then B for a flat rectangle. C adds depth and completes the layout.",
+            theme::TEXT_CAPTION,
+            theme::REGULAR,
+            theme::LAYOUT_NOTE,
+            NOTE_LINE_HEIGHT,
+        ));
     });
-    body.spawn((look::paragraph(
-        "Set A, then B for a flat rectangle. C adds depth and completes the layout.",
-        theme::TEXT_CAPTION,
-        theme::REGULAR,
-        theme::LAYOUT_NOTE,
-        NOTE_LINE_HEIGHT,
-    ),));
 }
 
-/// The gap between Voxels, with its stepper always to hand.
+/// The gap between Voxels, in metres and as a count.
 fn gap_row(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
-    body.spawn((
-        Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            padding: UiRect::vertical(Val::Px(17.0)),
-            margin: UiRect::top(Val::Px(15.0)),
-            border: UiRect::top(Val::Px(theme::RULE)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BorderColor::all(theme::GAP_RULE),
-    ))
-    .with_children(|row| {
-        row.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(5.0),
-            ..default()
-        })
-        .with_children(|words| {
-            words.spawn(look::label(
-                "Gap",
-                theme::TEXT_CAPTION,
-                theme::MEDIUM,
-                theme::INK,
-            ));
-            words.spawn(look::label(
-                format!(
-                    "{} m between Voxels",
-                    metres(layout.gap as f32 * voxel_size)
-                ),
-                theme::ITEM_TEXT_EYEBROW,
-                theme::REGULAR,
-                theme::GAP_NOTE,
-            ));
-        });
-        look::stepper(
-            row,
-            (Control::Gap(-1), Control::Gap(1)),
-            layout.gap.to_string(),
-            (look::GAP_STEPPER, false),
-        );
+    section(body, None, |section| {
+        section
+            .spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                padding: UiRect::horizontal(Val::Px(6.0)),
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn(Node {
+                    width: Val::Px(36.0),
+                    ..default()
+                })
+                .with_child(look::label(
+                    "Gap",
+                    theme::TEXT_CAPTION,
+                    theme::SEMIBOLD,
+                    theme::AXIS_TAG_INK,
+                ));
+                row.spawn(Node {
+                    flex_grow: 1.0,
+                    ..default()
+                })
+                .with_child(look::label(
+                    format!("{} m", metres(layout.gap as f32 * voxel_size)),
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::GAP_NOTE,
+                ));
+                look::stepper(
+                    row,
+                    (Control::Gap(-1), Control::Gap(1)),
+                    layout.gap.to_string(),
+                    (look::GAP_STEPPER, true),
+                );
+            });
     });
 }
 
@@ -741,73 +729,38 @@ pub(super) fn term(value: impl Into<String>) -> impl Bundle {
     )
 }
 
-fn value(value: impl Into<String>) -> impl Bundle {
-    look::figures(
-        value,
-        theme::TEXT_EYEBROW,
-        theme::LABEL,
-        theme::TOTALS_VALUE,
-    )
-}
-
-/// How many, how big and at what Voxel size: what the controls above make.
-fn sums(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
+/// The size in metres and the total out of the cap, at the foot of the panel.
+fn total(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
     let extent = layout
         .lengths
         .map(|count| metres(extent_m(count, layout.gap, voxel_size)));
-    totals(body, |rows| {
-        total_row(
-            rows,
-            term("Voxels"),
-            value_with(
-                layout.total(layout.lengths).to_string(),
-                format!(" / {MAX_LAYOUT_VOXELS}"),
-            ),
-        );
-        total_row(
-            rows,
-            term("Dimensions"),
-            value(format!("{} m", extent.join(" × "))),
-        );
-        total_row(
-            rows,
-            term("Voxel size"),
-            value(format!("{} m", metres(voxel_size))),
-        );
-    });
-}
-
-/// What the aim would lay, live, and what to do next.
-fn in_the_world(body: &mut ChildSpawnerCommands, between: bool) {
-    totals(body, |rows| {
-        // One run of text, so the number and its word share a baseline.
-        total_row(
-            rows,
-            term("In the World"),
-            (Info::Count, value_with("0", " Voxels")),
-        );
-        if between {
-            info_row(rows, Info::Size);
-        }
-        info_row(rows, Info::Body);
-    });
-}
-
-fn info_row(rows: &mut ChildSpawnerCommands, part: Info) {
-    rows.spawn(Node {
-        padding: UiRect::vertical(Val::Px(9.0)),
+    body.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        margin: UiRect::top(Val::Auto),
+        padding: UiRect::top(Val::Px(14.0)),
+        flex_shrink: 0.0,
         ..default()
     })
-    .with_child((
-        part,
-        look::paragraph(
-            "",
+    .with_children(|row| {
+        row.spawn(look::label(
+            format!("{} m", extent.join(" × ")),
             theme::TEXT_EYEBROW,
             theme::REGULAR,
             theme::TOTALS_TERM,
-            theme::LINE_HEIGHT,
-        ),
-    ));
+        ));
+        row.spawn((
+            Text::new(layout.total(layout.lengths).to_string()),
+            theme::figures(theme::TEXT_HEADING, theme::SEMIBOLD),
+            TextColor(theme::INK),
+            Pickable::IGNORE,
+            children![(
+                TextSpan::new(format!(" / {MAX_LAYOUT_VOXELS}")),
+                theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
+                TextColor(theme::muted()),
+            )],
+        ));
+    });
 }
 
 fn cap_note(body: &mut ChildSpawnerCommands, note: &str) {
@@ -822,47 +775,47 @@ fn cap_note(body: &mut ChildSpawnerCommands, note: &str) {
         BackgroundColor(theme::LAYOUT_ERROR),
         BorderColor::all(theme::LAYOUT_ERROR_EDGE),
     ))
-    .with_child((look::paragraph(
+    .with_child(look::paragraph(
         note,
         theme::TEXT_EYEBROW,
         theme::REGULAR,
         theme::LAYOUT_ERROR_INK,
         theme::LINE_HEIGHT,
-    ),));
+    ));
 }
 
-/// Back to play ready to build, or out of the mode.
-fn footer(card: &mut ChildSpawnerCommands) {
-    card.spawn((
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            padding: UiRect::axes(Val::Px(PAD_X), Val::Px(14.0)),
-            border: UiRect::top(Val::Px(theme::RULE)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BorderColor::all(theme::LAYOUT_RULE),
-    ))
-    .with_children(|foot| {
-        look::button(
-            foot,
-            "Ready to build",
-            Control::Ready,
-            cine::Kind::Primary,
-            look::WIDE,
-        );
-        look::button(
-            foot,
-            "Exit layout",
-            Control::Exit,
-            cine::Kind::Ghost,
-            look::WIDE,
-        );
-    });
+/// The keys for what the panel does; letters fire their prompt, the rest are
+/// read by [`keys`] and named here.
+fn prompts(kind: Kind) -> Vec<Prompt<Control>> {
+    let between = kind == Kind::Between;
+    let mut prompts = vec![Prompt::new(Cap::Text("1 2 3"), "Shape")];
+    if !between {
+        prompts.extend([
+            Prompt::new(Cap::Text("← →"), "Axis"),
+            Prompt::new(Cap::Text("↑ ↓"), "Count"),
+            Prompt::new(Cap::Letter('R'), "Reverse")
+                .act(Control::Reverse)
+                .pad(GamepadButton::West),
+        ]);
+    }
+    let (other, name) = if between {
+        (Kind::Directions, "Count")
+    } else {
+        (Kind::Between, "Point to point")
+    };
+    prompts.extend([
+        Prompt::new(Cap::Letter('G'), "Gap").act(Control::GapKey),
+        Prompt::new(Cap::Letter('P'), name)
+            .act(Control::Kind(other))
+            .pad(GamepadButton::North),
+        Prompt::new(Cap::Enter, "Build").act(Control::Build),
+        Prompt::new(Cap::Esc, "Exit").act(Control::Exit),
+    ]);
+    prompts
 }
 
-/// In play with the menu shut: what is set, what the aim would do and the keys.
+/// In play with the menu shut: what is set, what the aim would do and the
+/// keys, as text. It has nothing to click: in play the mouse aims.
 fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size: f32) {
     let extent = layout
         .lengths
@@ -997,7 +950,6 @@ fn update_info(
     );
     for (part, mut text) in &mut text {
         let line = match part {
-            Info::Count => said.count.unwrap_or(0).to_string(),
             Info::Size => said.size.clone(),
             Info::Body => said.body.clone(),
             Info::Hint => said.hint.clone(),
@@ -1042,11 +994,10 @@ fn render(
     mut commands: Commands,
     mut menu: ResMut<LayoutMenu>,
     panels: Query<Entity, With<Panel>>,
-    (controls, cards): (Query<&Control>, Query<&ScrollPosition, With<Card>>),
+    cards: Query<&ScrollPosition, With<Card>>,
     preferences: Res<Preferences>,
     mode: Res<LayoutMode>,
     world: Res<WorldSettings>,
-    focus: Res<InputFocus>,
 ) {
     let want = if menu.open {
         Some(true)
@@ -1067,10 +1018,6 @@ fn render(
     };
     menu.dirty = false;
     menu.shown = want;
-    let focused = focus
-        .get()
-        .and_then(|entity| controls.get(entity).ok())
-        .copied();
     for panel in &panels {
         commands.entity(panel).despawn();
     }
@@ -1095,75 +1042,94 @@ fn render(
         return;
     }
     let between = layout.kind == Kind::Between;
+    let active = mode.active.min(2);
     commands
         .spawn((
             Panel,
+            frame::Frame,
+            GlobalZIndex(20),
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(theme::SCREEN_PAD_X),
-                top: Val::Px(PANEL_TOP_PX),
-                bottom: Val::Px(PANEL_BOTTOM_PX),
-                width: Val::Px(CARD_WIDTH),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                border: UiRect::all(Val::Px(theme::FRAME)),
-                border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
-                overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(theme::LAYOUT_SURFACE),
-            BorderColor::all(theme::GROUT),
-            theme::shadow(),
+            Pickable::IGNORE,
         ))
-        .with_children(|panel| {
-            panel.spawn(theme::ring(theme::ITEM_RADIUS));
-            header(panel);
-            panel
-                .spawn((
-                    Card,
-                    ScrollArea,
-                    ScrollPosition(scroll),
-                    Node {
-                        flex_grow: 1.0,
-                        min_height: Val::Px(0.0),
-                        flex_direction: FlexDirection::Column,
-                        padding: UiRect::axes(Val::Px(PAD_X), Val::Px(17.0)),
-                        overflow: Overflow::scroll_y(),
-                        ..default()
-                    },
-                ))
-                .with_children(|body| {
-                    method(body, layout.kind);
-                    if between {
-                        points(body);
-                    } else {
-                        presets(body, layout.lengths);
-                        eyebrow(body, "COUNT & DIRECTION");
-                        for axis in 0..3 {
-                            axis_line(body, layout, axis);
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(|stage| {
+                stage
+                    .spawn((
+                        Card,
+                        ScrollArea,
+                        ScrollPosition(scroll),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(SIDE_INSET_PX),
+                            right: Val::Px(SIDE_INSET_PX),
+                            bottom: Val::Px(SIDE_INSET_PX),
+                            width: Val::Px(SIDE_WIDTH),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::axes(Val::Px(20.0), Val::Px(22.0)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                        BackgroundColor(theme::LAYOUT_SURFACE),
+                    ))
+                    .with_children(|body| {
+                        body.spawn((
+                            Node {
+                                margin: UiRect::bottom(Val::Px(14.0)),
+                                flex_shrink: 0.0,
+                                ..default()
+                            },
+                            Pickable::IGNORE,
+                        ))
+                        .with_child(look::label(
+                            "Quick layout",
+                            theme::TEXT_DIALOG_TITLE,
+                            theme::SEMIBOLD,
+                            theme::INK,
+                        ));
+                        method(body, layout.kind);
+                        if !menu.notice.is_empty() {
+                            cap_note(body, &menu.notice);
                         }
-                    }
-                    gap_row(body, layout, voxel_size);
-                    if !between {
-                        sums(body, layout, voxel_size);
-                    }
-                    if !menu.notice.is_empty() {
-                        cap_note(body, &menu.notice);
-                    }
-                    in_the_world(body, between);
-                });
-            footer(panel);
+                        if between {
+                            points(body);
+                        } else {
+                            shapes(body, layout.lengths);
+                            section(body, Some("Count"), |rows| {
+                                for axis in 0..3 {
+                                    axis_row(rows, layout, axis, axis == active);
+                                }
+                            });
+                        }
+                        gap_row(body, layout, voxel_size);
+                        if !between {
+                            total(body, layout, voxel_size);
+                        }
+                    });
+            });
+            frame::prompt_bar(root, "", prompts(layout.kind));
         });
-    // The rebuilt panel keeps focus where it was, or starts at the top.
-    let target = focused.unwrap_or(Control::Kind(layout.kind));
-    commands.queue(move |world: &mut World| {
-        let mut query = world.query::<(Entity, &Control)>();
-        let found = query
-            .iter(world)
-            .find_map(|(entity, control)| (*control == target).then_some(entity));
-        if let Some(entity) = found {
-            world
-                .resource_mut::<InputFocus>()
-                .set(entity, FocusCause::Auto);
+    // Only the pointer reaches the panel, so Tab never lands on it and Enter
+    // always builds.
+    commands.queue(|world: &mut World| {
+        let mut query = world.query_filtered::<Entity, (With<Control>, With<TabIndex>)>();
+        let found: Vec<Entity> = query.iter(world).collect();
+        for entity in found {
+            world.entity_mut(entity).remove::<TabIndex>();
         }
     });
 }
@@ -1172,6 +1138,7 @@ fn render(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+    use bevy::input_focus::InputFocus;
     use bevy::ui_widgets::Activate;
 
     fn app() -> App {
@@ -1248,6 +1215,71 @@ mod tests {
         app.world_mut().trigger(Activate { entity });
     }
 
+    /// One frame of a key held into the menu's own keys.
+    fn menu_key(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.world_mut().run_system_once(keys).unwrap();
+        app.world_mut().flush();
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        input.release(key);
+        input.clear();
+    }
+
+    #[test]
+    fn steppers_and_keys_change_the_same_counts() {
+        let mut app = app();
+        open(&mut app);
+        activate_control(&mut app, Control::Count(0, 1));
+        assert_eq!(layout(&app).lengths, [5, 1, 1]);
+        menu_key(&mut app, KeyCode::ArrowUp);
+        assert_eq!(layout(&app).lengths, [6, 1, 1], "Up adds to the axis + did");
+        menu_key(&mut app, KeyCode::ArrowDown);
+        activate_control(&mut app, Control::Count(0, -1));
+        assert_eq!(layout(&app).lengths, [4, 1, 1]);
+        menu_key(&mut app, KeyCode::ArrowRight);
+        menu_key(&mut app, KeyCode::ArrowRight);
+        menu_key(&mut app, KeyCode::ArrowUp);
+        activate_control(&mut app, Control::Count(2, 1));
+        assert_eq!(layout(&app).lengths, [4, 1, 3], "Right moves on to Z");
+        menu_key(&mut app, KeyCode::Digit2);
+        assert_eq!(layout(&app).lengths, [4, 1, 4], "2 is Plane");
+        activate_control(&mut app, Control::Reverse);
+        assert_eq!(layout(&app).negative, [false, false, true]);
+        activate_control(&mut app, Control::Way(2, false));
+        assert_eq!(layout(&app).negative, [false; 3]);
+        activate_control(&mut app, Control::GapKey);
+        assert_eq!(layout(&app).gap, 1);
+        activate_control(&mut app, Control::Gap(-1));
+        assert_eq!(layout(&app).gap, 0);
+    }
+
+    #[test]
+    fn going_over_the_cap_by_key_is_refused_with_a_message() {
+        let mut app = app();
+        open(&mut app);
+        app.world_mut().resource_mut::<Preferences>().layout.lengths = [16, 16, 1];
+        menu_key(&mut app, KeyCode::ArrowUp);
+        assert_eq!(layout(&app).lengths, [16, 16, 1]);
+        assert_eq!(menu(&app).notice, CAP_NOTE);
+        menu_key(&mut app, KeyCode::ArrowDown);
+        assert!(menu(&app).notice.is_empty(), "a good change clears it");
+    }
+
+    #[test]
+    fn enter_builds_and_escape_exits() {
+        let mut app = app();
+        open(&mut app);
+        menu_key(&mut app, KeyCode::Enter);
+        assert!(!menu(&app).open && app.world().resource::<LayoutMode>().on);
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+        open_again(&mut app);
+        press(&mut app, KeyCode::Escape);
+        assert!(!menu(&app).open && !app.world().resource::<LayoutMode>().on);
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
     #[test]
     fn the_layout_key_turns_the_mode_on_opens_the_menu_and_frees_the_cursor() {
         let mut app = app();
@@ -1268,16 +1300,6 @@ mod tests {
         press(&mut app, KeyCode::KeyL);
         assert!(menu(&app).open, "and it opens again, mode on");
         assert!(app.world().resource::<LayoutMode>().on);
-    }
-
-    #[test]
-    fn escape_closes_it_and_leaves_the_cursor_free_as_the_catalogue_does() {
-        let mut app = app();
-        open(&mut app);
-        press(&mut app, KeyCode::Escape);
-        assert!(!menu(&app).open);
-        assert!(app.world().resource::<LayoutMode>().on);
-        assert_eq!(cursor(&mut app), (CursorGrabMode::None, true));
     }
 
     #[test]
@@ -1350,14 +1372,12 @@ mod tests {
     }
 
     #[test]
-    fn the_close_cross_and_ready_go_back_to_play_with_the_layout_still_ready() {
-        for control in [Control::Close, Control::Ready] {
-            let mut app = app();
-            open(&mut app);
-            activate_control(&mut app, control);
-            assert!(!menu(&app).open && app.world().resource::<LayoutMode>().on);
-            assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
-        }
+    fn build_goes_back_to_play_with_the_layout_still_ready() {
+        let mut app = app();
+        open(&mut app);
+        activate_control(&mut app, Control::Build);
+        assert!(!menu(&app).open && app.world().resource::<LayoutMode>().on);
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
     }
 
     #[test]
@@ -1399,33 +1419,6 @@ mod tests {
     fn open_again(app: &mut App) {
         press(app, KeyCode::KeyL);
         assert!(menu(app).open);
-    }
-
-    #[test]
-    fn digits_type_a_count_into_the_active_axis_and_the_cap_refuses_a_big_one() {
-        let mut app = app();
-        open(&mut app);
-        app.world_mut().resource_mut::<LayoutMode>().active = 0;
-        let key = |app: &mut App, key| {
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key);
-            app.world_mut().run_system_once(type_count).unwrap();
-            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            keys.release(key);
-            keys.clear();
-        };
-        key(&mut app, KeyCode::Digit1);
-        key(&mut app, KeyCode::Digit2);
-        assert_eq!(layout(&app).lengths[0], 12);
-        key(&mut app, KeyCode::Backspace);
-        assert_eq!(layout(&app).lengths[0], 1);
-        key(&mut app, KeyCode::Enter);
-        app.world_mut().resource_mut::<Preferences>().layout.lengths = [1, 16, 1];
-        key(&mut app, KeyCode::Digit1);
-        key(&mut app, KeyCode::Digit7);
-        assert_eq!(layout(&app).lengths[0], 1, "17 by 16 passes the cap");
-        assert!(!menu(&app).notice.is_empty());
     }
 
     #[test]
@@ -1500,41 +1493,6 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_says_what_the_aim_would_lay_live() {
-        let mut app = render_app();
-        open(&mut app);
-        controls(&mut app);
-        assert_eq!(panels(&mut app), (1, 2), "the count and the next step");
-    }
-
-    #[test]
-    fn a_rebuild_keeps_focus_on_the_same_control_and_closing_takes_the_controls_away() {
-        let mut app = render_app();
-        open(&mut app);
-        controls(&mut app);
-        let target = app
-            .world_mut()
-            .query_filtered::<(Entity, &Control), With<bevy::ui_widgets::Button>>()
-            .iter(app.world())
-            .find(|(_, control)| **control == Control::Count(0, 1))
-            .map(|(entity, _)| entity)
-            .unwrap();
-        app.world_mut()
-            .resource_mut::<InputFocus>()
-            .set(target, FocusCause::Auto);
-        activate_control(&mut app, Control::Count(0, 1));
-        controls(&mut app);
-        let focused = app.world().resource::<InputFocus>().get().unwrap();
-        assert_ne!(focused, target, "the panel was rebuilt");
-        assert_eq!(
-            app.world().get::<Control>(focused),
-            Some(&Control::Count(0, 1))
-        );
-        press(&mut app, KeyCode::KeyL);
-        assert!(controls(&mut app).is_empty(), "closed, the controls go");
-    }
-
-    #[test]
     fn a_tall_card_scrolls_and_a_rebuild_keeps_its_place() {
         use bevy::ui_widgets::ScrollArea;
         let mut app = render_app();
@@ -1545,14 +1503,14 @@ mod tests {
                 .world_mut()
                 .query_filtered::<(&Node, &ScrollPosition), (With<Card>, With<ScrollArea>)>();
             let (node, scroll) = query.single(app.world()).expect("one scrolling card");
-            (node.overflow.y, node.min_height, scroll.0)
+            (node.overflow.y, node.bottom, scroll.0)
         };
-        let (overflow, min_height, _) = card(&mut app);
+        let (overflow, bottom, _) = card(&mut app);
         assert_eq!(overflow, OverflowAxis::Scroll);
         assert_eq!(
-            min_height,
-            Val::Px(0.0),
-            "it shrinks to the panel, which is never taller than the screen"
+            bottom,
+            Val::Px(SIDE_INSET_PX),
+            "pinned top and bottom, so never taller than the screen"
         );
         app.world_mut()
             .query_filtered::<&mut ScrollPosition, With<Card>>()
@@ -1588,20 +1546,6 @@ mod tests {
             }
             assert!(!shown.contains(&Control::Way(axis, turned)));
         }
-    }
-
-    #[test]
-    fn the_count_and_its_word_are_one_run_of_text() {
-        let mut app = render_app();
-        open(&mut app);
-        controls(&mut app);
-        let mut query = app.world_mut().query::<(&Info, &Text, Option<&Children>)>();
-        let (_, _, children) = query
-            .iter(app.world())
-            .find(|(info, ..)| matches!(info, Info::Count))
-            .expect("the count");
-        let span = children.expect("its word is a span of the same text")[0];
-        assert_eq!(app.world().get::<TextSpan>(span).unwrap().0, " Voxels");
     }
 
     #[test]
@@ -1658,9 +1602,10 @@ mod tests {
             Control::Kind(Kind::Between),
             Control::Preset(0),
             Control::Gap(1),
-            Control::Close,
-            Control::Ready,
+            Control::Build,
             Control::Exit,
+            Control::Reverse,
+            Control::GapKey,
         ] {
             assert!(shown.contains(&expected), "{expected:?}");
         }
@@ -1675,6 +1620,64 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, Control::Way(..) | Control::Count(..))),
             "point to point has no axes to set"
+        );
+    }
+
+    #[test]
+    fn the_prompt_bar_names_every_key_and_enter_builds() {
+        let mut app = render_app();
+        open(&mut app);
+        controls(&mut app);
+        let shown = frame::testing::prompts(&mut app);
+        let expected: Vec<(String, String)> = [
+            ("1 2 3", "Shape"),
+            ("← →", "Axis"),
+            ("↑ ↓", "Count"),
+            ("R", "Reverse"),
+            ("G", "Gap"),
+            ("P", "Point to point"),
+            ("Enter", "Build"),
+            ("Esc", "Exit"),
+        ]
+        .map(|(cap, label)| (cap.to_owned(), label.to_owned()))
+        .into();
+        assert_eq!(shown, expected);
+    }
+
+    #[test]
+    fn the_panel_is_for_the_pointer_so_nothing_in_it_takes_focus() {
+        let mut app = render_app();
+        open(&mut app);
+        controls(&mut app);
+        let reachable = app
+            .world_mut()
+            .query_filtered::<&Control, (
+                With<bevy::ui_widgets::Button>,
+                Or<(Without<frame::PointerOnly>, With<TabIndex>)>,
+            )>()
+            .iter(app.world())
+            .count();
+        assert_eq!(reachable, 0);
+        assert_eq!(app.world().resource::<InputFocus>().get(), None);
+    }
+
+    #[test]
+    fn a_refused_count_shows_its_message_in_the_panel() {
+        let mut app = render_app();
+        open(&mut app);
+        app.world_mut().resource_mut::<Preferences>().layout.lengths = [16, 16, 1];
+        activate_control(&mut app, Control::Count(1, 1));
+        controls(&mut app);
+        let texts: Vec<String> = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|text| text.0.clone())
+            .collect();
+        assert!(texts.iter().any(|text| text == CAP_NOTE), "{texts:?}");
+        assert!(
+            texts.iter().any(|text| text == "256"),
+            "the total out of 256"
         );
     }
 }

@@ -195,7 +195,11 @@ struct Swim {
 fn animate(
     time: Res<Time>,
     (anim, preferences, body): Inputs,
-    (covers, dead): (Covers, Option<Res<super::death::Dead>>),
+    (covers, dead, layout): (
+        Covers,
+        Option<Res<super::death::Dead>>,
+        Option<Res<super::layout_menu::LayoutMenu>>,
+    ),
     mut root: Query<(&mut Transform, &mut Visibility), With<Viewmodel>>,
     mut item: Query<&mut Transform, (With<Held>, Without<Viewmodel>)>,
     mode: Query<&FlyCamera>,
@@ -205,7 +209,11 @@ fn animate(
         return;
     };
     visibility.set_if_neq(
-        if super::menu::covered(&covers) || !super::death::alive(dead) {
+        // The hand would draw over Quick layout's side panel.
+        if super::menu::covered(&covers)
+            || !super::death::alive(dead)
+            || layout.is_some_and(|layout| layout.open)
+        {
             Visibility::Hidden
         } else {
             Visibility::Inherited
@@ -448,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn the_viewmodel_hides_under_the_menu_settings_inventory_and_death() {
+    fn the_viewmodel_hides_under_the_menu_settings_inventory_quick_layout_and_death() {
         let mut app = app();
         app.init_resource::<Menu>()
             .init_resource::<crate::client::settings::Settings>()
@@ -474,6 +482,15 @@ mod tests {
         assert_eq!(root(&mut app).1, Visibility::Hidden, "Inventory");
         app.world_mut()
             .resource_mut::<crate::client::inventory_window::InventoryWindow>()
+            .open = false;
+        app.init_resource::<crate::client::layout_menu::LayoutMenu>();
+        app.world_mut()
+            .resource_mut::<crate::client::layout_menu::LayoutMenu>()
+            .open = true;
+        app.update();
+        assert_eq!(root(&mut app).1, Visibility::Hidden, "Quick layout");
+        app.world_mut()
+            .resource_mut::<crate::client::layout_menu::LayoutMenu>()
             .open = false;
         app.insert_resource(crate::client::death::Dead::after_a_fall());
         app.update();
