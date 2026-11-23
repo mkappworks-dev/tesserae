@@ -110,6 +110,17 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(Update, (place, age, fade).chain());
 }
 
+/// The messages and tones of the toasts showing now, oldest first.
+#[cfg(test)]
+pub(in crate::client) fn showing(world: &mut World) -> Vec<(String, Tone)> {
+    world
+        .query::<&Toast>()
+        .iter(world)
+        .filter(|toast| toast.leaving_s.is_none())
+        .map(|toast| (toast.text.clone(), toast.tone))
+        .collect()
+}
+
 pub(in crate::client) fn notify(commands: &mut Commands, message: &str, tone: Tone) {
     notify_for(commands, message, tone, tone.seconds());
 }

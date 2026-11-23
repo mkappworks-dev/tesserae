@@ -127,7 +127,7 @@ pub(super) fn toggle(
     mut actions: ResMut<Actions>,
     mut menu: ResMut<LayoutMenu>,
     mut mode: ResMut<LayoutMode>,
-    preferences: Res<Preferences>,
+    mut preferences: ResMut<Preferences>,
     (catalogue, settings, ui, save, inventory, map, list, held): Blockers,
     window: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
@@ -171,6 +171,10 @@ pub(super) fn toggle(
     if menu.open {
         close(&mut menu, &mut cursor);
     } else {
+        if preferences.layout.kind != Kind::Directions {
+            preferences.layout.kind = Kind::Directions;
+            mode.points.clear();
+        }
         mode.on = true;
         menu.open = true;
         menu.dirty = true;
@@ -1344,6 +1348,18 @@ mod tests {
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
     }
 
+    #[test]
+    fn the_panel_opens_from_play_on_count_whatever_was_chosen_last() {
+        let mut app = app();
+        open(&mut app);
+        activate_control(&mut app, Control::Kind(Kind::Between));
+        assert_eq!(layout(&app).kind, Kind::Between, "switching still works");
+        press(&mut app, KeyCode::KeyL);
+        assert!(!menu(&app).open);
+        open_again(&mut app);
+        assert_eq!(layout(&app).kind, Kind::Directions);
+    }
+
     fn open_again(app: &mut App) {
         press(app, KeyCode::KeyL);
         assert!(menu(app).open);
@@ -1561,8 +1577,8 @@ mod tests {
             super::super::camera::FlyCamera::default(),
             GlobalTransform::IDENTITY,
         ));
-        app.world_mut().resource_mut::<Preferences>().layout.kind = Kind::Between;
         open(&mut app);
+        activate_control(&mut app, Control::Kind(Kind::Between));
         controls(&mut app);
         let fills = |app: &mut App| -> Vec<bool> {
             app.world_mut().run_system_once(update_info).unwrap();
@@ -1685,6 +1701,7 @@ mod tests {
         app.init_resource::<super::super::edit::Hotbar>()
             .init_resource::<super::super::input::UiInput>()
             .init_resource::<Time>()
+            .init_resource::<layout::Preview>()
             .add_message::<LayoutIntent>()
             .add_systems(
                 Update,

@@ -686,7 +686,15 @@ mod tests {
         prefs.layout.gap = 2;
         prefs.layout.negative = [true, false, true];
         let bytes = encode(&Bindings::default(), &prefs).unwrap();
-        assert_eq!(decode(&bytes).unwrap().1.layout, prefs.layout);
+        let decoded = decode(&bytes).unwrap().1.layout;
+        assert_eq!(decoded.kind, Kind::Directions, "the method is not kept");
+        assert_eq!(
+            decoded,
+            super::super::layout::LayoutPreferences {
+                kind: Kind::Directions,
+                ..prefs.layout.clone()
+            }
+        );
 
         let mut document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         document["preferences"]

@@ -336,6 +336,7 @@ pub(super) fn intercept(
 /// preview where the Server's fresh answer anchors it; near the pinned preview Use sends the
 /// Structure intent; Remove aimed at it cancels it.
 pub(super) fn act(
+    mut commands: Commands,
     ownership: Res<Ownership>,
     (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
     camera: Single<&GlobalTransform, With<FlyCamera>>,
@@ -356,14 +357,30 @@ pub(super) fn act(
     let on_pin =
         pinned && ghost.is_some_and(|g| aimed_at(&camera, g.corner, g.size, world.voxel_size));
     let near = pinned && ghost.is_some_and(|g| near(&camera, g.corner, g.size, world.voxel_size));
-    if pressed.place && !pinned {
-        pin(
+    if pressed.place
+        && !pinned
+        && let Some(intent) = &intent
+        && !pin(
             &mut tool,
             &preview,
             &catalogue.0,
             &camera,
             time.elapsed_secs_f64(),
-        );
+        )
+    {
+        // The Server never sees a pin, so its refusal is the aim's.
+        let refused = match preview.fresh(intent, time.elapsed_secs_f64()) {
+            Some(StructureAnswer {
+                ghost: Err(reason), ..
+            }) => *reason,
+            _ => RejectReason::OutOfReach,
+        };
+        let outcome = if waits(refused) {
+            Outcome::Waiting
+        } else {
+            Outcome::Refused(refused)
+        };
+        super::menu_ui::notify(&mut commands, &outcome.text(), super::menu_ui::Tone::Alert);
     }
     if pressed.use_
         && near
@@ -1214,6 +1231,30 @@ mod tests {
         app.update();
         assert!(!app.world().resource::<Actions>().started(Action::Remove));
         assert!(frame(&mut app, None, None).is_empty());
+    }
+
+    #[test]
+    fn place_with_nothing_in_reach_pins_nothing_and_says_why_in_a_toast() {
+        use super::super::menu_ui::{Tone, showing};
+        let mut app = app(Holding::Tool(PLACE));
+        assert!(frame(&mut app, None, Some(MouseButton::Right)).is_empty());
+        let said = ("Nothing in reach.".to_owned(), Tone::Alert);
+        assert_eq!(
+            showing(app.world_mut()),
+            std::slice::from_ref(&said),
+            "no answer yet"
+        );
+        answer(&mut app, Err(RejectReason::InsidePlayer));
+        frame(&mut app, None, Some(MouseButton::Right));
+        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        assert_eq!(
+            showing(app.world_mut()),
+            [
+                said,
+                (RejectReason::InsidePlayer.message().to_owned(), Tone::Alert)
+            ],
+            "the Server's reason, as the status line words it"
+        );
     }
 
     #[test]
