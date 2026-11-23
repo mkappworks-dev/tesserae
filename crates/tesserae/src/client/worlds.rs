@@ -81,10 +81,15 @@ impl Default for Previewer {
 struct Returning(bool);
 
 /// The tested Voxel sizes (ADR-0003), with what each costs.
-const VOXEL_SIZES: [(f32, &str); 3] = [
-    (1.0, "1 m · default"),
-    (0.5, "0.5 m · 2× finer, half the view distance"),
-    (0.25, "0.25 m · 4× finer, a quarter of the view distance"),
+/// Each Voxel size: its segment's label, and what choosing it costs.
+const VOXEL_SIZES: [(f32, &str, &str); 3] = [
+    (1.0, "1 m", "1 m · default"),
+    (0.5, "0.5 m", "0.5 m · 2× finer, half the view distance"),
+    (
+        0.25,
+        "0.25 m",
+        "0.25 m · 4× finer, a quarter of the view distance",
+    ),
 ];
 
 /// Frames the Opening screen is drawn before the World loads.
@@ -551,8 +556,8 @@ pub(super) enum Act {
     ResetBiomes,
     ConfirmReset,
     KeepBiomes,
-    /// Steps the Voxel size by this many sizes, wrapping; the selector itself carries `1`.
-    VoxelStep(i32),
+    /// Picks this Voxel size, one of [`VOXEL_SIZES`].
+    VoxelSize(f32),
     Mode(GameMode),
     PickGame(usize),
     ToggleMod(usize),
@@ -596,7 +601,11 @@ impl Act {
         match self {
             Act::Mode(_) => Some(Act::Mode(mode)),
             Act::EditMode(_) => Some(Act::EditMode(mode)),
-            Act::VoxelStep(_) => Some(Act::VoxelStep(by)),
+            Act::VoxelSize(size) => {
+                let at = VOXEL_SIZES.iter().position(|(s, ..)| s == size)? as i32;
+                let next = (at + by).clamp(0, VOXEL_SIZES.len() as i32 - 1) as usize;
+                Some(Act::VoxelSize(VOXEL_SIZES[next].0))
+            }
             _ => None,
         }
     }
@@ -1364,7 +1373,7 @@ fn handle(
             | Act::KeepBiomes
             | Act::KeepEditing
             | Act::DiscardSetup
-            | Act::VoxelStep(..)
+            | Act::VoxelSize(..)
             | Act::Mode(..)
             | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),

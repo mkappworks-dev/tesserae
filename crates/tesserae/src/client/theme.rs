@@ -420,6 +420,12 @@ pub(super) const SCREEN_PAD_TOP: f32 = 28.0;
 /// AppKit's transparent title bar is 32 pt tall, its buttons 9-23 pt from the top.
 #[cfg(target_os = "macos")]
 pub(super) const SCREEN_PAD_TOP: f32 = 32.0;
+/// The strip AppKit's window buttons take at the top of the window; other platforms keep a native
+/// frame above it.
+#[cfg(target_os = "macos")]
+pub(super) const TITLE_BAR_PX: f32 = 32.0;
+#[cfg(not(target_os = "macos"))]
+pub(super) const TITLE_BAR_PX: f32 = 0.0;
 pub(super) const SCREEN_PAD_BOTTOM: f32 = 22.0;
 pub(super) const WORKSPACE_MAX: f32 = 1180.0;
 pub(super) const RAIL_WIDTH: f32 = 224.0;
@@ -449,10 +455,11 @@ pub(super) const CHIP_EDGE: Color = Color::srgb_u8(0x45, 0x46, 0x4d);
 pub(super) const CHIP_INK: Color = Color::srgb_u8(0xc4, 0xc7, 0xcd);
 pub(super) const CHIP_ON: Color = Color::srgb_u8(0xe9, 0xee, 0xe0);
 pub(super) const PRESET_ON_INK: Color = Color::srgb_u8(0xf3, 0xf5, 0xee);
-pub(super) const STEPPER: Color = Color::srgb_u8(0x18, 0x18, 0x1d);
-pub(super) const STEPPER_EDGE: Color = Color::srgb_u8(0x65, 0x65, 0x6f);
-pub(super) const STEPPER_INK: Color = Color::srgb_u8(0xe4, 0xe6, 0xe4);
-pub(super) const STEPPER_VALUE: Color = Color::srgb_u8(0x20, 0x20, 0x27);
+pub(super) const STEPPER_EDGE: Color = Color::srgb_u8(0x64, 0x64, 0x6b);
+/// A Layout stepper's − or +.
+pub(super) fn step_fill() -> Color {
+    css_tint(0.06)
+}
 pub(super) const SLOT_TOP: Color = Color::srgb_u8(0x1b, 0x1c, 0x1f);
 pub(super) const SLOT_BOTTOM: Color = Color::srgb_u8(0x13, 0x14, 0x16);
 pub(super) const SLOT_HOVER_TOP: Color = Color::srgb_u8(0x25, 0x27, 0x2b);
@@ -465,16 +472,10 @@ pub(super) const SLOT_DROP: Color = Color::srgb_u8(0xd6, 0xc8, 0x8f);
 pub(super) const SLOT_NUMBER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x73);
 pub(super) const ITEM_SHADOW_ALPHA: f32 = 0.667;
 pub(super) const LAYOUT_SURFACE: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xef);
-pub(super) const METHOD: Color = Color::srgb_u8(0x19, 0x19, 0x1e);
-pub(super) const METHOD_EDGE: Color = Color::srgb_u8(0x54, 0x54, 0x5b);
+pub(super) const METHOD: Color = Color::srgb_u8(0x18, 0x18, 0x1b);
+pub(super) const METHOD_EDGE: Color = Color::srgb_u8(0x64, 0x64, 0x6b);
 pub(super) const METHOD_INK: Color = Color::srgb_u8(0xb9, 0xbd, 0xc6);
-pub(super) const PRESET: Color = Color::srgb_u8(0x1d, 0x1d, 0x22);
-pub(super) const PRESET_EDGE: Color = Color::srgb_u8(0x5c, 0x5c, 0x65);
-pub(super) const PRESET_INK: Color = Color::srgb_u8(0xc3, 0xc7, 0xcf);
 pub(super) const PRESET_ON: Color = Color::srgb_u8(0x2b, 0x30, 0x29);
-pub(super) const PRESET_ON_EDGE: Color = Color::srgb_u8(0xbc, 0xc8, 0xaf);
-pub(super) const PICK_ON: Color = Color::srgb_u8(0x35, 0x39, 0x2f);
-pub(super) const PICK_ON_EDGE: Color = Color::srgb_u8(0xaa, 0xb3, 0x9e);
 pub(super) const PRESET_ON_GLYPH: Color = Color::srgb_u8(0xed, 0xf1, 0xe7);
 pub(super) const AXIS_TAG_INK: Color = Color::srgb_u8(0xd2, 0xd7, 0xdd);
 pub(super) const AXIS_WAY_INK: Color = Color::srgb_u8(0xc0, 0xc4, 0xcc);
@@ -502,8 +503,9 @@ pub(super) const ITEM_RADIUS: f32 = 9.0;
 pub(super) const SLOT_GLOW_BLUR: f32 = 5.0;
 /// A plain `button`'s hover brightness.
 pub(super) const HOVER_LIFT: f32 = 1.15;
-pub(super) const STEP_HEIGHT: f32 = 39.0;
-pub(super) const STEPPER_VALUE_TEXT: f32 = 15.0;
+pub(super) const STEP_PX: f32 = 30.0;
+pub(super) const STEP_TEXT: f32 = 16.0;
+pub(super) const STEP_VALUE_PX: f32 = 36.0;
 pub(super) const SLOT_RECESS_PX: f32 = 3.0;
 pub(super) const SLOT_LIFT_PX: f32 = 2.0;
 pub(super) const GLYPH_SIZE: f32 = 22.0;
