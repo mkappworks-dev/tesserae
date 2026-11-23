@@ -1,9 +1,8 @@
 //! Bounded, opt-in measurements. Frame intervals end at the next First;
 //! main schedule spans end at Last and exclude extraction and render work.
+mod fill;
 mod gpu;
 mod monitor;
-pub(crate) use monitor::window as monitor_window;
-mod fill;
 mod waits;
 
 use crate::session::SessionApp;
