@@ -342,7 +342,6 @@ fn workspace(main: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSp
         flex_grow: 1.0,
         max_width: Val::Px(1180.0),
         min_height: Val::Px(0.0),
-        column_gap: Val::Px(24.0),
         ..default()
     })
     .with_children(children);
@@ -1061,7 +1060,7 @@ fn mode_picks(
             flex_shrink: 0.0,
             ..default()
         })
-        .with_children(|l| section_text(l, legend));
+        .with_children(|l| label(l, legend));
     parent
         .spawn(Node {
             display: Display::Grid,
@@ -1282,17 +1281,6 @@ fn label(parent: &mut ChildSpawnerCommands, value: &str) {
     ui::weighted_text(parent, value, theme::TEXT_BODY, theme::LABEL, theme::INK);
 }
 
-/// Small spaced capitals over a group of controls.
-fn section_text(parent: &mut ChildSpawnerCommands, value: &str) {
-    parent.spawn((
-        Text::new(value.to_uppercase()),
-        theme::font(theme::TEXT_EYEBROW),
-        bevy::text::LetterSpacing::Px(theme::SECTION_TRACKING),
-        TextColor(theme::muted()),
-        Pickable::IGNORE,
-    ));
-}
-
 fn form(
     main: &mut ChildSpawnerCommands,
     l: &Launcher,
@@ -1335,6 +1323,7 @@ fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
         "Give it a name you\u{2019}ll want to come back to.",
         "New World",
     );
+    gap(col, 24.0);
     mode_picks(
         col,
         "Game mode",
@@ -2219,31 +2208,36 @@ pub(super) fn picture(installed: &Installed, thumbnails: &Thumbnails, id: &str) 
     }
 }
 
-/// The thumbnail is drawn at a quarter of its size; swatches keep the mockup's 14 by 30.
+/// The thumbnail is drawn at a quarter of its size; swatches keep the mockup's 14 by 30, centred
+/// in a box of the same size so every card's text starts at one edge.
 fn draw_picture(parent: &mut ChildSpawnerCommands, picture: Picture) {
+    let frame = || Node {
+        width: Val::Px(128.0),
+        height: Val::Px(72.0),
+        border: UiRect::all(Val::Px(theme::RULE)),
+        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+        flex_shrink: 0.0,
+        ..default()
+    };
     match picture {
         Picture::Thumbnail(image) => {
             parent.spawn((
                 ImageNode::new(image),
                 BorderColor::all(theme::edge()),
-                Node {
-                    width: Val::Px(128.0),
-                    height: Val::Px(72.0),
-                    border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
+                frame(),
                 Pickable::IGNORE,
             ));
         }
         Picture::Swatches(colours) => {
             parent
                 .spawn((
+                    BackgroundColor(theme::panel()),
+                    BorderColor::all(theme::edge()),
                     Node {
                         column_gap: Val::Px(2.0),
-                        flex_shrink: 0.0,
-                        ..default()
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..frame()
                     },
                     Pickable::IGNORE,
                 ))
@@ -2563,6 +2557,8 @@ fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrust
                         row_gap: Val::Px(5.0),
                         flex_grow: 1.0,
                         min_width: Val::Px(0.0),
+                        // The SHA-256 cannot wrap; in a narrow dialog its tail is cut, not spilled.
+                        overflow: Overflow::clip_x(),
                         ..default()
                     })
                     .with_children(|info| {
@@ -2717,19 +2713,21 @@ fn step_frame(
     forward
 }
 
-/// The steps beside Create World's sheet, as tall as it is. A step
+/// The steps down the left of Create World's sheet, ruled off from it. A step
 /// before this one shows a tick only once it is valid.
 fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, current: Step) {
     w.spawn((
-        cine::surface(theme::panel()),
-        cine::framed(Node {
+        BackgroundColor(theme::SHEET_SHADE),
+        BorderColor::all(theme::edge()),
+        Node {
             width: Val::Px(165.0),
             flex_shrink: 0.0,
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(7.0),
-            padding: UiRect::axes(Val::Px(12.0), Val::Px(20.0)),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(28.0)),
+            border: UiRect::right(Val::Px(theme::RULE)),
             ..default()
-        }),
+        },
     ))
     .with_children(|rail| {
         rail.spawn((
@@ -4145,14 +4143,16 @@ fn dialog(
         },
     ))
     .with_children(|overlay| {
-        overlay
-            .spawn((TabGroup::modal(), cine::dialog_box()))
-            .with_children(|d| {
-                cine::dialog_title(d, title);
-                body(d);
-                d.spawn(cine::dialog_actions())
-                    .with_children(|row| focus = Some(actions(row)));
-            });
+        let mut dialog = overlay.spawn((TabGroup::modal(), cine::dialog_box()));
+        dialog
+            .entry::<Node>()
+            .and_modify(|mut node| node.max_height = Val::Percent(100.0));
+        dialog.with_children(|d| {
+            cine::dialog_title(d, title);
+            body(d);
+            d.spawn(cine::dialog_actions())
+                .with_children(|row| focus = Some(actions(row)));
+        });
     });
     focus
 }
@@ -4238,7 +4238,15 @@ fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed, on: Step) 
                 },
                 theme::muted(),
             );
-            trust_rows(d, items);
+            // A Game's requested limits run long; the list scrolls so the buttons stay on screen.
+            d.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                min_height: Val::Px(0.0),
+                flex_shrink: 1.0,
+                overflow: Overflow::scroll_y(),
+                ..default()
+            })
+            .with_children(|list| trust_rows(list, items));
         },
         |row| {
             let cancel = buttons::button(
