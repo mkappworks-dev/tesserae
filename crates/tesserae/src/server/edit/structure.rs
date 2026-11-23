@@ -310,6 +310,13 @@ pub(super) fn receive(
     }
 }
 
+/// A Structure the Server built whole, sent to the Player who placed it; a refusal is an
+/// [`EditRejected`].
+#[derive(Message, Clone, Debug, PartialEq)]
+pub struct StructureBuilt {
+    pub template: String,
+}
+
 /// How far a placement got on this tick.
 enum Progress {
     Done,
@@ -336,7 +343,7 @@ pub(in crate::server) fn drain(
         Option<Res<WorldGenerator>>,
     ),
     containers: Option<Res<Containers>>,
-    mut rejected: MessageWriter<EditRejected>,
+    (mut rejected, mut built): (MessageWriter<EditRejected>, MessageWriter<StructureBuilt>),
     players: Query<&Player>,
 ) {
     let body = players.single().ok().and_then(Player::solid_body);
@@ -358,7 +365,12 @@ pub(in crate::server) fn drain(
                 pending.2.push_front(structure);
                 break;
             }
-            Progress::Done => journal.record_group(structure.applied),
+            Progress::Done => {
+                journal.record_group(structure.applied);
+                built.write(StructureBuilt {
+                    template: tables.templates[structure.template].name.clone(),
+                });
+            }
             Progress::Refused(reason) => {
                 take_back(
                     structure.applied,
@@ -759,6 +771,26 @@ mod tests {
         count
     }
 
+    fn builds(app: &mut App) -> Vec<StructureBuilt> {
+        app.world_mut()
+            .resource_mut::<Messages<StructureBuilt>>()
+            .drain()
+            .collect()
+    }
+
+    #[test]
+    fn a_structure_built_whole_tells_the_player_which_template_landed() {
+        let mut app = hut_app();
+        send(&mut app, intent("t:hut"));
+        settle(&mut app);
+        assert_eq!(
+            builds(&mut app),
+            [StructureBuilt {
+                template: "t:hut".into()
+            }]
+        );
+    }
+
     #[test]
     fn survival_is_refused_with_a_reason_and_nothing_changes() {
         let mut app = hut_app();
@@ -862,6 +894,7 @@ mod tests {
             tick(&mut app);
         }
         assert_eq!(rejections(&mut app), [RejectReason::Busy]);
+        assert!(builds(&mut app).is_empty(), "and not announced as built");
         assert_eq!(built(&app), 0, "the World is as it was");
         assert!(app.world().resource::<Journal>().is_empty());
     }
