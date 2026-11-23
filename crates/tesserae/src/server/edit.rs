@@ -52,7 +52,7 @@ pub use layout::LayoutCell;
 pub(in crate::server) use layout::send_layout;
 pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
 pub use structure::StructureCell;
-pub use structure::{PIN_REACH_M, StructureIntent};
+pub use structure::{PIN_REACH_M, StructureBuilt, StructureIntent};
 #[cfg(test)]
 pub(in crate::server) use structure::{drain as drain_structures, send_structure};
 #[cfg(test)]
@@ -439,6 +439,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<StructureAnswer>()
         .add_player_intent::<LayoutIntent>()
         .add_player_intent::<StructureIntent>()
+        .add_session_message::<StructureBuilt>()
         .add_session_message::<LayoutAim>()
         .add_session_message::<LayoutAnswer>()
         .add_session_message::<AimReport>()

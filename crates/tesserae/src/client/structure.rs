@@ -20,7 +20,7 @@ use super::edit::{Catalogue, Holding, Hotbar};
 use super::input::Ownership;
 use crate::content::{CatalogueTemplate, ContentCatalogue};
 use crate::server::edit::{
-    RejectReason, StructureAim, StructureAnswer, StructureCell, StructureIntent,
+    RejectReason, StructureAim, StructureAnswer, StructureBuilt, StructureCell, StructureIntent,
 };
 use crate::server::tool::ToolKind;
 use crate::session::SessionApp;
@@ -371,12 +371,28 @@ pub(super) fn act(
     {
         intents.write(intent);
         tool.pinned = None;
-        tool.spend();
     }
     if pressed.remove && on_pin {
         tool.pinned = None;
     }
     prompt.set_if_neq(PinPrompt(tool.pinned.is_some() && near));
+}
+
+/// Unselects the Template once the Server says it was built whole, so a refused build keeps it
+/// chosen for another try.
+fn confirm_built(
+    mut confirmed: MessageReader<StructureBuilt>,
+    mut tool: ResMut<PlaceTool>,
+    catalogue: Res<Catalogue>,
+) {
+    for built in confirmed.read() {
+        if tool
+            .chosen(&catalogue.0)
+            .is_some_and(|chosen| chosen.name == built.template)
+        {
+            tool.spend();
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -771,7 +787,16 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::camera::reset)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (learn_palette, act, report, receive, track, build, outline)
+                (
+                    learn_palette,
+                    act,
+                    confirm_built,
+                    report,
+                    receive,
+                    track,
+                    build,
+                    outline,
+                )
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -831,6 +856,7 @@ mod tests {
             .init_resource::<PinPrompt>()
             .insert_resource(WorldSettings::default())
             .add_message::<StructureIntent>()
+            .add_message::<StructureBuilt>()
             .add_message::<StructureAim>()
             .add_message::<StructureAnswer>()
             .insert_resource(Catalogue(catalogue()));
@@ -851,7 +877,10 @@ mod tests {
                 Transform::from_xyz(1.0, 2.0, 3.0).looking_to(Vec3::NEG_Y, Vec3::Z),
             ),
         ));
-        app.add_systems(Update, (intercept, act, report, receive, track).chain());
+        app.add_systems(
+            Update,
+            (intercept, act, confirm_built, report, receive, track).chain(),
+        );
         // The first frame only notes that the cursor was already grabbed.
         app.update();
         app
@@ -949,9 +978,29 @@ mod tests {
             intent.direction.abs_diff_eq(Vec3::NEG_Y, 1e-6),
             "along the heading it was pinned with"
         );
+        let catalogue = app.world().resource::<Catalogue>().0.clone();
         let tool = app.world().resource::<PlaceTool>();
         assert!(tool.pinned.is_none());
-        let catalogue = app.world().resource::<Catalogue>().0.clone();
+        assert!(
+            tool.chosen(&catalogue).is_some() && !tool.reopen,
+            "sent, not yet built: a refusal keeps the Template"
+        );
+        app.world_mut().write_message(StructureBuilt {
+            template: "terra:well".into(),
+        });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<PlaceTool>()
+                .chosen(&catalogue)
+                .is_some(),
+            "another Template's build leaves the choice"
+        );
+        app.world_mut().write_message(StructureBuilt {
+            template: "terra:cottage".into(),
+        });
+        app.update();
+        let tool = app.world().resource::<PlaceTool>();
         assert!(tool.chosen(&catalogue).is_none(), "built, so unselected");
         assert!(tool.reopen, "and the panel asked to open");
         assert!(
