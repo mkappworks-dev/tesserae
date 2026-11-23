@@ -2,8 +2,7 @@
 
 Status: ready-for-agent
 
-Blocked by: [02: Approve the mockup](./02-mockup-approval.md), including the
-toast study at `/toasts`
+Blocked by: [02: Approve the mockup](./02-mockup-approval.md)
 
 Spec: [Menus polish](../spec.md).
 
@@ -28,3 +27,5 @@ Inventory-full line stay as they are.
 - [ ] Every existing `notify` call site still shows its message
 
 ## Comments
+
+The user chose the positions from the `/toasts` study on 2026-11-23: bottom-centre above the prompt bar in menus, top-centre under the compass in play.
