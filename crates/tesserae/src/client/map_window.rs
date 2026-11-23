@@ -6,12 +6,16 @@
 //! and gameplay input waits until it closes.
 
 use bevy::asset::RenderAssetUsages;
+use bevy::ecs::lifecycle::HookContext;
+use bevy::ecs::world::DeferredWorld;
 use bevy::image::ImageSampler;
+use bevy::input::gamepad::GamepadButton;
+use bevy::input_focus::InputFocus;
 use bevy::picking::events::PointerDrag;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::text::{Justify, TextLayout};
-use bevy::ui::{ComputedNode, InteractionDisabled, UiGlobalTransform};
+use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::HashMap;
@@ -20,13 +24,14 @@ use tesserae_core::MaterialId;
 use tesserae_core::map::{Map, SAMPLE_M, Sample, cell_of, locate};
 
 use super::actions::{Action, Actions};
+use super::frame::{self, Cap, Prompt};
 use super::map_cache::{MapCache, MapPalette};
-use super::map_pop::Pop;
+use super::map_pop::{Pop, PopControl};
 use super::menu::Facts;
 use super::menu_ui as ui;
 use super::minimap::{MAP_ARROW_PX, Spot, arrow_at, fog, light, lit};
 use super::theme;
-use super::waypoint_panel::PanelTab;
+use super::waypoint_panel::{PanelTab, WpControl};
 use super::waypoints::{
     Mark, Marks, Pending, paint_marks, paint_pending, pick, view_labels, view_marks, view_pending,
 };
@@ -35,21 +40,16 @@ use crate::session::SessionApp;
 /// The view's size until the window has laid it out, and the least it is ever painted at.
 pub(super) const DEFAULT_VIEW: Vec2 = Vec2::new(640.0, 480.0);
 const MIN_VIEW_PX: f32 = 200.0;
-const PANEL_PX: f32 = 290.0;
-const SCRIM: Color = Color::srgba(0.01, 0.02, 0.02, 0.35);
-const CARD_FILL: Color = Color::srgb_u8(0x0b, 0x0b, 0x0d);
-const CARD_EDGE: Color = Color::srgb_u8(0x66, 0x66, 0x6d);
-const CARD_RULE: Color = Color::srgb_u8(0x45, 0x45, 0x4c);
-const CARD_MAX_PX: Vec2 = Vec2::new(1000.0, 640.0);
-const CARD_SHARE: Vec2 = Vec2::new(78.0, 76.0);
+const LEGEND_PX: f32 = 300.0;
+/// Darker than the prototype's 0.72 alpha because the UI blends in linear light.
+const LEGEND_FILL: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xd0);
 const VIEW_FILL: Color = Color::srgb_u8(0x0b, 0x0f, 0x0c);
-const CHROME_FILL: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xe6);
 const CHROME_FILL_SOFT: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xb3);
 const CHROME_CLEAR: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0);
 const ROSE_FILL: Color = Color::srgba_u8(0x06, 0x08, 0x07, 0xcc);
 const NORTH: Color = Color::srgb_u8(0xe8, 0x70, 0x6a);
 const NEEDLE: Color = Color::srgb_u8(0xf2, 0xf4, 0xee);
-const FOOT_INK: Color = Color::srgb_u8(0xd3, 0xd9, 0xd0);
+const FOOT_INK: Color = Color::srgba_u8(0xd3, 0xd9, 0xd0, 0xbf);
 const FOG_SWATCH: Color = Color::srgb_u8(0x15, 0x1a, 0x17);
 const SWATCH_EDGE: Color = Color::srgba(0.0, 0.0, 0.0, 0.4);
 /// Metres per pixel, most detailed first.
@@ -375,10 +375,7 @@ pub(super) fn explored_m2(map: &Map) -> u64 {
 }
 
 fn area_text(m2: u64) -> String {
-    format!(
-        "{:.2} km\u{b2} \u{b7} seen with the ground loaded. Fogged ground is not guessed at.",
-        m2 as f64 / 1_000_000.0
-    )
+    format!("{:.2} km\u{b2} explored", m2 as f64 / 1_000_000.0)
 }
 
 /// The Biomes with at least one explored sample, in declaration order.
@@ -434,8 +431,6 @@ pub(super) struct MapView;
 #[derive(Component)]
 struct ReadoutText;
 #[derive(Component)]
-pub(super) struct ZoomText;
-#[derive(Component)]
 struct ScaleBar;
 #[derive(Component)]
 struct ScaleText;
@@ -449,15 +444,110 @@ struct LegendList;
 struct LabelLayer;
 #[derive(Component)]
 pub(super) struct SidePanel;
+#[derive(Component)]
+struct PromptHolder;
 
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Control {
-    ZoomIn,
-    ZoomOut,
     Centre,
     AddMode,
     Close,
 }
+
+/// What a prompt does: it becomes the control it names, so the observer that answers a click on
+/// the control answers the prompt too.
+#[derive(Component, Clone, Copy)]
+#[component(on_insert = unpack)]
+enum Act {
+    Map(Control),
+    Waypoint(WpControl),
+    Pop(PopControl),
+}
+
+fn unpack(mut world: DeferredWorld, context: HookContext) {
+    let Some(act) = world.get::<Act>(context.entity).copied() else {
+        return;
+    };
+    let mut commands = world.commands();
+    let mut entity = commands.entity(context.entity);
+    match act {
+        Act::Map(control) => entity.insert(control),
+        Act::Waypoint(control) => entity.insert(control),
+        Act::Pop(control) => entity.insert(control),
+    };
+}
+
+/// Which prompts the bar holds.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Bar {
+    /// Browsing, with the selected Waypoint and whether it is the death marker.
+    Browse(Option<(u32, bool)>),
+    Adding,
+    Popover {
+        adding: bool,
+    },
+    DeathMarker,
+}
+
+impl Bar {
+    fn of(window: &MapWindow, marks: &Marks) -> Self {
+        match window.pop {
+            Some(Pop::Add(_)) => Bar::Popover { adding: true },
+            Some(Pop::Edit(id)) if marks.get(id).is_some_and(|w| w.death) => Bar::DeathMarker,
+            Some(Pop::Edit(_)) => Bar::Popover { adding: false },
+            None if window.adding => Bar::Adding,
+            None => Bar::Browse(
+                marks
+                    .selected()
+                    .and_then(|id| marks.get(id).map(|w| (id, w.death))),
+            ),
+        }
+    }
+
+    fn prompts(self) -> Vec<Prompt<Act>> {
+        let cancel = |label| Prompt::new(Cap::Esc, label).act(Act::Pop(PopControl::Cancel));
+        match self {
+            Bar::Browse(selected) => {
+                let mut prompts = Vec::new();
+                if let Some((id, death)) = selected {
+                    prompts.push(
+                        Prompt::new(Cap::Enter, "Edit").act(Act::Waypoint(WpControl::Select(id))),
+                    );
+                    if !death {
+                        prompts.push(
+                            Prompt::new(Cap::Del, "Remove")
+                                .act(Act::Waypoint(WpControl::Remove(id))),
+                        );
+                    }
+                }
+                prompts.extend([
+                    Prompt::new(Cap::Letter('W'), "Add Waypoint")
+                        .act(Act::Map(Control::AddMode))
+                        .pad(GamepadButton::West),
+                    Prompt::new(Cap::Letter('C'), "Centre").act(Act::Map(Control::Centre)),
+                    Prompt::new(Cap::Text(ZOOM_KEYS), "Zoom"),
+                    Prompt::new(Cap::Esc, "Close").act(Act::Map(Control::Close)),
+                ]);
+                prompts
+            }
+            Bar::Adding => vec![
+                Prompt::new(Cap::Text("Click"), "Place"),
+                Prompt::new(Cap::Letter('H'), "At my position")
+                    .act(Act::Pop(PopControl::AtMyPosition))
+                    .pad(GamepadButton::West),
+                cancel("Cancel"),
+            ],
+            Bar::Popover { adding } => vec![
+                Prompt::new(Cap::Enter, if adding { "Add" } else { "Save" })
+                    .act(Act::Pop(PopControl::Ok)),
+                cancel("Cancel"),
+            ],
+            Bar::DeathMarker => vec![cancel("Close")],
+        }
+    }
+}
+
+const ZOOM_KEYS: &str = "+ \u{2212}";
 
 /// What the image was last painted for.
 #[derive(PartialEq)]
@@ -484,9 +574,19 @@ pub(super) fn plugin(app: &mut App) {
                     .after(super::layout_menu::toggle)
                     .before(super::input::resolve)
                     .before(super::camera::grab_cursor),
-                (track_pointer, zoom_wheel, sync).chain().after(toggle),
+                (
+                    track_pointer,
+                    (zoom_wheel, keys),
+                    sync,
+                    select_focused,
+                    prompt_bar,
+                )
+                    .chain()
+                    .after(toggle)
+                    .after(super::map_pop::escape),
             ),
         );
+    super::frame::plugin(app);
 }
 
 type Blockers<'w> = (
@@ -559,8 +659,6 @@ fn activate(
         return;
     };
     match control {
-        Control::ZoomIn => window.zoom_in(),
-        Control::ZoomOut => window.zoom_out(),
         Control::Centre => window.centre = None,
         Control::AddMode => {
             window.adding = !window.adding;
@@ -601,12 +699,78 @@ fn zoom_wheel(actions: Res<Actions>, mut window: ResMut<MapWindow>) {
     }
 }
 
+/// Q and E page the legend, + and − zoom; none of them while a name is being typed.
+fn keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    ui: Option<Res<super::input::UiInput>>,
+    mut window: ResMut<MapWindow>,
+) {
+    if !window.open || ui.is_some_and(|ui| ui.text_entry) {
+        return;
+    }
+    let page = [KeyCode::KeyQ, KeyCode::KeyE]
+        .into_iter()
+        .filter(|key| keys.just_pressed(*key))
+        .count();
+    if page % 2 == 1 {
+        window.tab = window.tab.other();
+    }
+    if keys.any_just_pressed([KeyCode::Equal, KeyCode::NumpadAdd]) {
+        window.zoom_in();
+    }
+    if keys.any_just_pressed([KeyCode::Minus, KeyCode::NumpadSubtract]) {
+        window.zoom_out();
+    }
+}
+
+/// Moving onto a Waypoint in the legend selects it, as hovering or the arrows do; only a press
+/// opens it.
+fn select_focused(
+    window: Res<MapWindow>,
+    focus: Res<InputFocus>,
+    rows: Query<&WpControl>,
+    mut marks: ResMut<Marks>,
+    mut last: Local<Option<Entity>>,
+) {
+    let now = focus.get().filter(|_| window.open);
+    if *last == now {
+        return;
+    }
+    *last = now;
+    if let Some(WpControl::Select(id)) = now.and_then(|e| rows.get(e).ok()) {
+        marks.select(Some(*id));
+    }
+}
+
+fn prompt_bar(
+    mut commands: Commands,
+    window: Res<MapWindow>,
+    marks: Res<Marks>,
+    holders: Query<(Entity, Has<Children>), With<PromptHolder>>,
+    mut shown: Local<Option<Bar>>,
+) {
+    let Ok((holder, filled)) = holders.single() else {
+        *shown = None;
+        return;
+    };
+    let wanted = Bar::of(&window, &marks);
+    if filled && *shown == Some(wanted) {
+        return;
+    }
+    *shown = Some(wanted);
+    commands
+        .entity(holder)
+        .despawn_children()
+        .with_children(|holder| frame::prompt_bar(holder, "", wanted.prompts()));
+}
+
 /// Keeps the view's size and the pointer's pixel in it from the laid-out node. Without a laid-out
 /// view, as in a headless test, both stay as set.
 fn track_pointer(
     mut window: ResMut<MapWindow>,
     primary: Single<&Window, With<PrimaryWindow>>,
     views: Query<(&ComputedNode, &UiGlobalTransform), With<MapView>>,
+    legends: Query<(&ComputedNode, &UiGlobalTransform), With<SidePanel>>,
 ) {
     let Ok((node, transform)) = views.single() else {
         return;
@@ -627,8 +791,17 @@ fn track_pointer(
         window.view = view;
     }
     let top_left = transform.translation * scale - size / 2.0;
+    // The legend floats over the view; the pointer on it is off the Map.
+    let over_legend = |cursor: Vec2| {
+        legends.iter().any(|(node, transform)| {
+            let half = node.size() * scale / 2.0;
+            let centre = transform.translation * scale;
+            (cursor - centre).abs().cmplt(half).all()
+        })
+    };
     let pointer = primary
         .cursor_position()
+        .filter(|cursor| !over_legend(*cursor))
         .and_then(|cursor| view_pixel(cursor, top_left, size, inset, view));
     if window.pointer != pointer {
         window.pointer = pointer;
@@ -650,24 +823,17 @@ fn view_pixel(
 }
 
 // Disjoint filters so the four Text queries in `Lines` do not conflict.
-type AreaOnly = (With<AreaText>, Without<ReadoutText>, Without<ZoomText>);
-type ScaleOnly = (
-    With<ScaleText>,
-    Without<ReadoutText>,
-    Without<ZoomText>,
-    Without<AreaText>,
-);
+type AreaOnly = (With<AreaText>, Without<ReadoutText>);
+type ScaleOnly = (With<ScaleText>, Without<ReadoutText>, Without<AreaText>);
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct Lines<'w, 's> {
     readout: Query<'w, 's, &'static mut Text, With<ReadoutText>>,
-    zoom: Query<'w, 's, &'static mut Text, (With<ZoomText>, Without<ReadoutText>)>,
     area: Query<'w, 's, &'static mut Text, AreaOnly>,
     scale_text: Query<'w, 's, &'static mut Text, ScaleOnly>,
     scale_bar: Query<'w, 's, &'static mut Node, With<ScaleBar>>,
     legend: Query<'w, 's, Entity, With<LegendList>>,
     labels: Query<'w, 's, Entity, With<LabelLayer>>,
-    controls: Query<'w, 's, (Entity, &'static Control, Has<InteractionDisabled>)>,
 }
 
 fn new_image(size: UVec2, pixels: Vec<u8>) -> Image {
@@ -718,11 +884,6 @@ fn spawn_labels(layer: &mut ChildSpawnerCommands, labels: &[(Vec2, String)]) {
     }
 }
 
-type Keys<'w> = (
-    Option<Res<'w, super::actions::Bindings>>,
-    Option<Res<'w, super::actions::Labels>>,
-);
-
 #[allow(clippy::too_many_arguments)]
 fn sync(
     mut commands: Commands,
@@ -734,7 +895,7 @@ fn sync(
         Option<Res<Facts>>,
         Res<Marks>,
     ),
-    (preferences, keys): (Option<Res<super::profile::Preferences>>, Keys),
+    preferences: Option<Res<super::profile::Preferences>>,
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<WindowRoot>>,
     mut lines: Lines,
@@ -801,18 +962,8 @@ fn sync(
             None => {
                 let handle = images.add(new_image(size, pixels));
                 let solid = preferences.is_some_and(|p| p.solid_background);
-                let key = keys
-                    .0
-                    .as_ref()
-                    .zip(keys.1.as_ref())
-                    .map_or_else(String::new, |(bindings, labels)| {
-                        bindings.label(Action::Map, labels)
-                    });
-                let eyebrow = facts
-                    .as_ref()
-                    .and_then(|f| f.0.as_ref())
-                    .map_or_else(|| "THE MAP".to_string(), eyebrow_of);
-                spawn(&mut commands, handle.clone(), solid, &eyebrow, &key);
+                let place = facts.as_ref().and_then(|f| f.0.as_ref()).map(place_of);
+                spawn(&mut commands, handle.clone(), solid, place.as_deref());
                 *drawn = Some((wanted, handle));
                 return;
             }
@@ -843,24 +994,11 @@ fn sync(
         },
     };
     set(lines.readout.iter_mut(), &text);
-    set(lines.zoom.iter_mut(), &format!("{mpp} m/px"));
     set(lines.area.iter_mut(), &area_text(stats.explored_m2));
     let (metres, px) = scale_bar(mpp);
     set(lines.scale_text.iter_mut(), &format!("{metres} m"));
     for mut node in &mut lines.scale_bar {
         node.width = Val::Px(px);
-    }
-    for (entity, control, disabled) in &lines.controls {
-        let limit = match control {
-            Control::ZoomIn => window.zoom == 0,
-            Control::ZoomOut => window.zoom == ZOOMS.len() - 1,
-            _ => continue,
-        };
-        if limit && !disabled {
-            commands.entity(entity).insert(InteractionDisabled);
-        } else if !limit && disabled {
-            commands.entity(entity).remove::<InteractionDisabled>();
-        }
     }
     let seen = (stats.seen.clone(), stats.tints.clone());
     if legend_shown.as_ref() != Some(&seen) {
@@ -888,15 +1026,14 @@ fn sync(
     }
 }
 
-/// The Game and the World, as the Map's heading names them.
-fn eyebrow_of(facts: &crate::content::WorldFacts) -> String {
-    let game = facts.game.as_ref().map(|(id, _)| id.to_uppercase());
-    let world = facts.name.as_ref().map(|name| name.to_uppercase());
-    match (game, world) {
-        (Some(game), Some(world)) => format!("{game} / {world}"),
-        (Some(only), None) | (None, Some(only)) => only,
-        (None, None) => "THE MAP".to_string(),
-    }
+/// The Game and the World, under the Map's title.
+fn place_of(facts: &crate::content::WorldFacts) -> String {
+    let game = facts.game.as_ref().map(|(id, _)| ui::title(id));
+    [game, facts.name.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
 }
 
 fn set<'a>(texts: impl Iterator<Item = Mut<'a, Text>>, value: &str) {
@@ -911,8 +1048,9 @@ fn legend_row(list: &mut ChildSpawnerCommands, swatch: Color, edge: Color, name:
     list.spawn((
         Pickable::IGNORE,
         Node {
+            min_height: Val::Px(30.0),
             align_items: AlignItems::Center,
-            column_gap: Val::Px(8.0),
+            column_gap: Val::Px(10.0),
             ..default()
         },
     ))
@@ -920,8 +1058,9 @@ fn legend_row(list: &mut ChildSpawnerCommands, swatch: Color, edge: Color, name:
         row.spawn((
             Pickable::IGNORE,
             Node {
-                width: Val::Px(12.0),
-                height: Val::Px(12.0),
+                width: Val::Px(14.0),
+                height: Val::Px(14.0),
+                flex_shrink: 0.0,
                 border: UiRect::all(Val::Px(theme::RULE)),
                 border_radius: BorderRadius::all(Val::Px(3.0)),
                 ..default()
@@ -929,64 +1068,50 @@ fn legend_row(list: &mut ChildSpawnerCommands, swatch: Color, edge: Color, name:
             BackgroundColor(swatch),
             BorderColor::all(edge),
         ));
-        ui::text(row, name, theme::TEXT_EYEBROW, theme::INK);
+        ui::text(row, name, theme::TEXT_CAPTION, theme::INK);
     });
 }
 
-fn spawn(commands: &mut Commands, image: Handle<Image>, solid: bool, eyebrow: &str, key: &str) {
+/// The Map fills the screen; its title, compass, legend and readouts float over it, and its
+/// actions are prompts in the bar below.
+fn spawn(commands: &mut Commands, image: Handle<Image>, solid: bool, place: Option<&str>) {
     commands
         .spawn((
             WindowRoot,
+            frame::Frame,
             GlobalZIndex(20),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
             BackgroundColor(if solid {
                 theme::SOLID_BACKGROUND
             } else {
-                SCRIM
+                VIEW_FILL
             }),
         ))
         .with_children(|root| {
+            view_box(root, image, place);
             root.spawn((
+                PromptHolder,
                 Node {
-                    width: Val::Percent(CARD_SHARE.x),
-                    height: Val::Percent(CARD_SHARE.y),
-                    max_width: Val::Px(CARD_MAX_PX.x),
-                    max_height: Val::Px(CARD_MAX_PX.y),
-                    border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
-                    overflow: Overflow::clip(),
+                    flex_direction: FlexDirection::Column,
+                    flex_shrink: 0.0,
                     ..default()
                 },
-                BackgroundColor(CARD_FILL),
-                BorderColor::all(CARD_EDGE),
-                BoxShadow::new(
-                    Color::srgba(0.0, 0.0, 0.0, 0.27),
-                    Val::Px(0.0),
-                    Val::Px(16.0),
-                    Val::Px(0.0),
-                    Val::Px(50.0),
-                ),
-            ))
-            .with_children(|card| {
-                view_box(card, image, eyebrow, key);
-                side_panel(card);
-            });
+            ));
         });
 }
 
-fn view_box(root: &mut ChildSpawnerCommands, image: Handle<Image>, eyebrow: &str, key: &str) {
+fn view_box(root: &mut ChildSpawnerCommands, image: Handle<Image>, place: Option<&str>) {
     root.spawn((
         ViewBox,
         Node {
             flex_grow: 1.0,
-            min_width: Val::Px(0.0),
+            min_height: Val::Px(0.0),
             overflow: Overflow::clip(),
             ..default()
         },
@@ -1014,54 +1139,56 @@ fn view_box(root: &mut ChildSpawnerCommands, image: Handle<Image>, eyebrow: &str
                 ..default()
             },
         ));
-        view.spawn((
-            Pickable::IGNORE,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                top: Val::Px(0.0),
-                padding: UiRect {
-                    left: Val::Px(16.0),
-                    right: Val::Px(40.0),
-                    top: Val::Px(14.0),
-                    bottom: Val::Px(18.0),
-                },
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundGradient::from(RadialGradient::new(
-                UiPosition::TOP_LEFT,
-                RadialGradientShape::Ellipse(Val::Percent(120.0), Val::Percent(100.0)),
-                vec![
-                    ColorStop::percent(CHROME_FILL_SOFT, 30.0),
-                    ColorStop::percent(CHROME_CLEAR, 100.0),
-                ],
-            )),
-        ))
-        .with_children(|title| {
-            title.spawn((
-                Text::new(eyebrow),
-                theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
-                bevy::text::LineHeight::Px(15.0),
-                bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
-                TextColor(theme::EYEBROW),
-                Pickable::IGNORE,
-                Node {
-                    margin: UiRect::bottom(Val::Px(12.0)),
-                    ..default()
-                },
-            ));
-            title.spawn((
-                Text::new("Map"),
-                theme::weighted(24.0, theme::BOOK),
-                bevy::text::LineHeight::Px(28.0),
-                TextColor(theme::INK),
-                Pickable::IGNORE,
-            ));
-        });
+        title(view, place);
         rose(view);
+        super::map_tools::banner(view);
+        legend(view);
         foot(view);
-        super::map_tools::corner(view, key);
+    });
+}
+
+fn title(view: &mut ChildSpawnerCommands, place: Option<&str>) {
+    view.spawn((
+        Pickable::IGNORE,
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            padding: UiRect {
+                left: Val::Px(24.0),
+                right: Val::Px(48.0),
+                top: Val::Px(18.0),
+                bottom: Val::Px(28.0),
+            },
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+        BackgroundGradient::from(RadialGradient::new(
+            UiPosition::TOP_LEFT,
+            RadialGradientShape::Ellipse(Val::Percent(120.0), Val::Percent(100.0)),
+            vec![
+                ColorStop::percent(CHROME_FILL_SOFT, 30.0),
+                ColorStop::percent(CHROME_CLEAR, 100.0),
+            ],
+        )),
+    ))
+    .with_children(|title| {
+        title.spawn((
+            Text::new("Map"),
+            theme::weighted(theme::TEXT_TITLE, theme::STRONG),
+            bevy::text::LineHeight::Px(34.0),
+            TextColor(theme::INK),
+            Pickable::IGNORE,
+        ));
+        if let Some(place) = place.filter(|p| !p.is_empty()) {
+            title.spawn((
+                Text::new(place),
+                theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
+                bevy::text::LineHeight::Px(16.0),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+            ));
+        }
     });
 }
 
@@ -1070,10 +1197,10 @@ fn rose(view: &mut ChildSpawnerCommands) {
         Pickable::IGNORE,
         Node {
             position_type: PositionType::Absolute,
-            right: Val::Px(16.0),
-            bottom: Val::Px(52.0),
-            width: Val::Px(44.0),
-            height: Val::Px(44.0),
+            right: Val::Px(20.0),
+            top: Val::Px(18.0),
+            width: Val::Px(34.0),
+            height: Val::Px(34.0),
             border: UiRect::all(Val::Px(theme::RULE)),
             border_radius: BorderRadius::MAX,
             ..default()
@@ -1088,7 +1215,7 @@ fn rose(view: &mut ChildSpawnerCommands) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
-                top: Val::Px(3.0),
+                top: Val::Px(1.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
@@ -1096,8 +1223,8 @@ fn rose(view: &mut ChildSpawnerCommands) {
         .with_children(|top| {
             top.spawn((
                 Text::new("N"),
-                theme::weighted(11.0, 700),
-                bevy::text::LineHeight::Px(13.0),
+                theme::weighted(10.0, 700),
+                bevy::text::LineHeight::Px(12.0),
                 TextColor(NORTH),
                 Pickable::IGNORE,
             ));
@@ -1106,10 +1233,10 @@ fn rose(view: &mut ChildSpawnerCommands) {
             Pickable::IGNORE,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(20.0),
-                top: Val::Px(16.0),
+                left: Val::Px(15.0),
+                top: Val::Px(14.0),
                 width: Val::Px(2.0),
-                height: Val::Px(18.0),
+                height: Val::Px(14.0),
                 ..default()
             },
             BackgroundGradient::from(LinearGradient::to_bottom(vec![
@@ -1131,27 +1258,27 @@ fn foot(view: &mut ChildSpawnerCommands) {
             right: Val::Px(0.0),
             bottom: Val::Px(0.0),
             padding: UiRect {
-                left: Val::Px(16.0),
-                right: Val::Px(16.0),
-                top: Val::Px(26.0),
-                bottom: Val::Px(10.0),
+                left: Val::Px(20.0),
+                right: Val::Px(20.0),
+                top: Val::Px(20.0),
+                bottom: Val::Px(8.0),
             },
             column_gap: Val::Px(14.0),
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundGradient::from(LinearGradient::to_bottom(vec![
-            ColorStop::percent(CHROME_CLEAR, 0.0),
-            ColorStop::percent(CHROME_FILL, 100.0),
-        ])),
     ))
     .with_children(|foot| {
         foot.spawn((
             ReadoutText,
             Text::new(""),
-            theme::figures(theme::TEXT_EYEBROW, theme::REGULAR),
+            theme::figures(theme::TEXT_TAG, theme::REGULAR),
             TextColor(FOOT_INK),
+            TextShadow {
+                offset: Vec2::new(0.0, 1.0),
+                color: Color::srgba_u8(0x0b, 0x0f, 0x0c, 0xdd),
+            },
             Pickable::IGNORE,
         ));
         foot.spawn((
@@ -1160,7 +1287,6 @@ fn foot(view: &mut ChildSpawnerCommands) {
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(8.0),
                 flex_shrink: 0.0,
-                margin: UiRect::right(Val::Px(60.0)),
                 ..default()
             },
         ))
@@ -1178,12 +1304,12 @@ fn foot(view: &mut ChildSpawnerCommands) {
                     },
                     ..default()
                 },
-                BorderColor::all(NEEDLE),
+                BorderColor::all(FOOT_INK),
             ));
             scale.spawn((
                 ScaleText,
                 Text::new(""),
-                theme::figures(theme::TEXT_EYEBROW, theme::REGULAR),
+                theme::figures(theme::TEXT_TAG, theme::REGULAR),
                 TextColor(FOOT_INK),
                 Pickable::IGNORE,
             ));
@@ -1191,47 +1317,49 @@ fn foot(view: &mut ChildSpawnerCommands) {
     });
 }
 
-fn side_panel(root: &mut ChildSpawnerCommands) {
-    root.spawn((
+/// The legend: Waypoints or the Explored biomes, paged with Q and E.
+fn legend(view: &mut ChildSpawnerCommands) {
+    view.spawn((
         SidePanel,
         ScrollPosition::default(),
         Node {
-            width: Val::Px(PANEL_PX),
-            flex_shrink: 0.0,
+            position_type: PositionType::Absolute,
+            top: Val::Px(70.0),
+            right: Val::Px(20.0),
+            width: Val::Px(LEGEND_PX),
+            max_height: Val::Percent(75.0),
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            padding: UiRect::all(Val::Px(16.0)),
-            border: UiRect::left(Val::Px(theme::RULE)),
+            padding: UiRect::new(Val::Px(14.0), Val::Px(14.0), Val::Px(6.0), Val::Px(14.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
             overflow: Overflow::scroll_y(),
             ..default()
         },
-        BackgroundColor(theme::panel()),
-        BorderColor::all(CARD_RULE),
+        BackgroundColor(LEGEND_FILL),
     ))
     .with_children(|panel| {
         super::waypoint_panel::sections(panel);
         super::waypoint_panel::section(panel, PanelTab::Explore).with_children(|section| {
-            super::waypoint_panel::heading(section, "Explored", false);
-            section.spawn((
-                AreaText,
-                Text::new(""),
-                theme::weighted(theme::TEXT_SMALL, theme::REGULAR),
-                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                TextColor(theme::muted()),
-                Pickable::IGNORE,
-                Node {
-                    margin: UiRect::top(Val::Px(6.0)),
-                    ..default()
-                },
-            ));
             section.spawn((
                 LegendList,
                 Node {
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(5.0),
-                    margin: UiRect::top(Val::Px(14.0)),
+                    row_gap: Val::Px(2.0),
                     ..default()
                 },
+            ));
+            section.spawn((
+                AreaText,
+                Text::new(""),
+                theme::weighted(theme::TEXT_EYEBROW, theme::REGULAR),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+                Node {
+                    margin: UiRect::top(Val::Px(10.0)),
+                    padding: UiRect::top(Val::Px(10.0)),
+                    border: UiRect::top(Val::Px(theme::RULE)),
+                    ..default()
+                },
+                BorderColor::all(theme::edge()),
             ));
         });
     });
