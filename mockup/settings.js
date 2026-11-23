@@ -754,7 +754,7 @@ function settingsBody() {
           "sound",
           "range",
           [0, 100, 1],
-          "Everything the World plays.",
+          "Everything the game plays.",
         ) +
         row(
           "Effects",

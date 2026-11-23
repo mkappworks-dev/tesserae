@@ -1049,7 +1049,7 @@ fn audio(list: &mut ChildSpawnerCommands, p: &Preferences) {
         for (name, hint, kind, value) in [
             (
                 "Master volume",
-                "Everything the World plays.",
+                "Everything the game plays.",
                 Scalar::MasterVolume,
                 p.volumes.master,
             ),
