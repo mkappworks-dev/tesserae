@@ -90,7 +90,7 @@ pub(super) fn spawn(
                     title(main, l, installed, logo);
                     None
                 }
-                Screen::Worlds => worlds(main, l, installed, thumbnails),
+                Screen::Worlds => worlds(main, l, installed, thumbnails, scroll),
                 Screen::Library => library_page(main, installed, thumbnails, scroll),
                 Screen::Create(Step::Game) => game_page(main, l, installed, thumbnails, scroll),
                 Screen::Create(Step::World) => form(main, l, installed, scroll),
@@ -361,6 +361,25 @@ fn page_scroll(scroll: Vec2) -> impl Bundle {
     (PageScroll, ScrollPosition(scroll))
 }
 
+/// The list under a toolbar, which alone scrolls so the toolbar above it stays in view.
+fn list_scroll(
+    col: &mut ChildSpawnerCommands,
+    scroll: Vec2,
+    children: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    col.spawn((
+        page_scroll(scroll),
+        Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    ))
+    .with_children(children);
+}
+
 /// Beyond this many Worlds the slots no longer fit on one screen, so a search appears.
 const SEARCH_FROM: usize = 8;
 
@@ -370,6 +389,7 @@ fn worlds(
     l: &Launcher,
     installed: &Installed,
     thumbnails: &Thumbnails,
+    scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
     let sheet = frame::MenuSheet::<()> {
@@ -397,8 +417,26 @@ fn worlds(
                 text_field(f, Field::Search, &l.search, "", "Find a World\u{2026}");
             });
             gap(body, 14.0);
+            list_scroll(body, scroll, |slots| {
+                world_slots(slots, l, installed, thumbnails, &mut focus);
+            });
+        } else {
+            world_slots(body, l, installed, thumbnails, &mut focus);
         }
-        body.spawn(Node {
+    });
+    focus
+}
+
+/// New World and the Worlds' slots, with what shows when the search matches none.
+fn world_slots(
+    slots: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    thumbnails: &Thumbnails,
+    focus: &mut Option<Entity>,
+) {
+    slots
+        .spawn(Node {
             display: Display::Grid,
             grid_template_columns: vec![RepeatedGridTrack::minmax(
                 GridTrackRepetition::AutoFill,
@@ -417,16 +455,17 @@ fn worlds(
                     .entity(fresh)
                     .insert(bevy::ui::InteractionDisabled);
             } else {
-                focus = Some(fresh);
+                *focus = Some(fresh);
             }
             for entry in &l.entries {
                 let slot = world_slot(grid, entry, installed, thumbnails);
                 if focus.is_none() || l.selected.as_deref() == Some(entry.path.as_path()) {
-                    focus = Some(slot);
+                    *focus = Some(slot);
                 }
             }
         });
-        body.spawn((
+    slots
+        .spawn((
             NoMatch(Field::Search),
             Node {
                 display: Display::None,
@@ -452,8 +491,6 @@ fn worlds(
                 theme::muted(),
             );
         });
-    });
-    focus
 }
 
 /// A save slot's button; [`super::paint_slots`] lights it when focused or hovered.
@@ -1254,38 +1291,45 @@ fn form(
 ) -> Option<Entity> {
     let f = &l.form;
     let mut focus = None;
-    step_frame(main, l, installed, Step::World, scroll, |col| {
-        problem(col, f.problem.as_ref());
-        col.spawn(Node {
-            column_gap: Val::Px(32.0),
-            align_items: AlignItems::FlexStart,
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|split| {
-            split
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_width: Val::Px(0.0),
-                    ..default()
-                })
-                .with_children(|fields| focus = Some(world_fields(fields, f)));
-            split
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    flex_shrink: 0.0,
-                    ..default()
-                })
-                .with_children(|aside| {
-                    terrain_aside(aside);
-                    if let Some(climate) = &f.climate {
-                        climate_fields(aside, climate);
-                    }
-                });
-        });
-    });
+    step_frame(
+        main,
+        l,
+        installed,
+        Step::World,
+        page_scroll(scroll),
+        |col| {
+            problem(col, f.problem.as_ref());
+            col.spawn(Node {
+                column_gap: Val::Px(32.0),
+                align_items: AlignItems::FlexStart,
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|split| {
+                split
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    })
+                    .with_children(|fields| focus = Some(world_fields(fields, f)));
+                split
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_shrink: 0.0,
+                        ..default()
+                    })
+                    .with_children(|aside| {
+                        terrain_aside(aside);
+                        if let Some(climate) = &f.climate {
+                            climate_fields(aside, climate);
+                        }
+                    });
+            });
+        },
+    );
     focus
 }
 
@@ -1493,7 +1537,7 @@ fn game_page(
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut chosen_row = None;
-    let forward = step_frame(main, l, installed, Step::Game, scroll, |col| {
+    let forward = step_frame(main, l, installed, Step::Game, page_scroll(scroll), |col| {
         problem(col, l.form.problem.as_ref());
         col.spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -1764,7 +1808,7 @@ fn mods_page(
 ) -> Option<Entity> {
     let f = &l.form;
     let game = f.game.clone().unwrap_or_default();
-    step_frame(main, l, installed, Step::Mods, scroll, |col| {
+    step_frame(main, l, installed, Step::Mods, (), |col| {
         problem(col, f.problem.as_ref());
         let required = installed.required(&game);
         let locked = installed.closure_for(&game, &f.mods);
@@ -1790,106 +1834,113 @@ fn mods_page(
         let (state, chosen, total) = mods::bulk(l, installed);
         bulk_box(col, Act::SelectShownMods, state, bulk_label(chosen, total));
         gap(col, 10.0);
-        col.spawn((
-            ModList,
-            Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|list| {
-            for i in mods::listed(l, installed) {
-                let m = &installed.mods[i];
-                let (category, about) = installed.about(&m.id);
-                let picture = match picture(installed, thumbnails, &m.id) {
-                    Picture::Swatches(colours) if colours.is_empty() => None,
-                    picture => Some(picture),
-                };
-                let ticked = f.mods.contains(&m.id);
-                let mut card = ModCard {
-                    act: Some(Act::ToggleMod(i)),
-                    check: Some((ticked, true)),
-                    picture,
-                    border: theme::edge(),
-                    title: ui::title(&m.id),
-                    detail: about.unwrap_or_default().to_owned(),
-                    adds: installed.summary(&m.id).and_then(adds),
-                    tag: category.map(|c| (c.to_owned(), theme::category_ink())),
-                };
-                if required.contains(&m.id) {
-                    card.act = None;
-                    card.check = Some((true, false));
-                    card.tag = Some(("Required".to_owned(), theme::category_ink()));
-                } else if let Some(why) = installed.blocked(&game, &m.id) {
-                    card.act = None;
-                    card.check = Some((false, false));
-                    card.detail = format!("Unavailable: {why}");
-                    card.tag = Some(("Unavailable".to_owned(), theme::category_ink()));
-                } else if let Some(clash) = l.clashes.get(&m.id) {
-                    card.border = theme::WARNING;
-                    card.detail = format!("Conflicts: {}", clash.reason);
-                    match &clash.replaces {
-                        Some(out) => {
-                            card.tag =
-                                Some((format!("Replaces {}", ui::title(out)), theme::WARNING));
-                        }
-                        None => {
+        list_scroll(col, scroll, |under| {
+            under
+                .spawn((
+                    ModList,
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ))
+                .with_children(|list| {
+                    for i in mods::listed(l, installed) {
+                        let m = &installed.mods[i];
+                        let (category, about) = installed.about(&m.id);
+                        let picture = match picture(installed, thumbnails, &m.id) {
+                            Picture::Swatches(colours) if colours.is_empty() => None,
+                            picture => Some(picture),
+                        };
+                        let ticked = f.mods.contains(&m.id);
+                        let mut card = ModCard {
+                            act: Some(Act::ToggleMod(i)),
+                            check: Some((ticked, true)),
+                            picture,
+                            border: theme::edge(),
+                            title: ui::title(&m.id),
+                            detail: about.unwrap_or_default().to_owned(),
+                            adds: installed.summary(&m.id).and_then(adds),
+                            tag: category.map(|c| (c.to_owned(), theme::category_ink())),
+                        };
+                        if required.contains(&m.id) {
+                            card.act = None;
+                            card.check = Some((true, false));
+                            card.tag = Some(("Required".to_owned(), theme::category_ink()));
+                        } else if let Some(why) = installed.blocked(&game, &m.id) {
                             card.act = None;
                             card.check = Some((false, false));
-                            card.tag = Some(("Conflict".to_owned(), theme::WARNING));
+                            card.detail = format!("Unavailable: {why}");
+                            card.tag = Some(("Unavailable".to_owned(), theme::category_ink()));
+                        } else if let Some(clash) = l.clashes.get(&m.id) {
+                            card.border = theme::WARNING;
+                            card.detail = format!("Conflicts: {}", clash.reason);
+                            match &clash.replaces {
+                                Some(out) => {
+                                    card.tag = Some((
+                                        format!("Replaces {}", ui::title(out)),
+                                        theme::WARNING,
+                                    ));
+                                }
+                                None => {
+                                    card.act = None;
+                                    card.check = Some((false, false));
+                                    card.tag = Some(("Conflict".to_owned(), theme::WARNING));
+                                }
+                            }
+                        } else if locked.contains(&m.id) && !ticked {
+                            card.act = None;
+                            card.check = Some((true, false));
+                            card.tag =
+                                Some(("Needed by another Mod".to_owned(), theme::category_ink()));
                         }
+                        let entity = mod_card(list, card);
+                        list.commands().entity(entity).insert((
+                            ModId(m.id.clone()),
+                            WorldCard {
+                                words: mods::words(installed, &m.id),
+                                by: Field::ModSearch,
+                            },
+                        ));
                     }
-                } else if locked.contains(&m.id) && !ticked {
-                    card.act = None;
-                    card.check = Some((true, false));
-                    card.tag = Some(("Needed by another Mod".to_owned(), theme::category_ink()));
-                }
-                let entity = mod_card(list, card);
-                list.commands().entity(entity).insert((
-                    ModId(m.id.clone()),
-                    WorldCard {
-                        words: mods::words(installed, &m.id),
-                        by: Field::ModSearch,
+                });
+            under
+                .spawn((
+                    NoMatch(Field::ModSearch),
+                    Node {
+                        display: Display::None,
+                        justify_content: JustifyContent::Center,
+                        padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
+                        flex_shrink: 0.0,
+                        ..default()
                     },
-                ));
+                ))
+                .with_children(|empty| {
+                    ui::text(
+                        empty,
+                        "No matching Mods.",
+                        theme::TEXT_SMALL,
+                        theme::muted(),
+                    )
+                });
+            for line in &installed.rejected {
+                gap(under, 8.0);
+                ui::paragraph(
+                    under,
+                    format!("Skipped: {line}"),
+                    theme::TEXT_SMALL,
+                    theme::WARNING,
+                );
             }
-        });
-        col.spawn((
-            NoMatch(Field::ModSearch),
-            Node {
-                display: Display::None,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|empty| {
-            ui::text(
-                empty,
-                "No matching Mods.",
+            gap(under, 14.0);
+            ui::paragraph(
+                under,
+                "Biomes supplied by the selected set appear in the next step.",
                 theme::TEXT_SMALL,
                 theme::muted(),
-            )
-        });
-        for line in &installed.rejected {
-            gap(col, 8.0);
-            ui::paragraph(
-                col,
-                format!("Skipped: {line}"),
-                theme::TEXT_SMALL,
-                theme::WARNING,
             );
-        }
-        gap(col, 14.0);
-        ui::paragraph(
-            col,
-            "Biomes supplied by the selected set appear in the next step.",
-            theme::TEXT_SMALL,
-            theme::muted(),
-        );
+        });
     })
 }
 
@@ -2916,7 +2967,7 @@ fn step_frame(
     l: &Launcher,
     installed: &Installed,
     step: Step,
-    scroll: Vec2,
+    scroll: impl Bundle,
     body: impl FnOnce(&mut ChildSpawnerCommands),
 ) -> Option<Entity> {
     let title = match step {
@@ -2944,7 +2995,7 @@ fn step_frame(
                 primary: Some((primary.0.as_str(), primary.1)),
                 height: frame::SheetHeight::Steps,
             },
-            page_scroll(scroll),
+            scroll,
             body,
         );
     });
@@ -3061,9 +3112,15 @@ fn review(
     scroll: Vec2,
 ) -> Option<Entity> {
     let f = &l.form;
-    step_frame(main, l, installed, Step::Review, scroll, |col| {
-        problem(col, f.problem.as_ref());
-        col.spawn(Node {
+    step_frame(
+        main,
+        l,
+        installed,
+        Step::Review,
+        page_scroll(scroll),
+        |col| {
+            problem(col, f.problem.as_ref());
+            col.spawn(Node {
             column_gap: Val::Px(32.0),
             align_items: AlignItems::FlexStart,
             flex_shrink: 0.0,
@@ -3103,7 +3160,8 @@ fn review(
                     ));
                 });
         });
-    })
+        },
+    )
 }
 
 fn review_sections(
@@ -3368,7 +3426,7 @@ fn biomes_page(
     scroll: Vec2,
 ) -> Option<Entity> {
     let f = &l.form;
-    step_frame(main, l, installed, Step::Biomes, scroll, |col| {
+    step_frame(main, l, installed, Step::Biomes, (), |col| {
         problem(col, f.problem.as_ref());
         let Some(draft) = &f.biomes else {
             return;
@@ -3383,7 +3441,8 @@ fn biomes_page(
         col.spawn(Node {
             column_gap: Val::Px(24.0),
             align_items: AlignItems::FlexStart,
-            flex_shrink: 0.0,
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
             ..default()
         })
         .with_children(|split| {
@@ -3393,9 +3452,10 @@ fn biomes_page(
                     flex_grow: 1.0,
                     flex_basis: Val::Px(0.0),
                     min_width: Val::Px(0.0),
+                    align_self: AlignSelf::Stretch,
                     ..default()
                 })
-                .with_children(|list| biome_list(list, l, draft));
+                .with_children(|list| biome_list(list, l, draft, scroll));
             if draft.editing {
                 biome_editor(split, l, draft);
             } else {
@@ -3405,7 +3465,7 @@ fn biomes_page(
     })
 }
 
-fn biome_list(col: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft) {
+fn biome_list(col: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft, scroll: Vec2) {
     biome_search_line(col, l, draft);
     gap(col, 14.0);
     col.spawn(Node {
@@ -3426,37 +3486,41 @@ fn biome_list(col: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft)
         );
     });
     gap(col, 10.0);
-    col.spawn((
-        BiomeList,
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(7.0),
-            flex_shrink: 0.0,
-            ..default()
-        },
-    ))
-    .with_children(|list| {
-        for at in biomes::listed(l) {
-            biome_row(list, l, draft, at);
-        }
-    });
-    col.spawn((
-        NoMatch(Field::BiomeSearch),
-        Node {
-            display: Display::None,
-            justify_content: JustifyContent::Center,
-            padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-    ))
-    .with_children(|empty| {
-        ui::text(
-            empty,
-            "No matching Biomes.",
-            theme::TEXT_SMALL,
-            theme::muted(),
-        )
+    list_scroll(col, scroll, |under| {
+        under
+            .spawn((
+                BiomeList,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(7.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ))
+            .with_children(|list| {
+                for at in biomes::listed(l) {
+                    biome_row(list, l, draft, at);
+                }
+            });
+        under
+            .spawn((
+                NoMatch(Field::BiomeSearch),
+                Node {
+                    display: Display::None,
+                    justify_content: JustifyContent::Center,
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ))
+            .with_children(|empty| {
+                ui::text(
+                    empty,
+                    "No matching Biomes.",
+                    theme::TEXT_SMALL,
+                    theme::muted(),
+                )
+            });
     });
 }
 
@@ -3766,8 +3830,7 @@ fn biome_editor(split: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDr
             Node {
                 flex_direction: FlexDirection::Column,
                 width: Val::Px(320.0),
-                // The sheet's body is about this tall, so Reset and Done stay in view.
-                max_height: Val::Vh(62.0),
+                max_height: Val::Percent(100.0),
                 flex_shrink: 0.0,
                 border: UiRect::all(Val::Px(theme::RULE)),
                 border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
