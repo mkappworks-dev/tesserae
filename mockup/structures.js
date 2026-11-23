@@ -1757,6 +1757,7 @@ function ensureStructure() {
     case: "ok",
   };
   state.structure.view ||= "outside";
+  state.structure.chosen ??= true;
   state.structure.floor ||= "ground";
   if (!TEMPLATES[state.structure.template])
     state.structure.template = GAME_TEMPLATES[structureGame()][0].id;
@@ -2324,19 +2325,6 @@ function structuresPage() {
       : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`
   }<div class="layout-totals"><div><span>Authored</span><b>1.0 m <small>grid</small></b></div><div><span>This World</span><b>${tally.voxel} m <small>Voxels</small></b></div></div><div class="structure-outcome ${tone}" role="status">${text}</div><p class="item-eyebrow">EXAMPLE AIM</p>${seg(GROUNDS, "ground", "structure-ground")}${seg({ ok: "In reach", far: "Too far", inside: "Inside", loading: "Loading" }, "case", "structure-case")}<small>In the game the aim decides these. The browser uses examples. Worldgen's level rule does not apply to a Player's placement.</small></div><footer><small>K opens and closes this list · Pick a Template and aim · R turns · Right mouse pins a preview; near it, G builds it whole, and Esc, K or Left mouse on it cancels it · Esc or K puts the Tool away · Z removes it in one step · Left mouse cancels</small>${button("Place here", "structure-place", { primary: true })}${button("Put the Tool away", "structure-exit", { ghost: true })}</footer></section></div>`;
 }
-function structureHud() {
-  if (state.heldTool !== "Place" || state.screen !== "play") return "";
-  ensureStructure();
-  const s = state.structure,
-    tally = structureTally(),
-    [tone, text] = structureOutcome();
-  return `<aside class="layout-status structure-hud"><span>${icon("layout", 18)} Place Tool</span><div class="structure-hud-head"><span class="structure-thumb">${structureThumb(s.template, s.turn)}</span><b>${TEMPLATES[s.template].name} · facing ${FACING[s.turn]}</b></div><small>${tally.size.map((n) => n.toFixed(1)).join(" × ")} m · ${structureNumber(tally.total)} Voxels</small><div class="structure-keys compact">${structureLegend(tally)}</div><div class="structure-outcome ${tone}" role="status">${text}</div><small><kbd>K</kbd> Templates <kbd>R</kbd> Turn</small>${
-    s.pinned
-      ? `<small><b>Preview pinned.</b> Come close: G builds it whole. Esc, K or Left mouse on it cancels it.</small>`
-      : `<small>Right mouse pins a preview to walk round · Esc or K puts the Tool away</small>`
-  }</aside>`;
-}
-
 /* Right mouse pins the ghost where it is aimed; once pinned it stays until built or cancelled. */
 function structuresPlace() {
   if (state.structure.pinned)
@@ -2357,7 +2345,7 @@ function structurePrompt() {
     !state.structure?.pinned
   )
     return "";
-  return `<div class="use-hint"><kbd>G</kbd>Build<kbd>K</kbd>Cancel</div>`;
+  return `<div class="use-hint"><kbd>G</kbd>Build<kbd>Esc</kbd>Cancel</div>`;
 }
 /* G near the pinned preview builds it, whole or not at all. */
 function structuresBuild() {
@@ -2373,7 +2361,9 @@ function structuresBuild() {
   }
   notice(`${TEMPLATES[state.structure.template].name} placed.`);
   log("structure placed");
-  render();
+  // Built whole, the Template is spent: the panel opens to pick the next one.
+  state.structure.chosen = false;
+  navigate("place");
 }
 function structuresAction(name, value) {
   if (!name.startsWith("structure-")) return false;
@@ -2406,7 +2396,10 @@ function structuresAction(name, value) {
   else if (name === "structure-case") ((s.case = value), again());
   else if (name === "structure-place") structuresPlace();
   else if (name === "structure-build") structuresBuild();
-  else if (name === "structure-unpin") {
+  else if (name === "structure-build-now") {
+    s.pinned = true;
+    structuresBuild();
+  } else if (name === "structure-unpin") {
     s.pinned = false;
     notice("Preview cancelled.", "info");
     render();
@@ -2426,27 +2419,28 @@ document.addEventListener("keydown", (e) => {
     listing = state.screen === "structures",
     holding = state.screen === "play" && state.heldTool === "Place";
   const pinned = holding && state.structure?.pinned,
-    cancel =
-      key === "k" || e.key === "Backspace" || (e.key === "Escape" && holding);
-  /* K is Structure placement's own key, as L is the Layout menu's: from play it takes the Tool. */
-  if (key === "k" && state.screen === "play" && !holding)
-    state.heldTool = "Place";
+    leave = e.key === "Escape" || e.key === "Backspace";
+  /* K is the place Tool's own key, as L is Quick layout's; one at a time. */
+  if (key === "k" && state.screen === "play" && state.quickLayout?.active)
+    return;
   const act =
     key === "k" && listing
       ? "structure-close"
-      : key === "k" && state.screen === "play" && !holding
-        ? "structure-open"
-        : cancel && pinned
+      : key === "k" && state.screen === "play"
+        ? "place-open"
+        : leave && pinned
           ? "structure-unpin"
-          : cancel && (holding || listing)
-            ? "structure-exit"
-            : key === "g" && pinned
-              ? "structure-build"
-              : key === "r" && (holding || listing)
-                ? "structure-turn"
-                : e.key === "Escape" && listing
-                  ? "structure-close"
-                  : "";
+          : leave && holding
+            ? "place-exit"
+            : e.key === "Backspace" && listing
+              ? "structure-exit"
+              : key === "g" && pinned
+                ? "structure-build"
+                : key === "r" && (holding || listing)
+                  ? "structure-turn"
+                  : e.key === "Escape" && listing
+                    ? "structure-close"
+                    : "";
   if (!act) return;
   e.preventDefault();
   e.stopImmediatePropagation();
@@ -2466,7 +2460,7 @@ document.addEventListener("mousedown", (e) => {
     state.screen !== "play" ||
     state.heldTool !== "Place" ||
     !state.structure?.pinned ||
-    e.target.closest?.("button,a,input,select,textarea,.structure-hud")
+    e.target.closest?.("button,a,input,select,textarea,.tool-panel")
   )
     return;
   e.preventDefault();

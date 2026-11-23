@@ -85,18 +85,47 @@ function layoutPreviewSvg() {
     .map((c) => c.svg)
     .join("")}</g></svg>`;
 }
-// A HUD card holds nothing clickable: in play the mouse aims, so the card only
-// names the keys.
-function layoutStatus() {
-  ensureLayout();
-  const s = layoutSummary();
-  return `<aside class="layout-status"><span>${icon("layout", 18)} Layout ready</span><b>${s.kind} · ${s.count}</b><small>${s.dimensions.join(" × ")} m</small><div class="layout-keys">${[
-    ["L", "Edit"],
-    ["Esc", "Exit"],
-    ["RMB", "Place"],
-  ]
+// One panel per tool, docked right the whole time it is in hand: full while
+// choosing, compact while aiming. The compact one holds nothing clickable, as
+// in play the mouse aims; both name their keys the same way.
+function toolPanel({ name, label, full, body, keys, aim }) {
+  const caps = `<div class="layout-keys">${keys
     .map(([k, l]) => `<span><kbd>${k}</kbd> ${l}</span>`)
-    .join("")}</div></aside>`;
+    .join("")}</div>`;
+  return `<section class="layout-side tool-panel ${full ? "full" : "compact"} ${name}-side" aria-label="${label}"><h2>${icon("layout", 18)} ${label}</h2>${body}<div class="tp-foot">${full ? `<button type="button" class="btn primary tp-aim" data-action="${aim}" ${aim ? "" : "disabled"}>Aim <kbd>Enter</kbd></button>` : ""}${caps}</div></section>`;
+}
+function toolPanels() {
+  const screen = state.screen;
+  if (screen === "layout") return layoutPanel(true);
+  if (screen === "place") return placePanel(true);
+  if (screen !== "play") return "";
+  if (state.heldTool === "Place") return placePanel(false);
+  return state.quickLayout?.active ? layoutPanel(false) : "";
+}
+function layoutPanel(full) {
+  ensureLayout();
+  const l = state.quickLayout,
+    s = layoutSummary();
+  const body = full
+    ? layoutToolbar()
+    : `<div class="tp-sel"><span class="tp-thumb">${icon({ Line: "line", Plane: "plane" }[s.kind] || "box", 22)}</span><span><b>${s.kind} · ${s.count}</b><small>${s.dimensions.join(" × ")} m${l.gap ? ` · gap ${l.gap}` : ""}</small></span></div><div class="structure-outcome ok" role="status">${l.kind === "between" ? `Point to point · right mouse sets ${"ABC"[Math.min(l.points, 2)]}` : "Aim at a surface: right mouse lays it out."}</div>`;
+  return toolPanel({
+    name: "layout",
+    label: "Quick layout",
+    full,
+    body,
+    aim: "layout-close",
+    keys: full
+      ? [
+          ["L", "Aim"],
+          ["Esc", "Exit"],
+        ]
+      : [
+          ["L", "Edit"],
+          ["Esc", "Exit"],
+          ["RMB", "Place"],
+        ],
+  });
 }
 const LAYOUT_AXES = [
   ["X", ["East", "West"]],
@@ -132,7 +161,7 @@ function layoutToolbar() {
         ([name, ways], i) =>
           `<div class="lp-row ${l.axis === i ? "on" : ""}"><b>${name}</b><button type="button" class="lp-dir" data-action="layout-reverse" data-value="${i}" title="Reverse · R">${ways[Number(l.negative[i])]}</button>${step("layout-count", `${i}:-1`, `Fewer along ${name}`, "−")}<output>${l.counts[i]}</output>${step("layout-count", `${i}:1`, `More along ${name}`, "+")}</div>`,
       ).join("")}</div>`;
-  return `<section class="layout-side" aria-label="Quick layout"><h2>Quick layout</h2><div class="segmented" role="radiogroup" aria-label="Method">${mode}</div>${state.layoutError ? `<div class="layout-error" role="alert">${state.layoutError}</div>` : ""}${body}<div class="lp-section"><div class="lp-row"><b>Gap</b><span class="lp-dir muted">${Number((l.gap * s.voxel).toFixed(2))} m</span>${step("layout-gap", -1, "Less gap", "−")}<output>${l.gap}</output>${step("layout-gap", 1, "More gap", "+")}</div></div><div class="lp-total ${s.total > 256 ? "over" : ""}"><span>${s.dimensions.join(" × ")} m</span><b>${s.total} <small>/ 256</small></b></div></section>`;
+  return `<div class="segmented" role="radiogroup" aria-label="Method">${mode}</div>${state.layoutError ? `<div class="layout-error" role="alert">${state.layoutError}</div>` : ""}${body}<div class="lp-section"><div class="lp-row"><b>Gap</b><span class="lp-dir muted">${Number((l.gap * s.voxel).toFixed(2))} m</span>${step("layout-gap", -1, "Less gap", "−")}<output>${l.gap}</output>${step("layout-gap", 1, "More gap", "+")}</div></div><div class="lp-total ${s.total > 256 ? "over" : ""}"><span>${s.dimensions.join(" × ")} m</span><b>${s.total} <small>/ 256</small></b></div>`;
 }
 function layoutPrompts() {
   const l = state.quickLayout,
@@ -155,17 +184,18 @@ function layoutPrompts() {
       "layout-kind",
       between ? "directions" : "between",
     ],
-    ["Enter", "Build", "layout-close"],
+    ["Enter", "Aim", "layout-close"],
     ["Esc", "Exit", "layout-exit"],
   ];
 }
+// The full panel opens over play: the World, the hotbar and the ghost stay in
+// view, so Enter only shrinks the panel and hands back the crosshair.
 function layoutPage() {
   ensureLayout();
-  const l = state.quickLayout,
-    s = layoutSummary();
-  l.active = true;
+  state.quickLayout.active = true;
+  if (state.heldTool === "Place") state.heldTool = null;
   screenPrompts = layoutPrompts();
-  return `<div class="layout-workspace"><div class="layout-stage"><div class="layout-stage-label"><h1>${s.kind === "Single Voxel" ? "Single Voxel" : s.kind + " layout"}</h1><p>${s.dimensions.join(" × ")} metres · ${s.count}</p></div><div class="layout-ghost">${layoutPreviewSvg()}</div><div class="layout-preview-caption">Illustrative preview · no terrain is edited</div></div>${layoutToolbar()}</div>`;
+  return `<div class="tool-ghost">${layoutPreviewSvg()}</div>${play()}`;
 }
 function refreshLayout() {
   const focused = document.activeElement,
@@ -264,38 +294,35 @@ document.addEventListener("keydown", (e) => {
     e.defaultPrevented ||
     openSelect ||
     $("#dialog-root").children.length ||
-    e.target.matches?.("input,textarea,select")
+    e.target.matches?.("input,textarea,select") ||
+    state.screen !== "play" ||
+    state.heldTool === "Place"
   )
     return;
   // Quick layout and the place Tool are two ways to place; one at a time.
+  const act =
+    e.key.toLowerCase() === "l"
+      ? "layout-open"
+      : (e.key === "Escape" || e.key === "Backspace") &&
+          state.quickLayout?.active
+        ? "layout-exit"
+        : "";
+  if (!act) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  action(act);
+});
+/* Right mouse lays the layout out and keeps it, for the next wall or row. */
+document.addEventListener("contextmenu", (e) => {
   if (
-    e.key.toLowerCase() === "l" &&
-    ["play", "layout"].includes(state.screen) &&
-    state.heldTool !== "Place"
-  ) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    action(state.screen === "layout" ? "layout-close" : "layout-open");
+    state.screen !== "play" ||
+    !state.quickLayout?.active ||
+    state.heldTool === "Place"
+  )
     return;
-  }
-  if (e.key === "Escape" && state.screen === "layout") {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    action("layout-exit");
-    return;
-  }
-  // In play Esc leaves layout mode before it opens the menu, but a held place
-  // Tool is put away first; structures.js handles that press.
-  if (
-    (e.key === "Backspace" ||
-      (e.key === "Escape" && state.heldTool !== "Place")) &&
-    ["play", "layout"].includes(state.screen) &&
-    state.quickLayout?.active
-  ) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    action("layout-exit");
-  }
+  e.preventDefault();
+  const s = layoutSummary();
+  notice(`${s.kind} laid out · ${s.count}.`, "info");
 });
 // Capture phase, so the arrow keys change the layout before interaction.js
 // would move menu focus with them.
@@ -325,8 +352,12 @@ document.addEventListener(
       act = ["layout-count", `${l.axis}:${e.key === "ArrowUp" ? 1 : -1}`];
     else if (e.key === "G" && e.shiftKey) act = ["layout-gap", -1];
     else if (e.key === " " && between) act = ["layout-point"];
-    else if (e.key === "Enter" && !e.target.closest?.("button"))
+    else if (
+      (e.key === "Enter" && !e.target.closest?.("button")) ||
+      e.key.toLowerCase() === "l"
+    )
       act = ["layout-close"];
+    else if (e.key === "Escape" || e.key === "Backspace") act = ["layout-exit"];
     if (!act) return;
     e.preventDefault();
     e.stopImmediatePropagation();
