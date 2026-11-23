@@ -18,4 +18,4 @@ Game mode becomes one Creative | Survival segmented control with one line descri
 
 ## Comments
 
-Climate scale sits under the terrain preview, not in the fields column as in the mockup: there it is below the fold, and the criterion is no scrolling at 1280×720. The Game mode line still reads the Client's copy ("Placing is free"), not the mockup's.
+Climate scale sits under the terrain preview, not in the fields column as in the mockup: there it is below the fold, and the criterion is no scrolling at 1280×720. The Game mode line now matches the mockup: Creative placement spends Items, as the Server does (ee8786c8).
