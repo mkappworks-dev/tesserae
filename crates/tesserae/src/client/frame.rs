@@ -222,6 +222,7 @@ impl Plugin for FramePlugin {
             .add_observer(cover)
             .add_observer(uncover)
             .add_observer(dismiss)
+            .add_observer(wheel_scroll)
             .add_systems(First, unsqueeze)
             .add_systems(
                 PreUpdate,
@@ -268,6 +269,36 @@ fn dismiss(
     if let Ok(&Scrim(popup)) = scrims.get(press.entity) {
         press.propagate(false);
         commands.trigger(Dismiss { entity: popup });
+    }
+}
+
+/// How far one wheel notch moves a list: about half a Mod card.
+const WHEEL_LINE_PX: f32 = 48.0;
+
+/// The wheel scrolls the innermost list under the pointer that has room to move.
+fn wheel_scroll(
+    mut wheel: On<bevy::picking::events::PointerScroll>,
+    mut lists: Query<(&Node, &ComputedNode, &mut ScrollPosition)>,
+    (parents, frames): (Query<&ChildOf>, Query<(), With<Frame>>),
+) {
+    let entity = wheel.entity;
+    let Ok((node, computed, mut position)) = lists.get_mut(entity) else {
+        return;
+    };
+    let room = (computed.content_size.y - computed.size.y + computed.scrollbar_size.y).max(0.0)
+        * computed.inverse_scale_factor;
+    if node.overflow.y != OverflowAxis::Scroll || room <= 0.0 || !framed(entity, &parents, &frames)
+    {
+        return;
+    }
+    wheel.propagate(false);
+    let by = match wheel.unit {
+        bevy::input::mouse::MouseScrollUnit::Line => wheel.y * WHEEL_LINE_PX,
+        bevy::input::mouse::MouseScrollUnit::Pixel => wheel.y,
+    };
+    let y = (position.y - by).clamp(0.0, room);
+    if position.y != y {
+        position.y = y;
     }
 }
 
@@ -404,6 +435,16 @@ pub(super) struct MenuSheet<'a, A> {
     pub title: &'a str,
     pub subtitle: Option<&'a str>,
     pub primary: Option<(&'a str, A)>,
+    pub height: SheetHeight,
+}
+
+/// How tall a sheet stands in its row.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum SheetHeight {
+    /// As tall as its content, up to the row, scrolling inside past that.
+    Content,
+    /// The row's full height, so a stepped screen's main button stays put from step to step.
+    Steps,
 }
 
 /// Spawns the sheet with `body` scrolling inside it, and returns the main button. `scroll` goes on
@@ -426,7 +467,15 @@ pub(super) fn menu_sheet<A: Bundle>(
             ));
         }
     });
-    sheet_with_actions(main, sheet.title, sheet.subtitle, scroll, body, actions);
+    sheet_with_actions(
+        main,
+        sheet.title,
+        sheet.subtitle,
+        sheet.height,
+        scroll,
+        body,
+        actions,
+    );
     primary
 }
 
@@ -436,6 +485,7 @@ pub(super) fn sheet_with_actions(
     main: &mut ChildSpawnerCommands,
     title: &str,
     subtitle: Option<&str>,
+    height: SheetHeight,
     scroll: impl Bundle,
     body: impl FnOnce(&mut ChildSpawnerCommands),
     actions: Option<impl FnOnce(&mut ChildSpawnerCommands)>,
@@ -452,6 +502,11 @@ pub(super) fn sheet_with_actions(
             flex_grow: 1.0,
             max_width: Val::Px(1180.0),
             min_height: Val::Px(0.0),
+            max_height: Val::Percent(100.0),
+            align_self: match height {
+                SheetHeight::Content => AlignSelf::FlexStart,
+                SheetHeight::Steps => AlignSelf::Stretch,
+            },
             flex_direction: FlexDirection::Column,
             ..default()
         },
@@ -901,6 +956,34 @@ pub(super) mod testing {
         app.update();
     }
 
+    /// Turns the mouse wheel `lines` notches over `entity`; negative is down, as a wheel reports.
+    pub(in crate::client) fn wheel(app: &mut App, entity: Entity, lines: f32) {
+        use bevy::input::mouse::MouseScrollUnit;
+        use bevy::input::touch::TouchPhase;
+        use bevy::picking::backend::HitData;
+        use bevy::picking::events::{Pointer, PointerScroll};
+        use bevy::picking::pointer::{Location, PointerId};
+        app.world_mut().trigger(PointerScroll {
+            entity,
+            pointer: Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: bevy::camera::NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            ),
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: lines,
+            hit: HitData::new(entity, 0.0, None, None),
+            phase: TouchPhase::Moved,
+        });
+        app.update();
+    }
+
     /// What a [`Frame`] needs besides itself, in a headless test App.
     pub(in crate::client) fn support(app: &mut App) {
         app.init_resource::<AccumulatedMouseMotion>()
@@ -1165,6 +1248,7 @@ mod tests {
                         title: "Choose a Game",
                         subtitle: Some("It shapes the land."),
                         primary: Some(("Next", Act::Play)),
+                        height: SheetHeight::Steps,
                     },
                     (),
                     |body| {

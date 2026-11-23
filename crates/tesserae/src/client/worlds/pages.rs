@@ -366,6 +366,7 @@ fn worlds(
         title: "Worlds",
         subtitle: None,
         primary: None,
+        height: frame::SheetHeight::Content,
     };
     frame::menu_sheet(main, sheet, (), |body| {
         if let Some(card) = &l.card {
@@ -795,6 +796,7 @@ fn library_page(
         title: "Mods",
         subtitle: None,
         primary: None,
+        height: frame::SheetHeight::Content,
     };
     frame::menu_sheet(main, sheet, page_scroll(scroll), |body| {
         if installed.mods.is_empty() {
@@ -850,6 +852,7 @@ fn edit(
             w,
             "Edit World",
             None,
+            frame::SheetHeight::Content,
             page_scroll(scroll),
             |body| {
                 problem(body, l.problem.as_ref());
@@ -2633,6 +2636,7 @@ fn trust(
         main,
         &title,
         Some(subtitle),
+        frame::SheetHeight::Content,
         page_scroll(scroll),
         |col| {
             problem(col, l.problem.as_ref());
@@ -2695,6 +2699,7 @@ fn step_frame(
                 title,
                 subtitle,
                 primary: Some((primary.0.as_str(), primary.1)),
+                height: frame::SheetHeight::Steps,
             },
             page_scroll(scroll),
             body,

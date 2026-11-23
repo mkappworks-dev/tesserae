@@ -1260,6 +1260,75 @@ fn a_controller_reaches_a_mod_toggle_and_ticks_it() {
     assert!(launcher(&app).form.mods.contains("reeds"));
 }
 
+/// Lays the Mods step's page out 200 px tall over 1000 px of content, as a short window would.
+fn short_page(app: &mut App) -> Entity {
+    let page = app
+        .world_mut()
+        .query_filtered::<Entity, With<PageScroll>>()
+        .single(app.world())
+        .unwrap();
+    app.world_mut().entity_mut(page).insert((
+        ComputedNode {
+            size: Vec2::new(800.0, 200.0),
+            content_size: Vec2::new(800.0, 1000.0),
+            ..default()
+        },
+        UiGlobalTransform::from_translation(Vec2::new(400.0, 100.0)),
+    ));
+    page
+}
+
+fn scrolled(app: &App, page: Entity) -> f32 {
+    app.world().get::<ScrollPosition>(page).unwrap().y
+}
+
+#[test]
+fn the_mods_step_scrolls_to_its_last_mod_by_wheel_and_by_focus() {
+    let worlds = Directory::new();
+    let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[]);
+    for i in 0..12 {
+        installed = installed.with_mod(&format!("mod{i:02}"), &[]);
+    }
+    let (mut app, _) = pad_app(&worlds, installed);
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+    let page = short_page(&mut app);
+    let card = control(&mut app, &Act::ToggleMod(0));
+
+    frame::testing::wheel(&mut app, card, -3.0);
+    assert!(
+        scrolled(&app, page) > 0.0,
+        "the wheel over a Mod scrolls the page"
+    );
+    frame::testing::wheel(&mut app, card, -1000.0);
+    assert_eq!(
+        scrolled(&app, page),
+        800.0,
+        "the wheel stops at the last Mod"
+    );
+    frame::testing::wheel(&mut app, card, 1000.0);
+    assert_eq!(scrolled(&app, page), 0.0);
+
+    let last = control(&mut app, &Act::ToggleMod(11));
+    app.world_mut().entity_mut(last).insert((
+        ComputedNode {
+            size: Vec2::new(700.0, 60.0),
+            ..default()
+        },
+        UiGlobalTransform::from_translation(Vec2::new(400.0, 570.0)),
+    ));
+    app.world_mut().resource_mut::<InputFocusVisible>().0 = true;
+    focus_on(&mut app, Act::ToggleMod(11));
+    app.update();
+    assert_eq!(
+        scrolled(&app, page),
+        400.0,
+        "focus from a key brings the last Mod into view"
+    );
+}
+
 #[test]
 fn only_dialogs_trap_focus_so_the_empty_list_can_reach_create() {
     let trapping = |app: &mut App| {
