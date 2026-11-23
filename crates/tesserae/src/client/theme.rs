@@ -362,7 +362,11 @@ pub(super) fn shade() -> BackgroundGradient {
 
 // Pass C: the in-game Menu and Settings.
 /// The space around a launcher or Settings screen, above the prompt bar.
+#[cfg(not(target_os = "macos"))]
 pub(super) const SCREEN_PAD_TOP: f32 = 28.0;
+/// The window's buttons sit over the top 32 of the screen there.
+#[cfg(target_os = "macos")]
+pub(super) const SCREEN_PAD_TOP: f32 = 32.0;
 pub(super) const SCREEN_PAD_BOTTOM: f32 = 22.0;
 pub(super) const WORKSPACE_MAX: f32 = 1180.0;
 pub(super) const RAIL_WIDTH: f32 = 224.0;
@@ -534,6 +538,13 @@ mod tests {
     use bevy::text::TextPlugin;
     use bevy::ui::UiPlugin;
     use bevy::window::WindowPlugin;
+
+    /// AppKit's transparent title bar is 32 pt tall, its buttons 9-23 pt from the top.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_screen_starts_below_the_macos_window_buttons() {
+        assert!(SCREEN_PAD_TOP >= 32.0);
+    }
 
     fn width_of(digits: &str, font: TextFont) -> f32 {
         let mut app = App::new();

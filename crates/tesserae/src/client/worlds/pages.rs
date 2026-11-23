@@ -76,8 +76,8 @@ pub(super) fn spawn(
             padding: UiRect::new(
                 Val::Px(theme::SCREEN_PAD_X),
                 Val::Px(theme::SCREEN_PAD_X),
-                Val::Px(28.0),
-                Val::Px(22.0),
+                Val::Px(theme::SCREEN_PAD_TOP),
+                Val::Px(theme::SCREEN_PAD_BOTTOM),
             ),
             justify_content: JustifyContent::Center,
             ..default()
