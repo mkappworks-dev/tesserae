@@ -3,14 +3,14 @@
 Status: ready-for-agent
 Blocked by: 01
 
-Spec: [Texture shimmer and saturation](../spec.md).
+Spec: [Texture shimmer](../spec.md).
 
 ## What to build
 
 Solution item 2: the atlas becomes a 2D array, one 16x16 layer per Material
-face, with a CPU-built mip chain, a nearest-mag / trilinear-min / anisotropic
-repeat sampler, and `textureSampleGrad` on continuous UVs. Item models and tile
-icons follow.
+face, with a CPU-built mip chain, an all-linear 16x anisotropic repeat sampler,
+a shader texel snap where the mip level is at or below 0, and
+`textureSampleGrad` on continuous UVs. Item models and tile icons follow.
 
 ## Acceptance
 

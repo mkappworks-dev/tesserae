@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Spec: [Texture shimmer and saturation](../spec.md).
+Spec: [Texture shimmer](../spec.md).
 
 ## What to build
 
@@ -16,9 +16,11 @@ with a fractional part:
 - Cave: a space lit only by block light.
 
 Record the Eyes and variables in Comments so later tickets repeat them exactly.
-Images stay in one `/tmp` folder and are never committed.
+Images stay in one `/tmp` folder and are never committed. The colour spec
+reuses these Eyes and images as its baseline.
 
 ## Acceptance
 
 - [ ] Four views and the shimmer pair captured, Eyes recorded.
-- [ ] The user has looked at them and said which parts read too saturated.
+- [ ] The user has seen them. Which parts read too saturated is the colour
+      spec's first ticket, on these same images.
