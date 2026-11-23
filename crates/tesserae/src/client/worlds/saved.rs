@@ -94,24 +94,30 @@ pub(super) fn load(
         return;
     }
     *read_at = Some(l.version);
-    let pictures = &mut thumbnails.1.0;
-    pictures.retain(|folder, _| l.entries.iter().any(|e| &e.path == folder));
+    let pictures = &mut thumbnails.1;
+    pictures
+        .0
+        .retain(|folder, _| l.entries.iter().any(|e| &e.path == folder));
     for entry in &l.entries {
-        let file = entry.path.join(library::THUMBNAIL);
+        pictures.refresh(&entry.path, &mut images);
+    }
+}
+
+impl Pictures {
+    /// Rereads `folder`'s thumbnail if its file changed since it was last read.
+    pub(super) fn refresh(&mut self, folder: &Path, images: &mut Assets<Image>) {
+        let file = folder.join(library::THUMBNAIL);
         let Ok(modified) = std::fs::metadata(&file).and_then(|m| m.modified()) else {
-            pictures.remove(&entry.path);
-            continue;
+            self.0.remove(folder);
+            return;
         };
-        if pictures
-            .get(&entry.path)
-            .is_some_and(|(at, _)| *at == modified)
-        {
-            continue;
+        if self.0.get(folder).is_some_and(|(at, _)| *at == modified) {
+            return;
         }
         let handle = read(&file)
             .inspect_err(|e| warn!("Thumbnail {} unreadable: {e}", file.display()))
             .ok()
             .map(|picture| images.add(terrain::image(picture)));
-        pictures.insert(entry.path.clone(), (modified, handle));
+        self.0.insert(folder.to_owned(), (modified, handle));
     }
 }

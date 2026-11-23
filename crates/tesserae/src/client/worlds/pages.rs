@@ -846,7 +846,7 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
 }
 
 /// The terrain saved when the World was created, or the neutral landscape for one saved before.
-fn world_picture(
+pub(in crate::client) fn world_picture(
     parent: &mut ChildSpawnerCommands,
     thumbnails: &Thumbnails,
     folder: &Path,

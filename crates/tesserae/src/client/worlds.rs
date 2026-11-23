@@ -1343,6 +1343,11 @@ impl Thumbnails {
         self.1.get(folder)
     }
 
+    /// Reads the open World's thumbnail, which may have been written after the list last looked.
+    pub(in crate::client) fn read_world(&mut self, folder: &Path, images: &mut Assets<Image>) {
+        self.1.refresh(folder, images);
+    }
+
     pub(in crate::client) fn get(&self, id: &str) -> Option<&Handle<Image>> {
         self.0.get(id)?.as_ref()
     }

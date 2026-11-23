@@ -99,6 +99,7 @@ pub(super) enum Choice {
     CloseDetails,
     /// The prompt bar's Esc: closes World details, else resumes.
     Back,
+    CopySeed,
 }
 
 #[derive(Component)]
@@ -200,6 +201,11 @@ fn resume(menu: &mut Menu, cursor: &mut CursorOptions) {
 fn choose(
     event: On<Activate>,
     choices: Query<&Choice>,
+    (mut commands, facts, mut clipboard): (
+        Commands,
+        Res<Facts>,
+        Option<ResMut<bevy::clipboard::Clipboard>>,
+    ),
     mut menu: ResMut<Menu>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut inventory: Option<ResMut<super::inventory_window::InventoryWindow>>,
@@ -233,6 +239,11 @@ fn choose(
         Choice::Back => {
             if let Ok(mut cursor) = cursor.single_mut() {
                 resume(&mut menu, &mut cursor);
+            }
+        }
+        Choice::CopySeed => {
+            if let Some(facts) = &facts.0 {
+                copy_seed(&mut commands, clipboard.as_deref_mut(), facts.seed);
             }
         }
     }
@@ -311,6 +322,26 @@ type Open<'w> = (
     Option<Res<'w, super::settings::Settings>>,
 );
 
+/// What World details draws the World's picture from.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Picture<'w> {
+    opened: Option<Res<'w, crate::open::Opened>>,
+    thumbnails: Option<ResMut<'w, super::worlds::Thumbnails>>,
+    images: Option<ResMut<'w, Assets<Image>>>,
+}
+
+impl Picture<'_> {
+    /// The open World's folder, with its thumbnail read afresh: one written after the list last
+    /// looked, as a new World's is, shows too.
+    fn read(&mut self) -> Option<std::path::PathBuf> {
+        let folder = self.opened.as_ref()?.folder()?.to_owned();
+        if let (Some(thumbnails), Some(images)) = (&mut self.thumbnails, &mut self.images) {
+            thumbnails.read_world(&folder, images);
+        }
+        Some(folder)
+    }
+}
+
 fn render(
     mut commands: Commands,
     (menu, facts, (here, cave), settings): Open,
@@ -318,6 +349,7 @@ fn render(
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
     mut shown: Local<Option<Shown>>,
+    mut picture: Picture,
 ) {
     let solid = preferences.as_ref().is_some_and(|p| p.solid_background);
     let stronger = preferences.is_some_and(|p| p.stronger_contrast);
@@ -403,7 +435,18 @@ fn render(
                 ],
             );
             if details {
-                world_details(root, facts, own);
+                let folder = picture.read();
+                let neutral = super::worlds::Thumbnails::default();
+                let thumbnails = picture.thumbnails.as_deref().unwrap_or(&neutral);
+                world_details(
+                    root,
+                    facts,
+                    own,
+                    (
+                        thumbnails,
+                        folder.as_deref().unwrap_or(std::path::Path::new("")),
+                    ),
+                );
             }
         });
 }
@@ -556,11 +599,17 @@ fn world_status(pause: &mut ChildSpawnerCommands, facts: Option<&WorldFacts>, bi
         });
 }
 
-/// The World's facts in a dialog over the Menu.
+/// The World's picture in World details.
+#[derive(Component)]
+struct DetailsPicture;
+
+/// The World's picture, its fixed settings in two columns and its biomes, in a dialog over the
+/// Menu.
 fn world_details(
     root: &mut ChildSpawnerCommands,
     facts: Option<&WorldFacts>,
     own: Option<GameMode>,
+    (thumbnails, folder): (&super::worlds::Thumbnails, &std::path::Path),
 ) {
     root.spawn((
         BackgroundColor(theme::overlay()),
@@ -574,48 +623,160 @@ fn world_details(
         },
     ))
     .with_children(|center| {
-        center
-            .spawn((
-                TabGroup {
-                    modal: true,
+        let mut dialog = center.spawn((
+            TabGroup {
+                modal: true,
+                ..default()
+            },
+            cine::dialog_box(),
+        ));
+        dialog.entry::<Node>().and_modify(|mut node| {
+            node.width = Val::Px(600.0);
+        });
+        dialog.with_children(|dialog| {
+            cine::dialog_title(
+                dialog,
+                facts
+                    .and_then(|f| f.name.as_deref())
+                    .unwrap_or("This World"),
+            );
+            let picture = super::worlds::pages::world_picture(
+                dialog,
+                thumbnails,
+                folder,
+                Node {
+                    width: Val::Percent(100.0),
+                    aspect_ratio: Some(3.0),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
-                cine::dialog_box(),
-            ))
-            .with_children(|dialog| {
-                match facts {
-                    Some(facts) => {
-                        cine::dialog_title(dialog, facts.name.as_deref().unwrap_or("This World"));
-                        cine::dialog_text(dialog, lines(facts, own).join("\n"), theme::muted());
-                    }
-                    None => {
-                        cine::dialog_title(dialog, "This World");
-                        cine::dialog_text(
-                            dialog,
-                            "The Server has not described this World yet.",
-                            theme::muted(),
-                        );
-                    }
+            );
+            dialog.commands().entity(picture).insert(DetailsPicture);
+            match facts {
+                Some(facts) => {
+                    settings(dialog, facts, own);
+                    biomes(dialog, facts);
                 }
-                dialog
-                    .spawn(cine::dialog_actions())
-                    .with_children(|actions| {
-                        let close = buttons::button(
-                            actions,
-                            "Close",
-                            Choice::CloseDetails,
-                            ButtonStyle::Cinematic {
-                                kind: Kind::Primary,
-                                align: Align::Centre,
-                            },
-                        );
-                        actions
-                            .commands()
-                            .entity(close)
-                            .insert(super::frame::Autofocus);
-                    });
-            });
+                None => cine::dialog_text(
+                    dialog,
+                    "The Server has not described this World yet.",
+                    theme::muted(),
+                ),
+            }
+            dialog
+                .spawn(cine::dialog_actions())
+                .with_children(|actions| {
+                    let close = buttons::button(
+                        actions,
+                        "Close",
+                        Choice::CloseDetails,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                            align: Align::Centre,
+                        },
+                    );
+                    actions
+                        .commands()
+                        .entity(close)
+                        .insert(super::frame::Autofocus);
+                });
+        });
     });
+}
+
+/// The settings fixed at creation, as label and value pairs two to a row; the seed has a copy
+/// control.
+fn settings(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts, own: Option<GameMode>) {
+    let game = facts
+        .game
+        .as_ref()
+        .map_or_else(|| "No Game".to_owned(), |(id, _)| ui::title(id));
+    let rows = [
+        ("Game", game),
+        ("Seed", facts.seed.to_string()),
+        ("Voxel size", format!("{} m", facts.voxel_size_m)),
+        (
+            "Climate scale",
+            format!(
+                "{} m \u{00b7} {} m",
+                facts.temperature_size_m, facts.humidity_size_m
+            ),
+        ),
+        (
+            "Game mode",
+            format!(
+                "{} \u{00b7} yours {}",
+                mode_name(facts.default_mode),
+                own.map_or("not yet known", mode_name)
+            ),
+        ),
+        ("Generator", format!("Version {}", facts.generator)),
+    ];
+    dialog
+        .spawn(Node {
+            display: Display::Grid,
+            grid_template_columns: vec![
+                GridTrack::auto(),
+                GridTrack::flex(1.0),
+                GridTrack::auto(),
+                GridTrack::flex(1.0),
+            ],
+            column_gap: Val::Px(14.0),
+            row_gap: Val::Px(8.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|grid| {
+            for (label, value) in rows {
+                ui::text(grid, label, theme::TEXT_SMALL, theme::muted());
+                if label == "Seed" {
+                    grid.spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    })
+                    .with_children(|seed| {
+                        ui::text(seed, value, theme::TEXT_SMALL, theme::INK);
+                        buttons::button(
+                            seed,
+                            "Copy",
+                            Choice::CopySeed,
+                            ButtonStyle::Small { kind: Kind::Ghost },
+                        );
+                    });
+                } else {
+                    ui::text(grid, value, theme::TEXT_SMALL, theme::INK);
+                }
+            }
+        });
+}
+
+/// The World's biomes, one chip each.
+fn biomes(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts) {
+    ui::text(dialog, "Biomes", theme::TEXT_SMALL, theme::muted());
+    dialog
+        .spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(6.0),
+            row_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|chips| {
+            for name in &facts.biomes {
+                chips
+                    .spawn((
+                        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.05)),
+                        Node {
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|chip| {
+                        ui::text(chip, ui::declared_title(name), 12.0, theme::INK);
+                    });
+            }
+        });
 }
 
 fn mode_name(mode: GameMode) -> &'static str {
@@ -625,33 +786,16 @@ fn mode_name(mode: GameMode) -> &'static str {
     }
 }
 
-/// The World details, one fact per line, as the prototype words them.
-fn lines(facts: &WorldFacts, own: Option<GameMode>) -> Vec<String> {
-    let game = facts
-        .game
-        .as_ref()
-        .map_or_else(|| "No Game".to_owned(), |(id, _)| ui::title(id));
-    vec![
-        format!("{game} · {} m voxels", facts.voxel_size_m),
-        format!("Seed: {}", facts.seed),
-        format!(
-            "{} · Generator version {}",
-            match facts.biomes.len() {
-                1 => "1 biome".to_owned(),
-                n => format!("{n} biomes"),
-            },
-            facts.generator
-        ),
-        format!(
-            "Default mode {} · your mode {}",
-            mode_name(facts.default_mode),
-            own.map_or("not yet known", mode_name)
-        ),
-        format!(
-            "Temperature / humidity size: {} m / {} m",
-            facts.temperature_size_m, facts.humidity_size_m
-        ),
-    ]
+fn copy_seed(
+    commands: &mut Commands,
+    clipboard: Option<&mut bevy::clipboard::Clipboard>,
+    seed: u64,
+) {
+    if clipboard.is_some_and(|c| c.set_text(seed.to_string()).is_ok()) {
+        ui::notify(commands, "Seed copied", ui::Tone::Change);
+    } else {
+        ui::notify(commands, "Could not copy the seed", ui::Tone::Alert);
+    }
 }
 
 /// The screens that free the cursor and hide the HUD while open.
@@ -981,34 +1125,85 @@ mod tests {
         assert_eq!(backdrop(&mut app).alpha(), 1.0);
     }
 
+    /// A World folder holding a 2×1 grey thumbnail; returns its pixels.
+    fn saved_picture(folder: &std::path::Path) -> Vec<u8> {
+        std::fs::create_dir_all(folder).unwrap();
+        let rgba = [90, 90, 90, 255].repeat(2);
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&rgba).unwrap();
+        writer.finish().unwrap();
+        std::fs::write(folder.join(tesserae_core::save::library::THUMBNAIL), bytes).unwrap();
+        rgba
+    }
+
     #[test]
-    fn world_details_show_what_the_server_reported() {
+    fn world_details_open_with_close_focused_and_show_the_picture_settings_and_biomes() {
         let mut app = app();
-        app.world_mut().write_message(WorldFacts {
-            name: Some("River bend".into()),
-            game: Some(("terra".into(), "0.1.0".into())),
-            voxel_size_m: 0.5,
-            seed: 42,
-            biomes: vec!["terra:ash_flats".into(), "terra:meadow".into()],
-            cave_biomes: Vec::new(),
-            default_mode: GameMode::Survival,
-            generator: 3,
-            temperature_size_m: 300.0,
-            humidity_size_m: 700.0,
-        });
-        app.world_mut()
-            .write_message(crate::server::game_mode::GameModeChanged(
-                GameMode::Creative,
-            ));
-        app.add_systems(Update, super::super::game_mode::receive);
+        let folder = std::env::temp_dir().join(format!(
+            "tesserae-details-{}",
+            tesserae_core::save::WorldId::new().as_str()
+        ));
+        let grey = saved_picture(&folder);
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<super::super::worlds::Thumbnails>()
+            .insert_resource(crate::open::Opened::at(folder.clone()));
+        river_bend(&mut app);
         press(&mut app, KeyCode::Tab);
         choose(&mut app, Choice::Details);
+        assert_eq!(focused(&app), Some(find(&mut app, Choice::CloseDetails)));
         let shown = texts(&mut app);
-        assert!(shown.iter().any(|t| t == "River bend"), "{shown:?}");
-        let body = "Terra · 0.5 m voxels\nSeed: 42\n2 biomes · Generator version 3\nDefault mode Survival · your mode Creative\nTemperature / humidity size: 300 m / 700 m";
-        assert!(shown.iter().any(|t| t == body), "{body} in {shown:?}");
+        for line in [
+            "River bend",
+            "Game",
+            "Terra",
+            "Seed",
+            "42",
+            "Voxel size",
+            "0.5 m",
+            "Climate scale",
+            "300 m \u{00b7} 700 m",
+            "Game mode",
+            "Survival \u{00b7} yours Creative",
+            "Generator",
+            "Version 3",
+            "Biomes",
+            "Ash flats",
+            "Meadow",
+        ] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        let picture = app
+            .world_mut()
+            .query_filtered::<&ImageNode, With<DetailsPicture>>()
+            .single(app.world())
+            .unwrap()
+            .image
+            .clone();
+        assert_eq!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&picture)
+                .unwrap()
+                .data,
+            Some(grey),
+            "the thumbnail saved with the World"
+        );
+
+        choose(&mut app, Choice::CopySeed);
+        assert!(
+            texts(&mut app)
+                .iter()
+                .any(|t| t == "Could not copy the seed"),
+            "a headless test has no clipboard"
+        );
+
         press(&mut app, KeyCode::Escape);
         assert!(open(&app), "Escape closes the details only");
         assert!(!app.world().resource::<Menu>().details);
+        assert_eq!(focused(&app), Some(find(&mut app, Choice::Resume)));
+        std::fs::remove_dir_all(folder).unwrap();
     }
 }
