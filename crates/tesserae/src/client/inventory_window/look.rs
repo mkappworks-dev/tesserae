@@ -87,13 +87,6 @@ pub(in crate::client) const ROOMY: Size = Size {
     height: theme::CONTROL_HEIGHT,
     ..COMPACT
 };
-/// `.btn.small`: Sort and the Shape choices.
-pub(in crate::client) const SMALL: Size = Size {
-    height: theme::CONTROL_HEIGHT,
-    text: theme::TEXT_SMALL,
-    pad_x: theme::ITEM_SMALL_PAD_X,
-    pad_y: theme::ITEM_SMALL_PAD_Y,
-};
 pub(in crate::client) const WIDE: Size = Size {
     text: theme::TEXT_SMALL,
     ..ROOMY
@@ -149,8 +142,6 @@ pub(in crate::client) fn button(
 /// The small controls that are not `.btn`s: each its own colours.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(in crate::client) enum Flavour {
-    /// A Catalogue category.
-    Chip,
     /// A count preset.
     Preset,
     /// A stepper's − or +.
@@ -160,8 +151,6 @@ pub(in crate::client) enum Flavour {
     Method,
     /// A quick shape.
     Shape,
-    /// A Shape in the item details, drawn as the Item placed in it.
-    ShapeChip,
     /// The way an axis grows, as text.
     Way,
     /// A Template in the place Tool's list.
@@ -182,8 +171,6 @@ pub(in crate::client) struct FlatInk;
 fn flat_colours(flat: Flat) -> (Color, Color, Color) {
     let none = Color::NONE;
     match (flat.flavour, flat.selected) {
-        (Flavour::Chip, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
-        (Flavour::Chip, true) => (theme::CHIP_ON, theme::CHIP_ON, theme::CHIP_ON_INK),
         (Flavour::Preset, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
         (Flavour::Preset, true) => (theme::CHIP, theme::CHIP_ON, theme::PRESET_ON_INK),
         (Flavour::Step, _) => (none, none, theme::STEPPER_INK),
@@ -199,12 +186,6 @@ fn flat_colours(flat: Flat) -> (Color, Color, Color) {
             theme::PRESET_ON,
             theme::PRESET_ON_EDGE,
             theme::PRESET_ON_GLYPH,
-        ),
-        (Flavour::ShapeChip, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
-        (Flavour::ShapeChip, true) => (
-            theme::SHAPE_CHIP_ON,
-            theme::SHAPE_CHIP_ON_EDGE,
-            theme::CHIP_ON,
         ),
         (Flavour::Way, _) => (none, none, theme::AXIS_WAY_INK),
         (Flavour::Pick, false) => (theme::PRESET, theme::PRESET_EDGE, theme::PRESET_INK),
@@ -380,12 +361,6 @@ pub(in crate::client) struct Stepper {
     pub value_weight: u16,
 }
 
-pub(in crate::client) const CATALOGUE_STEPPER: Stepper = Stepper {
-    step_width: 30.0,
-    step_text: 17.0,
-    value_width: 48.0,
-    value_weight: theme::SEMIBOLD,
-};
 pub(in crate::client) const LAYOUT_STEPPER: Stepper = Stepper {
     step_width: 35.0,
     step_text: 20.0,
@@ -459,7 +434,6 @@ pub(in crate::client) fn stepper(
 pub(in crate::client) enum Frame {
     Plain,
     Hover,
-    Inspected,
     /// The selected hotbar slot, or the chosen tile.
     Active,
     Picked,
@@ -486,12 +460,6 @@ pub(in crate::client) fn frame(state: Frame) -> (BackgroundGradient, Color, Colo
             gradient(theme::SLOT_HOVER_TOP, theme::SLOT_TOP),
             theme::SLOT_EDGE,
             theme::SLOT_RIM_HOVER,
-            none,
-        ),
-        Frame::Inspected => (
-            gradient(theme::SLOT_TOP, theme::SLOT_BOTTOM),
-            theme::SLOT_INSPECTED_EDGE,
-            theme::SLOT_INSPECTED_RIM,
             none,
         ),
         Frame::Active => (
@@ -597,69 +565,6 @@ pub(in crate::client) fn slot_focus() -> Outline {
         Val::Px(theme::FRAME),
         Color::NONE,
     )
-}
-
-/// The bag beside the Inventory's title: a handle over a rounded body with a
-/// pocket, drawn from nodes as the prototype's `storage` icon is from strokes.
-pub(in crate::client) fn storage_icon(parent: &mut ChildSpawnerCommands, size: f32, ink: Color) {
-    let unit = size / 24.0;
-    let stroke = Val::Px((1.8 * unit).max(1.0));
-    let px = |v: f32| Val::Px(v * unit);
-    parent
-        .spawn((
-            Node {
-                width: px(24.0),
-                height: px(24.0),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .with_children(|icon| {
-            let at = |left: f32, top: f32, width: f32, height: f32| Node {
-                position_type: PositionType::Absolute,
-                left: px(left),
-                top: px(top),
-                width: px(width),
-                height: px(height),
-                ..default()
-            };
-            icon.spawn((
-                Node {
-                    border: UiRect {
-                        left: stroke,
-                        right: stroke,
-                        top: stroke,
-                        bottom: Val::ZERO,
-                    },
-                    border_radius: BorderRadius::top(px(4.0)),
-                    ..at(8.0, 1.0, 8.0, 6.0)
-                },
-                BorderColor::all(ink),
-            ));
-            icon.spawn((
-                Node {
-                    border: UiRect::all(stroke),
-                    border_radius: BorderRadius::all(px(2.0)),
-                    ..at(4.0, 6.0, 16.0, 16.0)
-                },
-                BorderColor::all(ink),
-            ));
-            icon.spawn((
-                Node {
-                    border: UiRect::all(stroke),
-                    ..at(8.0, 13.0, 8.0, 6.0)
-                },
-                BorderColor::all(ink),
-            ));
-            icon.spawn((
-                Node {
-                    border: UiRect::top(stroke),
-                    ..at(9.0, 9.0, 6.0, 1.0)
-                },
-                BorderColor::all(ink),
-            ));
-        });
 }
 
 /// A quick shape's glyph.

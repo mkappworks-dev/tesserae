@@ -1,12 +1,12 @@
-//! The Inventory window: the backpack, the hotbar beneath it and the details
-//! of one stack, over the dimmed World. It draws only what the Server sent and
-//! asks the Server for every change (`docs/adr/0002-client-server-from-day-one.md`).
+//! The Inventory: one panel over the dimmed World, the Catalogue or Crafting
+//! beside the backpack, an open Chest above it, and what the pointer or focus
+//! is on told in a tooltip. Every input is a prompt in the bar beneath. It
+//! draws only what the Server sent and asks the Server for every change
+//! (`docs/adr/0002-client-server-from-day-one.md`).
 //!
 //! It is its own input context, as the Layout menu is: the cursor is free and
 //! gameplay input waits until it closes.
 
-use crate::client::buttons::{self, Eyebrow};
-use crate::client::cinematic::Kind;
 use bevy::input_focus::InputFocus;
 use bevy::picking::hover::Hovered;
 use bevy::picking::pointer::PointerButton;
@@ -16,10 +16,9 @@ use bevy::picking::{
     pointer::PointerId,
 };
 use bevy::prelude::*;
-use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS, Inventory, Slot, Stack};
+use tesserae_core::inventory::{BACKPACK_SLOTS, Destination, HOTBAR_SLOTS, Inventory, Slot, Stack};
 use tesserae_core::{MaterialId, ShapeId};
 
 mod catalogue;
@@ -27,6 +26,7 @@ mod container;
 mod crafting;
 mod flight;
 pub(super) mod look;
+mod tip;
 
 use super::actions::{Action, Actions};
 use super::drops::Looks;
@@ -45,30 +45,15 @@ const GRID_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32 + SLOT_GAP_PX * (HOTBAR_SLOTS
 const SLOT_ICON_PX: f32 = 32.0;
 /// The Item carried under the pointer by a drag.
 const GHOST_PX: f32 = 44.0;
-const INSPECTOR_PX: f32 = 220.0;
-const INSPECTOR_ICON_PX: f32 = 44.0;
-const CHIP_ICON_PX: f32 = 28.0;
-const INSPECTOR_NAME_PX: f32 = 17.0;
-const INSPECTOR_CAPS_PX: f32 = 10.0;
-/// The details' actions, two to a row.
-const ACTION: look::Size = look::Size {
-    height: 32.0,
-    text: 12.0,
-    pad_x: 6.0,
-    pad_y: 4.0,
-};
-const EMPTY_PX: f32 = 100.0;
-const EMPTY_ICON_PX: f32 = 40.0;
-/// Below this window width the details column is a toggle, as in the prototype.
-const NARROW_PX: f32 = 1180.0;
+const PANEL_PAD_PX: f32 = 16.0;
+const SECTION_LABEL_PX: f32 = 13.0;
+const SECTION_COUNT_PX: f32 = 11.0;
 
 #[derive(Resource, Default)]
 pub(super) struct InventoryWindow {
     pub(super) open: bool,
     /// The stack chosen to move; the next slot clicked receives it.
     picked: Option<SlotAddress>,
-    inspected: Option<Slot>,
-    details: bool,
     dragging: Option<SlotAddress>,
     /// A drag ends in a click on the slot it started from, which is not a pick.
     suppress_click: bool,
@@ -82,8 +67,6 @@ impl InventoryWindow {
     pub(super) fn opened() -> Self {
         Self {
             open: true,
-            details: true,
-            inspected: Some(Slot::Backpack(0)),
             ..default()
         }
     }
@@ -101,7 +84,7 @@ pub(super) fn station_in_front(app: &mut App) {
     crafting::workbench_in_front(app);
 }
 
-/// A Chest's slots beside the Inventory, for a capture of them.
+/// A Chest's slots above the backpack, for a capture of them.
 #[cfg(any(feature = "dev", feature = "profiling"))]
 pub(super) fn container_in_front(app: &mut App) {
     let wood = Some(Stack {
@@ -135,12 +118,11 @@ fn stack_at<'a>(held: &'a Held, open: &'a container::Open, at: SlotAddress) -> O
 #[derive(Component)]
 struct WindowRoot;
 
-/// Holds the Catalogue and the Inventory side by side at one height.
+/// The panel: the side pane, when there is one, and the slots beside it.
 #[derive(Component)]
 struct WindowRow;
 
-/// The Inventory itself, rebuilt whenever it changes; the Catalogue beside it
-/// is not.
+/// The slots, rebuilt whenever they change; the side pane is not.
 #[derive(Component)]
 struct Card;
 
@@ -151,27 +133,19 @@ enum Control {
     /// The open Container's.
     SortContainer,
     TakeAll,
-    Details,
     Close,
-    QuickTransfer(Slot),
-    Split(Slot),
-    CancelMove,
-    /// The Shape the selected slot's Material is placed in.
-    Shape(tesserae_core::ShapeId),
-    /// Throws one Item of the Stack, or all of it, onto the ground.
-    DropOne(Slot),
-    DropStack(Slot),
+    /// Puts the cursor in the side pane's search.
+    Search,
+    /// Throws one Item of the pointed Stack onto the ground, or all of it with
+    /// Shift.
+    Drop,
 }
 
 #[derive(Component)]
 struct SlotCount;
 
-/// Holds the inspected Item's icon, drawn in the Player's chosen Shape.
-#[derive(Component)]
-struct HeadIcon;
-
-/// The Inventory's and the Catalogue's panels: a drag released anywhere else,
-/// over the World, throws the Stack out.
+/// The panel: a drag released anywhere else, over the World, throws the Stack
+/// out.
 #[derive(Component)]
 pub(super) struct Panel;
 
@@ -187,6 +161,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<InventoryRefused>()
         .add_observer(activate)
         .add_observer(press)
+        .add_observer(split)
         .add_observer(drag_start)
         .add_observer(drag_end)
         .add_observer(drop_on_slot)
@@ -196,6 +171,7 @@ pub(super) fn plugin(app: &mut App) {
             crafting::plugin,
             flight::plugin,
             look::plugin,
+            tip::plugin,
         ))
         .add_session_systems(
             Update,
@@ -217,6 +193,11 @@ pub(super) fn plugin(app: &mut App) {
                     catalogue::fill,
                     crafting::fill,
                     catalogue::focus_search,
+                    catalogue::show_search,
+                    tip::point,
+                    tip::to_hotbar,
+                    tip::show,
+                    tip::prompts,
                     paint,
                     catalogue::paint,
                     crafting::paint,
@@ -243,8 +224,8 @@ type Blockers<'w> = (
 
 /// The Inventory key opens the window and closes it into play; Escape, Use and
 /// the clear key close it into play too, Escape spent so the cursor stays
-/// grabbed. The Catalogue
-/// key opens it, or keeps it open, with the cursor in the Catalogue search.
+/// grabbed. The Catalogue key opens it, or keeps it open, with the cursor in
+/// the Catalogue search.
 fn toggle(
     mut actions: ResMut<Actions>,
     (mut window, mut side): (ResMut<InventoryWindow>, ResMut<catalogue::Side>),
@@ -365,9 +346,10 @@ fn activate(
     event: On<Activate>,
     controls: Query<&Control>,
     mut window: ResMut<InventoryWindow>,
-    mut hotbar: ResMut<super::edit::Hotbar>,
-    (held, open): (Res<Held>, Res<container::Open>),
+    (held, open, pointed): (Res<Held>, Res<container::Open>, Res<tip::Pointed>),
     keys: Res<ButtonInput<KeyCode>>,
+    searches: Query<Entity, catalogue::Search>,
+    mut focus: ResMut<InputFocus>,
     mut intents: MessageWriter<InventoryIntent>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
@@ -381,9 +363,6 @@ fn activate(
         Control::Slot(slot) => {
             if std::mem::take(&mut window.suppress_click) {
                 return;
-            }
-            if let Some(slot) = slot.inventory() {
-                window.inspected = Some(slot);
             }
             let filled = stack_at(&held, &open, slot).is_some();
             if shift_held(&keys) {
@@ -404,7 +383,6 @@ fn activate(
         }
         Control::Sort => {
             window.picked = None;
-            window.inspected = Some(Slot::Backpack(0));
             intents.write(InventoryIntent::Sort);
         }
         Control::SortContainer => {
@@ -415,44 +393,53 @@ fn activate(
             window.picked = None;
             intents.write(InventoryIntent::TakeAll);
         }
-        Control::Details => window.details = !window.details,
         Control::Close => {
             for mut cursor in &mut cursor {
                 close(&mut window, &mut cursor);
             }
         }
-        Control::QuickTransfer(slot) => {
-            window.picked = None;
-            intents.write(InventoryIntent::QuickTransfer(slot.into()));
+        Control::Search => {
+            if let Some(search) = searches.iter().next() {
+                focus.set(search, bevy::input_focus::FocusCause::Navigated);
+            }
         }
-        Control::Split(slot) => {
-            window.picked = None;
-            intents.write(InventoryIntent::Split(slot.into()));
-        }
-        Control::CancelMove => window.picked = None,
-        Control::DropOne(slot) | Control::DropStack(slot) => {
+        Control::Drop => {
+            // A Container's Stack is not thrown from it.
+            let Some(tip::Pointing::Slot(SlotAddress::Inventory(slot))) = pointed.what else {
+                return;
+            };
             let Some(stack) = held.0.get(slot) else {
                 return;
             };
-            let count = if control == Control::DropOne(slot) {
-                1
-            } else {
-                stack.count
-            };
+            let count = if shift_held(&keys) { stack.count } else { 1 };
             window.picked = None;
             window.dropping = Some((stack.item.clone(), count));
             intents.write(InventoryIntent::Drop { slot, count });
         }
-        Control::Shape(shape) => match &mut hotbar.outside {
-            Some(Holding::Solid { shape: chosen, .. }) => *chosen = shape,
-            _ => hotbar.shape = shape,
-        },
     }
 }
 
 fn press(event: On<PointerPress>, mut window: ResMut<InventoryWindow>) {
     if event.button == PointerButton::Primary {
         window.suppress_click = false;
+    }
+}
+
+/// Right-click halves a Stack into the first empty slot.
+fn split(
+    event: On<PointerPress>,
+    controls: Query<&Control>,
+    (held, open): (Res<Held>, Res<container::Open>),
+    mut window: ResMut<InventoryWindow>,
+    mut intents: MessageWriter<InventoryIntent>,
+) {
+    if window.open
+        && event.button == PointerButton::Secondary
+        && let Ok(&Control::Slot(slot)) = controls.get(event.entity)
+        && stack_at(&held, &open, slot).is_some_and(|stack| stack.count > 1)
+    {
+        window.picked = None;
+        intents.write(InventoryIntent::Split(slot));
     }
 }
 
@@ -546,7 +533,7 @@ type Hovering<'w, 's> = (
     Query<'w, 's, &'static ChildOf>,
 );
 
-/// Whether the pointer is over one of the window's panels rather than the World.
+/// Whether the pointer is over the panel rather than the World.
 fn over_a_panel(
     hover: &HoverMap,
     panels: &Query<(), With<Panel>>,
@@ -562,7 +549,7 @@ fn over_a_panel(
         })
 }
 
-/// A Stack let go over the World, not over a slot or a panel, is thrown out
+/// A Stack let go over the World, not over a slot or the panel, is thrown out
 /// whole. A drop on a slot was taken by [`drop_on_slot`] before this.
 fn drag_end(
     event: On<PointerDragEnd>,
@@ -589,7 +576,6 @@ fn drag_end(
     }
     if let Some(stack) = held.0.get(slot) {
         window.dropping = Some((stack.item.clone(), stack.count));
-        window.inspected = None;
         intents.write(InventoryIntent::Drop {
             slot,
             count: stack.count,
@@ -612,13 +598,11 @@ fn drop_on_slot(
     };
     if let Some(material) = side.taking.take() {
         if let Some(to) = to.inventory() {
-            window.inspected = Some(to);
-            intents.write(side.take(material, to));
+            intents.write(catalogue::take(material, MAX_STACK, Destination::Slot(to)));
         }
     } else if let Some(from) = window.dragging.take()
         && from != to
     {
-        window.inspected = to.inventory().or(window.inspected);
         intents.write(InventoryIntent::Move { from, to });
     }
 }
@@ -628,27 +612,13 @@ fn drop_on_slot(
 struct Built {
     held: Inventory,
     picked: Option<SlotAddress>,
-    inspected: Option<Slot>,
-    details: bool,
-    /// The keys that close it: the Inventory key, Use and the clear key.
-    keys: [String; 3],
-    /// The open Container, whose pane takes the side pane's place.
+    /// The open Container, shown above the backpack in place of the side pane.
     container: Option<crate::server::container::ContainerShown>,
     /// The Catalogue is beside the Inventory only outside Survival.
     survival: bool,
     pane: crafting::Pane,
-    /// A Station's pane stands in for the side pane, tabs and all.
+    /// A Station's Recipes stand in for the side pane, tabs and all.
     station: Option<crafting::OpenStation>,
-    /// Too narrow for the details column beside the grid, so it is toggled.
-    narrow: bool,
-    /// The Player's Shape choice, which any solid stack is placed in.
-    shape: ShapeId,
-}
-
-impl Built {
-    fn details_shown(&self) -> bool {
-        !self.narrow || self.details
-    }
 }
 
 type Parts<'w, 's> = (
@@ -664,39 +634,23 @@ fn render(
     window: Res<InventoryWindow>,
     (held, open): (Res<Held>, Res<container::Open>),
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
-    (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Parts,
-    (mode, hotbar, preferences, pane): (
+    (mode, preferences, pane): (
         Res<super::game_mode::Mode>,
-        Res<super::edit::Hotbar>,
         Res<super::profile::Preferences>,
         Res<crafting::Pane>,
     ),
     station: Res<crafting::AtStation>,
-    (focus, screen): (
-        Option<Res<InputFocus>>,
-        Single<&Window, With<PrimaryWindow>>,
-    ),
+    focus: Option<Res<InputFocus>>,
     mut built: Local<Option<Built>>,
 ) {
     let wanted = window.open.then(|| Built {
         held: held.0.clone(),
         picked: window.picked,
-        inspected: window.inspected,
-        details: window.details,
-        keys: [Action::Inventory, Action::Use, Action::ClearTool].map(|action| {
-            let all = bindings.label(action, &labels);
-            all.split(" / ").next().unwrap_or_default().to_owned()
-        }),
         container: open.0.clone(),
         survival: mode.survival(),
         pane: pane.shown(mode.survival()),
         station: station.0.clone(),
-        narrow: screen.width() < NARROW_PX,
-        shape: match hotbar.outside {
-            Some(Holding::Solid { shape, .. }) => shape,
-            _ => hotbar.shape,
-        },
     });
     if *built == wanted && !looks.is_changed() && !catalogue.is_changed() {
         return;
@@ -711,7 +665,7 @@ fn render(
             built.survival,
             built.pane,
             built.station.clone(),
-            built.container.clone(),
+            built.container.is_some(),
         )
     };
     let was_side = built.as_ref().map(side);
@@ -722,8 +676,8 @@ fn render(
         }
         return;
     };
-    // The row is built once per opening, so a mode or tab change while open
-    // rebuilds it with the other side pane.
+    // The panel is built once per opening, so a mode, tab or Container change
+    // while open rebuilds it with the other side pane.
     let reframe = was_side.is_some_and(|was| was != side(&state));
     if reframe {
         for root in &roots {
@@ -741,39 +695,46 @@ fn render(
             let row = commands
                 .spawn((
                     WindowRow,
+                    Panel,
                     Node {
-                        height: Val::Px(theme::ITEM_WINDOW_HEIGHT),
                         max_height: Val::Percent(100.0),
-                        column_gap: Val::Px(theme::ITEM_GAP),
+                        column_gap: Val::Px(PANEL_PAD_PX),
+                        padding: UiRect::all(Val::Px(PANEL_PAD_PX)),
+                        border: UiRect::all(Val::Px(theme::FRAME)),
+                        border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
                         align_items: AlignItems::Stretch,
                         ..default()
                     },
+                    BackgroundColor(theme::ITEM_SURFACE),
+                    BorderColor::all(theme::GROUT),
+                    item_shadow(),
                 ))
-                .with_children(|row| match (&state.station, state.pane) {
-                    _ if state.container.is_some() => container::panel(
-                        row,
-                        &state,
-                        &Names {
-                            looks: &looks,
-                            catalogue: &catalogue,
-                        },
-                    ),
-                    (None, crafting::Pane::Catalogue) => catalogue::panel(row, &searches.catalogue),
-                    (station, _) => {
-                        crafting::panel(row, &searches.recipes, !state.survival, station.as_ref())
+                .with_children(|row| {
+                    row.spawn(theme::ring(theme::ITEM_RADIUS));
+                    match (&state.station, state.pane) {
+                        _ if state.container.is_some() => {}
+                        (None, crafting::Pane::Catalogue) => {
+                            catalogue::panel(row, &searches.catalogue)
+                        }
+                        (station, _) => crafting::panel(
+                            row,
+                            &searches.recipes,
+                            !state.survival,
+                            station.as_ref(),
+                        ),
                     }
                 })
                 .id();
             commands
                 .spawn((
                     WindowRoot,
+                    super::frame::Frame,
                     GlobalZIndex(20),
                     Node {
                         position_type: PositionType::Absolute,
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
+                        flex_direction: FlexDirection::Column,
                         ..default()
                     },
                     BackgroundColor(if preferences.solid_background {
@@ -782,7 +743,24 @@ fn render(
                         theme::INVENTORY_SCRIM
                     }),
                 ))
-                .add_child(row);
+                .with_children(|root| {
+                    root.spawn(Node {
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        padding: UiRect::all(Val::Px(theme::SCREEN_PAD_X)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    })
+                    .add_child(row);
+                    root.spawn((
+                        tip::PromptBar,
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            ..default()
+                        },
+                    ));
+                });
             row
         }
     };
@@ -793,36 +771,33 @@ fn render(
     commands
         .spawn((
             Card,
-            Panel,
             ChildOf(row),
             Node {
                 flex_direction: FlexDirection::Column,
-                border: UiRect::all(Val::Px(theme::FRAME)),
-                border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
-                overflow: Overflow::clip(),
-                ..default()
-            },
-            BackgroundColor(theme::ITEM_SURFACE),
-            BorderColor::all(theme::GROUT),
-            item_shadow(),
-        ))
-        .with_children(|card| {
-            card.spawn(theme::ring(theme::ITEM_RADIUS));
-            header(card, &state);
-            card.spawn(Node {
-                flex_grow: 1.0,
+                row_gap: Val::Px(12.0),
                 min_height: Val::Px(0.0),
                 ..default()
-            })
-            .with_children(|main| {
-                backpack(main, &state, &names);
-                if state.details_shown() {
-                    details(main, &state, &names);
-                }
+            },
+        ))
+        .with_children(|card| {
+            if let Some(open) = &state.container {
+                container::section(card, &state, open, &names);
+            }
+            let used = state.held.backpack().iter().flatten().count();
+            section(card, "Backpack".into(), used, BACKPACK_SLOTS, |section| {
+                grid(section, &state, &names, Slot::Backpack, BACKPACK_SLOTS);
             });
-            footer(card, &state, &names);
+            card.spawn((
+                Node {
+                    padding: UiRect::top(Val::Px(12.0)),
+                    border: UiRect::top(Val::Px(theme::RULE)),
+                    ..default()
+                },
+                BorderColor::all(theme::item_row_rule()),
+            ))
+            .with_children(|hotbar| grid(hotbar, &state, &names, Slot::Hotbar, HOTBAR_SLOTS));
         });
-    // Focus elsewhere, in the Catalogue's search or tiles, outlives the card.
+    // Focus elsewhere, in the side pane, outlives the slots.
     let target = focused.or(opening.then_some(Control::Slot(Slot::Backpack(0).into())));
     commands.queue(move |world: &mut World| {
         let Some(target) = target else {
@@ -838,8 +813,50 @@ fn render(
     });
 }
 
-/// The Inventory's and the Catalogue's drop shadow, a little deeper than a
-/// menu panel's.
+/// A labelled group of slots, with how many of them hold a Stack.
+fn section(
+    card: &mut ChildSpawnerCommands,
+    label: String,
+    used: usize,
+    slots: usize,
+    grid: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    card.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(6.0),
+        ..default()
+    })
+    .with_children(|section| {
+        section
+            .spawn(Node {
+                width: Val::Px(GRID_PX),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Baseline,
+                ..default()
+            })
+            .with_children(|heading| {
+                heading.spawn(look::label(
+                    label,
+                    SECTION_LABEL_PX,
+                    theme::SEMIBOLD,
+                    theme::INK,
+                ));
+                heading.spawn(look::figures(
+                    format!("{used} / {slots}"),
+                    SECTION_COUNT_PX,
+                    theme::REGULAR,
+                    if used == slots {
+                        theme::ITEM_FULL
+                    } else {
+                        theme::ITEM_CAPTION
+                    },
+                ));
+            });
+        grid(section);
+    });
+}
+
+/// The Inventory's drop shadow, a little deeper than a menu panel's.
 pub(super) fn item_shadow() -> BoxShadow {
     BoxShadow::new(
         Color::BLACK.with_alpha(theme::ITEM_SHADOW_ALPHA),
@@ -911,171 +928,19 @@ impl Names<'_> {
         let name = &self.catalogue.0.material(material)?.name;
         (name != item).then_some(name.as_str())
     }
-}
 
-fn header(card: &mut ChildSpawnerCommands, state: &Built) {
-    card.spawn((
-        Node {
-            min_height: Val::Px(theme::ITEM_HEADER_HEIGHT),
-            padding: UiRect::axes(Val::Px(18.0), Val::ZERO),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::SpaceBetween,
-            column_gap: Val::Px(12.0),
-            border: UiRect::bottom(Val::Px(theme::RULE)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BackgroundColor(theme::sheet_header()),
-        BorderColor::all(theme::item_rule()),
-    ))
-    .with_children(|header| {
-        header
-            .spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            })
-            .with_children(|title| {
-                look::storage_icon(title, theme::ICON_SIZE, theme::INK);
-                title.spawn(look::label(
-                    "Inventory",
-                    theme::ITEM_TEXT_HEADING,
-                    theme::LABEL,
-                    theme::INK,
-                ));
-                for key in &state.keys {
-                    look::key_cap(title, key.clone(), ());
-                }
-            });
-        header
-            .spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                ..default()
-            })
-            .with_children(|context| {
-                if state.narrow {
-                    look::flat_text(
-                        context,
-                        "i",
-                        Control::Details,
-                        look::Flat {
-                            flavour: look::Flavour::Close,
-                            selected: state.details,
-                        },
-                        Node {
-                            width: Val::Px(theme::CLOSE_SIZE),
-                            height: Val::Px(theme::CLOSE_SIZE),
-                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                            ..default()
-                        },
-                        (theme::TEXT_SMALL, theme::SEMIBOLD),
-                    );
-                }
-                if !state.survival {
-                    context
-                        .spawn((
-                            Node {
-                                padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
-                                border: UiRect::all(Val::Px(theme::RULE)),
-                                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                                ..default()
-                            },
-                            BackgroundColor(theme::BADGE),
-                            BorderColor::all(theme::BADGE_EDGE),
-                            Pickable::IGNORE,
-                        ))
-                        .with_child(look::label(
-                            "Creative access",
-                            theme::ITEM_TEXT_EYEBROW,
-                            theme::REGULAR,
-                            theme::BADGE_INK,
-                        ));
-                }
-                look::close(context, Control::Close);
-            });
-    });
-}
-
-fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
-    let used = state.held.backpack().iter().flatten().count();
-    let full = used == BACKPACK_SLOTS;
-    main.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        flex_grow: 1.0,
-        padding: UiRect::axes(Val::Px(22.0), Val::Px(20.0)),
-        ..default()
-    })
-    .with_children(|browser| {
-        browser
-            .spawn(Node {
-                width: Val::Px(GRID_PX),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                margin: UiRect::bottom(Val::Px(16.0)),
-                ..default()
-            })
-            .with_children(|heading| {
-                heading
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(5.0),
-                        ..default()
-                    })
-                    .with_children(|title| {
-                        buttons::eyebrow(title, "YOUR ITEMS", Eyebrow::Inventory);
-                        title.spawn(look::label(
-                            "Backpack",
-                            theme::ITEM_TEXT_TITLE,
-                            theme::MEDIUM,
-                            theme::INK,
-                        ));
-                    });
-                heading
-                    .spawn(Node {
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(10.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        let capacity = format!("{used} / {BACKPACK_SLOTS} slots");
-                        row.spawn(if full {
-                            look::label(
-                                format!("Full · {capacity}"),
-                                theme::TEXT_EYEBROW,
-                                theme::SEMIBOLD,
-                                theme::ITEM_FULL,
-                            )
-                        } else {
-                            look::label(
-                                capacity,
-                                theme::TEXT_EYEBROW,
-                                theme::REGULAR,
-                                theme::item_capacity(),
-                            )
-                        });
-                        look::button(row, "Sort", Control::Sort, Kind::Ghost, look::SMALL);
-                    });
-            });
-        grid(browser, state, names, Slot::Backpack, BACKPACK_SLOTS);
-        browser
-            .spawn(Node {
-                width: Val::Px(GRID_PX),
-                padding: UiRect::axes(Val::ZERO, Val::Px(8.0)),
-                ..default()
-            })
-            .with_child((look::paragraph(
-                if state.picked.is_some() {
-                    "Stack selected. Choose a destination, or select the source again to cancel."
-                } else {
-                    "Click to move · Shift-click for quick transfer · Drag and drop supported · Drag out to drop"
-                },
-                theme::TEXT_EYEBROW,
-                theme::REGULAR,
-                theme::item_soft(),
-                theme::LINE_HEIGHT,
-            ),));
-    });
+    /// The Shapes a solid Material can be placed as, when there is a choice.
+    fn shapes(&self) -> Vec<ShapeId> {
+        let shapes: Vec<_> = self
+            .catalogue
+            .0
+            .shapes
+            .iter()
+            .filter(|s| !s.fixed)
+            .map(|s| s.id)
+            .collect();
+        if shapes.len() < 2 { Vec::new() } else { shapes }
+    }
 }
 
 fn grid(
@@ -1216,371 +1081,6 @@ pub(super) fn item_icon(
     }
 }
 
-fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
-    let shown = state
-        .picked
-        .and_then(SlotAddress::inventory)
-        .or(state.inspected);
-    let stack = shown.and_then(|slot| state.held.get(slot).map(|stack| (slot, stack)));
-    // Laid out to fit the window, so it clips rather than scrolls.
-    main.spawn((
-        Node {
-            width: Val::Px(INSPECTOR_PX),
-            min_height: Val::Px(0.0),
-            flex_shrink: 0.0,
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(12.0),
-            padding: UiRect::all(Val::Px(16.0)),
-            border: UiRect::left(Val::Px(theme::RULE)),
-            overflow: Overflow::clip(),
-            ..default()
-        },
-        BackgroundColor(theme::ITEM_INSPECTOR),
-        BorderColor::all(theme::item_rule()),
-    ))
-    .with_children(|panel| {
-        buttons::eyebrow(
-            panel,
-            if state.picked.is_some() {
-                "MOVING STACK"
-            } else {
-                "ITEM DETAILS"
-            },
-            Eyebrow::Inventory,
-        );
-        match stack {
-            Some((slot, stack)) => inspected(panel, state, names, slot, stack),
-            None => {
-                panel
-                    .spawn(Node {
-                        height: Val::Px(EMPTY_PX),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        flex_shrink: 0.0,
-                        ..default()
-                    })
-                    .with_children(|empty| {
-                        look::storage_icon(empty, EMPTY_ICON_PX, theme::ITEM_EMPTY_ICON);
-                    });
-                panel.spawn(look::label(
-                    "Choose an item",
-                    theme::ITEM_TEXT_NAME,
-                    theme::LABEL,
-                    theme::INK,
-                ));
-                panel.spawn(look::label(
-                    "Select a carried stack to inspect or move it.",
-                    theme::TEXT_SMALL,
-                    theme::REGULAR,
-                    theme::muted(),
-                ));
-            }
-        }
-    });
-}
-
-/// Small spaced capitals: the stats' terms and the Shape label.
-fn caps(text: &str, color: Color) -> impl Bundle {
-    (
-        look::label(text, INSPECTOR_CAPS_PX, theme::REGULAR, color),
-        bevy::text::LetterSpacing::Px(INSPECTOR_CAPS_PX * 0.1),
-    )
-}
-
-/// A stack's icon and name, its count and limit, the Shape choice and actions.
-fn inspected(
-    panel: &mut ChildSpawnerCommands,
-    state: &Built,
-    names: &Names,
-    slot: Slot,
-    stack: &Stack,
-) {
-    let icon = names.icon(&stack.item);
-    let material = match icon {
-        Ok(Holding::Solid { material, .. }) => Some(material),
-        _ => None,
-    };
-    panel
-        .spawn(Node {
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|head| {
-            head.spawn((HeadIcon, Node::default())).with_children(|at| {
-                let icon = match material {
-                    Some(material) => Ok(Holding::solid(material, state.shape)),
-                    None => icon,
-                };
-                item_icon(at, icon, INSPECTOR_ICON_PX, false);
-            });
-            head.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(2.0),
-                min_width: Val::Px(0.0),
-                ..default()
-            })
-            .with_children(|name| {
-                name.spawn(look::label(
-                    ui::title(&stack.item),
-                    INSPECTOR_NAME_PX,
-                    theme::LABEL,
-                    theme::INK,
-                ));
-                let source = match names.places(&stack.item) {
-                    Some(material) => format!("{} · places {}", stack.item, ui::title(material)),
-                    None => stack.item.clone(),
-                };
-                name.spawn(look::label(
-                    source,
-                    theme::ITEM_TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::item_source(),
-                ));
-            });
-        });
-    panel
-        .spawn((
-            Node {
-                display: Display::Grid,
-                grid_template_columns: RepeatedGridTrack::flex(2, 1.0),
-                border: UiRect::vertical(Val::Px(theme::RULE)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BorderColor::all(theme::item_row_rule()),
-        ))
-        .with_children(|stats| {
-            let facts = [
-                ("COUNT", stack.count),
-                ("MAX", names.stack_limit(&stack.item)),
-            ];
-            for (at, (term, value)) in facts.into_iter().enumerate() {
-                stats
-                    .spawn((
-                        Node {
-                            flex_direction: FlexDirection::Column,
-                            align_items: AlignItems::Center,
-                            row_gap: Val::Px(1.0),
-                            padding: UiRect::vertical(Val::Px(7.0)),
-                            border: UiRect::left(Val::Px(if at > 0 { theme::RULE } else { 0.0 })),
-                            ..default()
-                        },
-                        BorderColor::all(theme::item_row_rule()),
-                    ))
-                    .with_children(|stat| {
-                        stat.spawn(caps(term, theme::item_term()));
-                        stat.spawn(look::figures(
-                            value.to_string(),
-                            theme::TEXT_SMALL,
-                            theme::REGULAR,
-                            theme::ITEM_VALUE,
-                        ));
-                    });
-            }
-        });
-    if let Some(material) = material {
-        shape_chips(panel, material, state.shape, names);
-    }
-    panel
-        .spawn(Node {
-            display: Display::Grid,
-            grid_template_columns: RepeatedGridTrack::flex(2, 1.0),
-            row_gap: Val::Px(5.0),
-            column_gap: Val::Px(5.0),
-            margin: UiRect::top(Val::Auto),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|actions| {
-            let other = match slot {
-                Slot::Hotbar(_) => "To backpack",
-                Slot::Backpack(_) => "To hotbar",
-            };
-            look::button(
-                actions,
-                other,
-                Control::QuickTransfer(slot),
-                Kind::Plain,
-                ACTION,
-            );
-            let split = look::button(actions, "Split", Control::Split(slot), Kind::Ghost, ACTION);
-            if stack.count < 2 {
-                actions.commands().entity(split).insert(InteractionDisabled);
-            }
-            look::button(
-                actions,
-                "Drop 1",
-                Control::DropOne(slot),
-                Kind::Ghost,
-                ACTION,
-            );
-            look::button(
-                actions,
-                "Drop stack",
-                Control::DropStack(slot),
-                Kind::Ghost,
-                ACTION,
-            );
-            if state.picked.is_some() {
-                let cancel = look::button(
-                    actions,
-                    "Cancel move",
-                    Control::CancelMove,
-                    Kind::Ghost,
-                    ACTION,
-                );
-                actions
-                    .commands()
-                    .entity(cancel)
-                    .entry::<Node>()
-                    .and_modify(|mut node| node.grid_column = GridPlacement::span(2));
-            }
-        });
-}
-
-/// The Shapes `material` can be placed in, each drawn in it. The choice is the
-/// Player's, not the stack's, so it shows on whichever solid is inspected.
-fn shape_chips(
-    panel: &mut ChildSpawnerCommands,
-    material: MaterialId,
-    chosen: ShapeId,
-    names: &Names,
-) {
-    let shapes: Vec<_> = names
-        .catalogue
-        .0
-        .shapes
-        .iter()
-        .filter(|s| !s.fixed)
-        .collect();
-    if shapes.len() < 2 {
-        return;
-    }
-    panel.spawn(caps("SHAPE", theme::ITEM_CAPTION));
-    panel
-        .spawn(Node {
-            display: Display::Grid,
-            grid_template_columns: RepeatedGridTrack::flex(shapes.len() as u16, 1.0),
-            column_gap: Val::Px(3.0),
-            margin: UiRect::top(Val::Px(-6.0)),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|chips| {
-            for shape in &shapes {
-                look::flat(
-                    chips,
-                    Control::Shape(shape.id),
-                    look::Flat {
-                        flavour: look::Flavour::ShapeChip,
-                        selected: shape.id == chosen,
-                    },
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(2.0),
-                        padding: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(4.0), Val::Px(3.0)),
-                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
-                        min_width: Val::Px(0.0),
-                        ..default()
-                    },
-                    |chip, ink| {
-                        item_icon(
-                            chip,
-                            Ok(Holding::solid(material, shape.id)),
-                            CHIP_ICON_PX,
-                            false,
-                        );
-                        chip.spawn((
-                            look::FlatInk,
-                            look::label(
-                                ui::title(&shape.name),
-                                INSPECTOR_CAPS_PX,
-                                theme::REGULAR,
-                                ink,
-                            ),
-                        ));
-                    },
-                );
-            }
-        });
-}
-
-fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
-    card.spawn((
-        Node {
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::axes(Val::Px(22.0), Val::Px(13.0)),
-            border: UiRect::top(Val::Px(theme::RULE)),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        BackgroundColor(theme::ITEM_FOOTER),
-        BorderColor::all(theme::item_footer_rule()),
-    ))
-    .with_children(|footer| {
-        footer
-            .spawn(Node {
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                margin: UiRect::bottom(Val::Px(8.0)),
-                ..default()
-            })
-            .with_children(|caption| {
-                caption.spawn(look::label(
-                    "Hotbar",
-                    theme::TEXT_EYEBROW,
-                    theme::MEDIUM,
-                    theme::INK,
-                ));
-                caption.spawn(look::label(
-                    "Quick access · the same slots you use in game",
-                    theme::ITEM_TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::ITEM_CAPTION,
-                ));
-            });
-        footer
-            .spawn(Node {
-                justify_content: JustifyContent::Center,
-                ..default()
-            })
-            .with_children(|row| grid(row, state, names, Slot::Hotbar, HOTBAR_SLOTS));
-        footer
-            .spawn(Node {
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                margin: UiRect::top(Val::Px(12.0)),
-                ..default()
-            })
-            .with_children(|actions| {
-                actions.spawn((look::paragraph(
-                    if state.container.is_some() {
-                        "Shift-click moves a stack between the Container and your Inventory."
-                    } else if state.survival {
-                        "Item counts stay intact when switching screens."
-                    } else {
-                        "Drag from the Catalogue into any slot, or set a count and transfer."
-                    },
-                    theme::TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::item_soft(),
-                    theme::LINE_HEIGHT,
-                ),));
-                look::button(
-                    actions,
-                    "Back to game",
-                    Control::Close,
-                    Kind::Ghost,
-                    look::COMPACT,
-                );
-            });
-    });
-}
-
 type Slots<'w, 's> = Query<
     'w,
     's,
@@ -1596,7 +1096,7 @@ type Slots<'w, 's> = Query<
     ),
 >;
 
-/// Hover, inspected, picked, selected and drop-target state, without a rebuild.
+/// Hover, picked, selected and drop-target state, without a rebuild.
 fn paint(
     (window, side, hotbar): (
         Res<InventoryWindow>,
@@ -1622,8 +1122,6 @@ fn paint(
             look::Frame::DropTarget
         } else if slot == Slot::Hotbar(hotbar.selected).into() && hotbar.outside.is_none() {
             look::Frame::Active
-        } else if window.inspected.map(SlotAddress::from) == Some(slot) {
-            look::Frame::Inspected
         } else if hovered.get() {
             look::Frame::Hover
         } else {
@@ -1658,7 +1156,7 @@ mod tests {
     use crate::server::player::Player;
     use bevy::camera::NormalizedRenderTarget;
     use bevy::picking::backend::HitData;
-    use bevy::picking::events::Pointer;
+    use bevy::picking::events::{Pointer, PointerPress};
     use bevy::picking::pointer::{Location, PointerId};
     use tesserae_core::MaterialId;
 
@@ -1689,6 +1187,7 @@ mod tests {
             .init_resource::<super::super::drops::Looks>()
             .init_resource::<super::super::menu_ui::Searches>()
             .init_resource::<Time<Real>>()
+            .init_resource::<Time>()
             .insert_resource(super::super::edit::Catalogue(ContentCatalogue {
                 materials: vec![
                     material(0, "core:air", false),
@@ -1737,8 +1236,51 @@ mod tests {
             Player::at(Vec3::ZERO),
             crate::server::inventory::Inventory(held),
         ));
+        super::super::frame::testing::support(&mut app);
         server(&mut app);
         app
+    }
+
+    pub(super) fn texts(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .collect()
+    }
+
+    pub(super) fn shown_prompts(app: &mut App) -> Vec<(String, String)> {
+        super::super::frame::testing::prompts(app)
+    }
+
+    pub(super) fn bar(prompts: &[(&str, &str)]) -> Vec<(String, String)> {
+        prompts
+            .iter()
+            .map(|(cap, label)| (cap.to_string(), label.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn the_inventory_is_one_panel_with_its_inputs_as_prompts() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        assert_eq!(
+            shown_prompts(&mut app),
+            bar(&[
+                ("⇧ Click", "Quick move"),
+                ("Right-click", "Split"),
+                ("Q", "Drop"),
+                ("1–9", "To hotbar"),
+                ("S", "Sort"),
+                ("I", "Close"),
+                ("Esc", "Back"),
+            ])
+        );
+        let shown = texts(&mut app);
+        for chrome in ["Inventory", "Back to game", "ITEM DETAILS"] {
+            assert!(!shown.iter().any(|t| t == chrome), "{chrome} in {shown:?}");
+        }
+        assert!(shown.iter().any(|t| t == "Backpack"));
     }
 
     /// One Server tick, then one Client frame.
@@ -1851,68 +1393,6 @@ mod tests {
         assert!(shown(&mut app), "the search keeps its letters");
     }
 
-    /// The Shape a chip, or the details header, draws its Item in.
-    fn preview_in<C: Component>(app: &mut App, parent: impl Fn(&C) -> bool) -> Option<Holding> {
-        let world = app.world_mut();
-        let (_, children) = world
-            .query::<(&C, &Children)>()
-            .iter(world)
-            .find(|(c, _)| parent(c))?;
-        children
-            .iter()
-            .find_map(|child| world.get::<TilePreview>(child))
-            .map(|tile| tile.0)
-    }
-
-    #[test]
-    fn each_shape_chip_previews_the_item_and_choosing_one_redraws_the_header_and_the_hand() {
-        use tesserae_core::{SHAPE_FULL_CUBE, SHAPE_SLAB};
-        let mut app = app();
-        app.world_mut()
-            .resource_mut::<super::super::edit::Catalogue>()
-            .0
-            .shapes = vec![
-            shape(SHAPE_FULL_CUBE, "cube", false),
-            shape(SHAPE_SLAB, "slab", true),
-        ];
-        app.world_mut().write_message(InventoryIntent::Take {
-            material: SAND,
-            count: 5,
-            into: tesserae_core::inventory::Destination::Slot(Slot::Hotbar(3)),
-        });
-        server(&mut app);
-        app.insert_resource(super::super::edit::Hotbar::holding(
-            3,
-            Holding::solid(SAND, SHAPE_FULL_CUBE),
-        ));
-        press(&mut app, KeyCode::KeyI);
-        click(&mut app, Slot::Hotbar(3));
-        click(&mut app, Slot::Hotbar(3));
-        let chip = |app: &mut App, id| preview_in(app, |c: &Control| *c == Control::Shape(id));
-        assert_eq!(
-            chip(&mut app, SHAPE_SLAB),
-            Some(Holding::solid(SAND, SHAPE_SLAB))
-        );
-        assert_eq!(
-            chip(&mut app, SHAPE_FULL_CUBE),
-            Some(Holding::solid(SAND, SHAPE_FULL_CUBE))
-        );
-        let head = |app: &mut App| preview_in(app, |_: &HeadIcon| true);
-        assert_eq!(head(&mut app), Some(Holding::solid(SAND, SHAPE_FULL_CUBE)));
-
-        let slab = find(&mut app, Control::Shape(SHAPE_SLAB));
-        app.world_mut().trigger(Activate { entity: slab });
-        app.update();
-        assert_eq!(head(&mut app), Some(Holding::solid(SAND, SHAPE_SLAB)));
-        let hotbar = app.world().resource::<super::super::edit::Hotbar>();
-        assert_eq!(hotbar.shape, SHAPE_SLAB);
-        assert_eq!(
-            hotbar.held(),
-            Holding::solid(SAND, SHAPE_SLAB),
-            "the selected slot now places a slab"
-        );
-    }
-
     #[test]
     fn a_slot_draws_its_item_as_the_engine_s_tile_of_the_material_it_places() {
         let mut app = app();
@@ -2012,13 +1492,6 @@ mod tests {
         let entity = find(app, control);
         app.world_mut().trigger(Activate { entity });
         server(app);
-    }
-
-    /// Lets enough time pass that the next click is not a double-click.
-    pub(super) fn later(app: &mut App) {
-        app.world_mut()
-            .resource_mut::<Time<Real>>()
-            .advance_by(std::time::Duration::from_secs(1));
     }
 
     fn drag(app: &mut App, material: MaterialId, onto: Slot) {
@@ -2246,49 +1719,6 @@ mod tests {
     }
 
     #[test]
-    fn the_details_buttons_drop_one_or_the_whole_stack_and_the_servers_answer_makes_the_toast() {
-        let mut app = app();
-        press(&mut app, KeyCode::KeyI);
-        click(&mut app, Slot::Backpack(0));
-        let count = app
-            .world()
-            .resource::<Held>()
-            .0
-            .get(Slot::Backpack(0))
-            .unwrap()
-            .count;
-        let one = find(&mut app, Control::DropOne(Slot::Backpack(0)));
-        app.world_mut().trigger(Activate { entity: one });
-        assert_eq!(
-            intents(&app),
-            [InventoryIntent::Drop {
-                slot: Slot::Backpack(0),
-                count: 1
-            }]
-        );
-        let all = find(&mut app, Control::DropStack(Slot::Backpack(0)));
-        app.world_mut().trigger(Activate { entity: all });
-        assert_eq!(
-            intents(&app).last(),
-            Some(&InventoryIntent::Drop {
-                slot: Slot::Backpack(0),
-                count
-            })
-        );
-
-        let mut after = app.world().resource::<Held>().0.clone();
-        after.take_from(Slot::Backpack(0), count).unwrap();
-        app.world_mut().write_message(InventoryChanged(after));
-        app.update();
-        let said = app
-            .world_mut()
-            .query::<&Text>()
-            .iter(app.world())
-            .any(|t| t.0 == format!("Dropped {count} Rock."));
-        assert!(said, "the notice names what the Server took out");
-    }
-
-    #[test]
     fn c_opens_the_inventory_with_the_catalogue_search_focused() {
         let mut app = app();
         press(&mut app, KeyCode::KeyC);
@@ -2356,62 +1786,251 @@ mod tests {
         assert_eq!(count(&mut app, Slot::Backpack(0)).as_deref(), Some("64"));
     }
 
+    fn hover<C: Component + PartialEq>(app: &mut App, wanted: C) {
+        let entity = find(app, wanted);
+        super::super::frame::testing::hover(app, entity);
+    }
+
+    fn holding(app: &mut App, keys: &[KeyCode], tap: KeyCode) {
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        for &key in keys {
+            input.press(key);
+        }
+        press(app, tap);
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        for &key in keys {
+            input.release(key);
+        }
+        input.clear();
+    }
+
+    fn slot(at: Slot) -> Control {
+        Control::Slot(at.into())
+    }
+
+    /// Every intent the window sent since the last call.
+    fn sent(app: &mut App) -> Vec<InventoryIntent> {
+        let mut messages = app.world_mut().resource_mut::<Messages<InventoryIntent>>();
+        let intents = messages.get_cursor().read(&messages).copied().collect();
+        messages.clear();
+        intents
+    }
+
     #[test]
-    fn each_take_gesture_lands_the_item_and_count_through_the_server() {
+    fn q_drops_one_of_the_pointed_stack_and_shift_q_all_of_it() {
         let mut app = app();
         press(&mut app, KeyCode::KeyI);
+        hover(&mut app, slot(Slot::Backpack(1)));
+        sent(&mut app);
+        press(&mut app, KeyCode::KeyQ);
+        assert_eq!(
+            sent(&mut app),
+            [InventoryIntent::Drop {
+                slot: Slot::Backpack(1),
+                count: 1
+            }]
+        );
+        holding(&mut app, &[KeyCode::ShiftLeft], KeyCode::KeyQ);
+        assert_eq!(
+            sent(&mut app),
+            [InventoryIntent::Drop {
+                slot: Slot::Backpack(1),
+                count: 6
+            }]
+        );
+        assert!(shown(&mut app), "Q is the prompt's, not a close");
+
+        let mut after = app.world().resource::<Held>().0.clone();
+        after.take_from(Slot::Backpack(1), 6).unwrap();
+        app.world_mut().write_message(InventoryChanged(after));
+        app.update();
+        assert!(
+            texts(&mut app).iter().any(|t| t == "Dropped 6 Rock."),
+            "the notice names what the Server took out"
+        );
+    }
+
+    #[test]
+    fn a_slot_key_sends_the_pointed_stack_to_that_hotbar_slot() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        hover(&mut app, slot(Slot::Backpack(1)));
+        press(&mut app, KeyCode::Digit5);
+        server(&mut app);
+        assert_eq!(count(&mut app, Slot::Backpack(1)), None);
+        assert_eq!(count(&mut app, Slot::Hotbar(4)).as_deref(), Some("6"));
+    }
+
+    #[test]
+    fn right_click_splits_the_pointed_stack_and_s_sorts() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        let entity = find(&mut app, slot(Slot::Backpack(0)));
+        app.world_mut().trigger(PointerPress {
+            entity,
+            pointer: Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            ),
+            button: PointerButton::Secondary,
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            count: 1,
+        });
+        server(&mut app);
+        assert_eq!(count(&mut app, Slot::Backpack(0)).as_deref(), Some("32"));
+        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("32"));
+        press(&mut app, KeyCode::KeyS);
+        server(&mut app);
+        assert_eq!(count(&mut app, Slot::Backpack(0)).as_deref(), Some("64"));
+        assert_eq!(count(&mut app, Slot::Backpack(1)).as_deref(), Some("6"));
+    }
+
+    /// The text and the Material tiles drawn in the tooltip, and whether it
+    /// offers anything to press.
+    pub(super) fn tooltip(app: &mut App) -> Option<(Vec<String>, Vec<Holding>, bool)> {
+        let world = app.world_mut();
+        let tip = world
+            .query_filtered::<Entity, With<tip::Tooltip>>()
+            .iter(world)
+            .next()?;
+        let world = app.world();
+        let inside: Vec<Entity> = world
+            .entity(tip)
+            .get::<Children>()
+            .into_iter()
+            .flat_map(|_| {
+                let mut all = Vec::new();
+                let mut stack = vec![tip];
+                while let Some(at) = stack.pop() {
+                    all.push(at);
+                    if let Some(children) = world.get::<Children>(at) {
+                        stack.extend(children.iter().rev());
+                    }
+                }
+                all
+            })
+            .collect();
+        let texts = inside
+            .iter()
+            .filter_map(|&e| world.get::<Text>(e).map(|t| t.0.clone()))
+            .collect();
+        let tiles = inside
+            .iter()
+            .filter_map(|&e| world.get::<TilePreview>(e).map(|t| t.0))
+            .collect();
+        let pressable = inside
+            .iter()
+            .any(|&e| world.get::<bevy::ui_widgets::Button>(e).is_some());
+        Some((texts, tiles, pressable))
+    }
+
+    #[test]
+    fn the_tooltip_names_the_pointed_stack_and_lists_its_shapes_without_offering_them() {
+        use tesserae_core::{SHAPE_FULL_CUBE, SHAPE_SLAB};
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::edit::Catalogue>()
+            .0
+            .shapes = vec![
+            shape(SHAPE_FULL_CUBE, "cube", false),
+            shape(SHAPE_SLAB, "slab", true),
+        ];
+        app.world_mut().write_message(InventoryIntent::Take {
+            material: SAND,
+            count: 5,
+            into: tesserae_core::inventory::Destination::Slot(Slot::Hotbar(3)),
+        });
+        server(&mut app);
+        press(&mut app, KeyCode::KeyI);
+        hover(&mut app, slot(Slot::Hotbar(3)));
+        let (texts, tiles, pressable) = tooltip(&mut app).expect("a tooltip");
+        assert_eq!(texts[0], "Sand");
+        assert!(
+            texts.iter().any(|t| t.starts_with("5 / 64 · t:sand")),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|t| t == "Places as"));
+        assert_eq!(
+            tiles,
+            [
+                Holding::solid(SAND, SHAPE_FULL_CUBE),
+                Holding::solid(SAND, SHAPE_SLAB)
+            ]
+        );
+        assert!(!pressable, "the Shape is chosen in the hand, not here");
+
+        hover(&mut app, slot(Slot::Hotbar(8)));
+        assert!(tooltip(&mut app).is_none(), "an empty slot names nothing");
+    }
+
+    #[test]
+    fn a_catalogue_tile_takes_a_stack_on_click_one_on_shift_click_and_fills_a_hotbar_slot() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        hover(&mut app, CatalogueControl::Tile(SAND));
+        assert_eq!(
+            shown_prompts(&mut app),
+            bar(&[
+                ("Click", "Take stack"),
+                ("⇧ Click", "Take one"),
+                ("1–9", "To hotbar"),
+                ("/", "Search"),
+                ("I", "Close"),
+                ("Esc", "Back"),
+            ])
+        );
+        let (texts, _, _) = tooltip(&mut app).expect("a tooltip");
+        assert_eq!(texts[..2], ["Sand".to_string(), "t:sand · solid".into()]);
         activate(&mut app, CatalogueControl::Tile(SAND));
-        activate(&mut app, CatalogueControl::Count(16));
-        activate(&mut app, CatalogueControl::ToBackpack);
-        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("16"));
-        activate(&mut app, CatalogueControl::ToHotbar);
-        assert_eq!(count(&mut app, Slot::Hotbar(3)).as_deref(), Some("16"));
-
-        activate(&mut app, CatalogueControl::Count(1));
-        later(&mut app);
-        activate(&mut app, CatalogueControl::Tile(WATER));
-        assert_eq!(count(&mut app, Slot::Hotbar(3)).as_deref(), Some("16"));
-        activate(&mut app, CatalogueControl::Tile(WATER));
-        assert_eq!(
-            count(&mut app, Slot::Hotbar(3)).as_deref(),
-            Some("1"),
-            "a double-click takes into the selected hotbar slot"
-        );
-        assert_eq!(
-            count(&mut app, Slot::Backpack(2)).as_deref(),
-            Some("32"),
-            "and the sand there moves to the backpack"
-        );
-
-        later(&mut app);
+        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("64"));
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ShiftLeft);
-        activate(&mut app, CatalogueControl::Tile(SAND));
-        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("33"));
+        activate(&mut app, CatalogueControl::Tile(WATER));
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release(KeyCode::ShiftLeft);
-
-        activate(&mut app, CatalogueControl::Count(64));
+        assert_eq!(count(&mut app, Slot::Backpack(3)).as_deref(), Some("1"));
+        hover(&mut app, CatalogueControl::Tile(ROCK));
+        press(&mut app, KeyCode::Digit9);
+        server(&mut app);
+        assert_eq!(count(&mut app, Slot::Hotbar(8)).as_deref(), Some("64"));
         drag(&mut app, ROCK, Slot::Backpack(10));
         assert_eq!(count(&mut app, Slot::Backpack(10)).as_deref(), Some("64"));
     }
 
     #[test]
-    fn the_count_steps_between_one_and_the_stack_limit() {
+    fn search_waits_behind_its_icon_until_its_prompt_opens_it() {
         let mut app = app();
         press(&mut app, KeyCode::KeyI);
-        activate(&mut app, CatalogueControl::Tile(SAND));
-        activate(&mut app, CatalogueControl::Count(1));
-        activate(&mut app, CatalogueControl::Fewer);
-        activate(&mut app, CatalogueControl::More);
-        activate(&mut app, CatalogueControl::More);
-        activate(&mut app, CatalogueControl::ToBackpack);
-        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("3"));
-        activate(&mut app, CatalogueControl::Count(64));
-        activate(&mut app, CatalogueControl::More);
-        activate(&mut app, CatalogueControl::ToHotbar);
-        assert_eq!(count(&mut app, Slot::Hotbar(3)).as_deref(), Some("64"));
+        let search = app
+            .world_mut()
+            .query_filtered::<Entity, With<SearchBox>>()
+            .single(app.world())
+            .unwrap();
+        let display = |app: &mut App| {
+            let world = app.world_mut();
+            let slot = world
+                .query_filtered::<&Node, With<catalogue::SearchSlot>>()
+                .single(world)
+                .unwrap();
+            slot.display
+        };
+        assert_eq!(display(&mut app), Display::None);
+        hover(&mut app, CatalogueControl::Tile(SAND));
+        press(&mut app, KeyCode::Slash);
+        assert_eq!(
+            app.world()
+                .resource::<bevy::input_focus::InputFocus>()
+                .get(),
+            Some(search)
+        );
+        assert_eq!(display(&mut app), Display::Flex);
     }
 }

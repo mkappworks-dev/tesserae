@@ -1,7 +1,8 @@
-//! Draft preferences become active only after a successful Apply.
+//! Every change applies at once and is saved; a display change asks to be
+//! kept before it stays.
 
 mod distance;
-mod drafts;
+mod operations;
 mod pages;
 mod widgets;
 
@@ -17,7 +18,7 @@ use bevy::{
 };
 
 pub(super) use distance::*;
-pub(super) use drafts::*;
+pub(super) use operations::*;
 pub(super) use pages::*;
 pub(super) use widgets::*;
 
@@ -26,9 +27,11 @@ type Conflict = (Action, [Option<Binding>; 2], Vec<(Action, usize)>);
 #[derive(Resource, Default)]
 pub(super) struct Settings {
     pub open: bool,
-    draft: Option<(Bindings, Preferences)>,
     capture: Option<(Device, Action, usize, bool)>,
     conflict: Option<Conflict>,
+    keep: Option<Keep>,
+    /// Changed preferences or bindings wait for the frame's end to be saved,
+    /// so a dragged slider writes the file once.
     unsaved: bool,
     show_reference: bool,
     /// Whether Controller's Touch controls are expanded.
@@ -42,34 +45,48 @@ pub(super) struct Settings {
     last_controls: super::menu_ui::Tab,
     /// The category F10 reopens.
     last: super::menu_ui::Tab,
-    pending: Option<super::menu_ui::Tab>,
 }
 impl Settings {
-    pub(super) fn binding_visible(
-        &self,
-        action: Action,
-        query: &str,
-        bindings: &Bindings,
-        labels: &super::actions::Labels,
-    ) -> bool {
-        (!query.trim().is_empty() || category(action) == self.category.label())
-            && super::menu_ui::matches(
-                query,
-                &format!(
-                    "{} {} {} {}",
-                    action_name(action),
-                    category(action),
-                    bindings.label_for(Device::KeyboardMouse, action, labels),
-                    binding_display(bindings.label_for(Device::KeyboardMouse, action, labels))
-                ),
-            )
-    }
-
     pub(super) fn modal(&self) -> bool {
-        self.unsaved || self.conflict.is_some() || self.resetting
+        self.conflict.is_some() || self.resetting || self.keep.is_some()
     }
     pub fn capturing(&self) -> bool {
         self.capture.is_some()
+    }
+}
+
+/// The display preferences a change may need to undo, and how long is left
+/// to keep the change.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Keep {
+    previous: Display,
+    left_s: f32,
+}
+
+pub(super) const KEEP_S: f32 = 10.0;
+
+/// The preferences a bad value of could leave the screen unusable.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Display {
+    sync: bool,
+    cap: Option<u32>,
+    anti_aliasing: super::anti_alias::AntiAliasing,
+    scale: u32,
+}
+impl Display {
+    fn of(p: &Preferences) -> Self {
+        Self {
+            sync: p.display_sync,
+            cap: p.fps_cap,
+            anti_aliasing: p.anti_aliasing,
+            scale: p.render_scale,
+        }
+    }
+    fn restore(self, p: &mut Preferences) {
+        p.display_sync = self.sync;
+        p.fps_cap = self.cap;
+        p.anti_aliasing = self.anti_aliasing;
+        p.render_scale = self.scale;
     }
 }
 
@@ -77,7 +94,7 @@ impl Settings {
 pub(super) struct Panel;
 #[derive(Component)]
 pub(super) struct SettingsScroll;
-#[derive(Default, Clone, Copy, PartialEq)]
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub(super) enum Category {
     #[default]
     Movement,
@@ -85,6 +102,7 @@ pub(super) enum Category {
     Interface,
 }
 impl Category {
+    const ALL: [Category; 3] = [Self::Movement, Self::Building, Self::Interface];
     fn label(self) -> &'static str {
         match self {
             Self::Movement => "Movement",
@@ -93,37 +111,38 @@ impl Category {
         }
     }
 }
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub(super) enum Operation {
     Navigate(super::menu_ui::Tab),
     Category(Category),
-    Apply,
+    /// Q and E: the previous or next binding category.
+    CategoryStep(i8),
     Cancel,
     Back,
-    Discard,
-    Stay,
     Reset,
     ConfirmReset,
     CancelReset,
-    Reference,
+    KeepDisplay,
+    RevertDisplay,
+    Reference(bool),
     TouchControls,
     EffectControls,
-    ResetAction(Device, Action),
+    ResetAction(Action),
     Capture(Device, Action, usize),
     Clear(Device, Action, usize),
     Replace,
     CancelConflict,
     Sprint(crate::server::player::SpeedLevel),
     Removal(bool),
-    Repeat,
-    Ghost,
-    Compass,
-    Minimap,
+    Repeat(bool),
+    Ghost(bool),
+    Compass(bool),
+    Minimap(bool),
     MinimapSize(super::minimap::MinimapSize),
-    Invert,
-    PadInvert,
+    Invert(bool),
+    PadInvert(bool),
     PadCrouch(bool),
-    TouchInvert,
+    TouchInvert(bool),
     TouchMirror(bool),
     TouchSize(super::profile::TouchSize),
     ScrollDirection(bool),
@@ -139,21 +158,17 @@ pub(super) enum Operation {
 }
 
 pub(super) fn plugin(app: &mut App) {
+    super::frame::plugin(app);
     app.init_session_state::<Settings>()
         .init_session_state::<super::menu::Menu>()
         .init_resource::<bevy::input_focus::InputFocus>()
         .add_observer(activate)
+        .add_observer(step)
+        .add_observer(run)
         .add_observer(scalar_changed)
-        .add_observer(toggle_select)
         .add_systems(
             Update,
-            (
-                close_selects.before(super::menu::toggle).before(capture),
-                place_selects,
-                select_visuals,
-                checkbox_visuals,
-            )
-                .run_if(crate::session::in_menus),
+            (choice_visuals, cap_visuals, show_help.after(render)).run_if(crate::session::in_menus),
         )
         .add_systems(
             PreUpdate,
@@ -172,24 +187,14 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (capture, render)
+            (count_down, capture, render)
                 .chain()
                 .before(super::input::resolve)
                 .run_if(crate::session::in_menus),
-        );
+        )
+        .add_systems(Last, persist.run_if(crate::session::in_menus));
 }
-fn launch(
-    mut settings: ResMut<Settings>,
-    bindings: Res<Bindings>,
-    preferences: Res<Preferences>,
-    mut searches: ResMut<super::menu_ui::Searches>,
-) {
-    if std::env::var_os("TESSERAE_SCREENSHOT").is_some()
-        && let Ok(query) = std::env::var("TESSERAE_SCREENSHOT_SEARCH")
-    {
-        searches.catalogue = query.clone();
-        searches.bindings = query;
-    }
+fn launch(mut settings: ResMut<Settings>, preferences: Res<Preferences>) {
     if std::env::var_os("TESSERAE_SCREENSHOT_SETTINGS").is_some()
         || std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some()
     {
@@ -204,7 +209,6 @@ fn launch(
         };
         settings.open = true;
         settings.dirty = true;
-        settings.draft = Some((bindings.clone(), preferences.clone()));
         if std::env::var_os("TESSERAE_SCREENSHOT").is_some() {
             match std::env::var("TESSERAE_SCREENSHOT_SETTINGS_DIALOG").as_deref() {
                 Ok("capture") => {
@@ -212,9 +216,11 @@ fn launch(
                     settings.capture = Some((Device::KeyboardMouse, Action::Forward, 0, true));
                 }
                 Ok("reset") => settings.resetting = true,
-                Ok("unsaved") => {
-                    settings.draft.as_mut().unwrap().1.invert_y = !preferences.invert_y;
-                    settings.unsaved = true;
+                Ok("keep") => {
+                    settings.keep = Some(Keep {
+                        previous: Display::of(&preferences),
+                        left_s: KEEP_S,
+                    })
                 }
                 _ => {}
             }
@@ -222,21 +228,18 @@ fn launch(
     }
 }
 
-/// Opens Settings at the category used last, drafting what is applied now.
+/// Opens Settings at the category used last.
 #[derive(bevy::ecs::system::SystemParam)]
 pub(super) struct Opener<'w, 's> {
     settings: ResMut<'w, Settings>,
-    bindings: Res<'w, Bindings>,
-    preferences: Res<'w, Preferences>,
     store: Res<'w, Store>,
     cursor:
         Query<'w, 's, &'static mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
 }
 
 impl Opener<'_, '_> {
-    /// At the category used last.
-    /// Opening Settings again while they show, from the header's button,
-    /// keeps the draft.
+    /// At the category used last; opening Settings again while they show
+    /// does nothing.
     pub(super) fn open(&mut self) {
         if self.settings.open {
             return;
@@ -250,7 +253,6 @@ impl Opener<'_, '_> {
         settings.open = true;
         settings.notice = self.store.error.clone().unwrap_or_default();
         settings.tab = tab;
-        settings.draft = Some((self.bindings.clone(), self.preferences.clone()));
         settings.dirty = true;
         for mut cursor in &mut self.cursor {
             cursor.grab_mode = bevy::window::CursorGrabMode::None;
@@ -300,6 +302,9 @@ pub(super) fn open_shortcut(
 mod tests;
 
 #[cfg(test)]
-pub(super) fn observe_drafts_for_test(app: &mut App) {
-    app.add_observer(activate).add_observer(scalar_changed);
+pub(super) fn observe_operations_for_test(app: &mut App) {
+    app.add_observer(activate)
+        .add_observer(step)
+        .add_observer(run)
+        .add_observer(scalar_changed);
 }

@@ -22,6 +22,11 @@ use super::theme;
 #[derive(Component, Default)]
 pub(super) struct Frame;
 
+/// A control only the pointer reaches, such as the icons on a World's slot:
+/// hover, Tab and the D-pad pass over it, and its keys are in the prompt bar.
+#[derive(Component)]
+pub(super) struct PointerOnly;
+
 /// The control a [`Frame`] focuses when it opens; without one, its first.
 #[derive(Component)]
 pub(super) struct Autofocus;
@@ -46,10 +51,6 @@ const PRESS_DARKEN: f32 = 0.06;
 
 /// What a prompt's cap reads, and which key fires it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the screens that move onto the frame use it")
-)]
 pub(super) enum Cap {
     Tab,
     Enter,
@@ -58,6 +59,8 @@ pub(super) enum Cap {
     Esc,
     Del,
     Letter(char),
+    /// A pointer gesture or a key range, named only: it fires nothing.
+    Text(&'static str),
 }
 
 impl Cap {
@@ -69,6 +72,7 @@ impl Cap {
             Cap::Esc => "Esc".into(),
             Cap::Del => "Del".into(),
             Cap::Letter(c) => c.to_ascii_uppercase().to_string(),
+            Cap::Text(text) => text.into(),
         }
     }
 
@@ -108,6 +112,7 @@ impl Cap {
                 let at = (c.to_ascii_uppercase() as u8 - b'A') as usize;
                 std::slice::from_ref(&LETTERS[at])
             }
+            Cap::Letter('/') => &[KeyCode::Slash],
             _ => &[],
         }
     }
@@ -119,7 +124,7 @@ impl Cap {
             Cap::CtrlEnter => Some(GamepadButton::Start),
             Cap::Esc => Some(GamepadButton::East),
             Cap::Del => Some(GamepadButton::North),
-            Cap::Tab | Cap::Letter(_) => None,
+            Cap::Tab | Cap::Letter(_) | Cap::Text(_) => None,
         }
     }
 }
@@ -152,10 +157,6 @@ impl<A: Bundle> Prompt<A> {
 
     /// The controller button that also fires it: X for a screen's secondary
     /// action, Y for its destructive or reset one.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the screens that move onto the frame use it")
-    )]
     pub(super) fn pad(self, button: GamepadButton) -> Self {
         Self {
             pad: Some(button),
@@ -324,10 +325,6 @@ pub(super) struct MenuSheet<'a, A> {
 }
 
 /// Spawns the sheet with `body` scrolling inside it, and returns the main button.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the screens that move onto the frame use it")
-)]
 pub(super) fn menu_sheet<A: Bundle>(
     main: &mut ChildSpawnerCommands,
     sheet: MenuSheet<A>,
@@ -513,6 +510,7 @@ fn framed(entity: Entity, parents: &Query<&ChildOf>, frames: &Query<(), With<Fra
 type Focusable = (
     With<Button>,
     Without<PromptKey>,
+    Without<PointerOnly>,
     Without<InteractionDisabled>,
 );
 
