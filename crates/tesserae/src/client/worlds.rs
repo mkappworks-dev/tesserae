@@ -92,6 +92,11 @@ enum Screen {
     Edit(PathBuf),
     Delete(PathBuf),
     Trust(Next),
+    /// Trust asked in a dialog over step `on`, which moves on to `to` once granted.
+    StepTrust {
+        on: Step,
+        to: Step,
+    },
     Opening(String),
 }
 
@@ -483,6 +488,8 @@ pub(super) enum Act {
     Trust,
     /// The Mods step's primary button: trusts what the panel lists, then shows the Biomes.
     TrustMods,
+    /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
+    TrustStep,
     Dismiss,
     Disclose(Disclosure),
     ModTab(Option<String>),
@@ -1107,6 +1114,7 @@ fn handle(
             | Act::Voxel(..)
             | Act::Mode(..)
             | Act::TrustMods
+            | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
             Act::Home
             | Act::Worlds
@@ -1177,7 +1185,9 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 None if l.form.unchanged_from(&l.initial) => l.show(Screen::Worlds),
                 None => l.show(Screen::Discard(step)),
             },
-            Screen::Discard(step) => l.show(Screen::Create(step)),
+            Screen::Discard(step) | Screen::StepTrust { on: step, .. } => {
+                l.show(Screen::Create(step))
+            }
             Screen::Delete(path) => l.show(Screen::Edit(path)),
             Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
             Screen::Worlds | Screen::Library => l.show(Screen::Title),

@@ -122,6 +122,18 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             go(l, cx.installed, cx.previewer, Step::Biomes);
         }
+        Act::TrustStep => {
+            let Screen::StepTrust { on, to } = l.screen else {
+                return;
+            };
+            l.screen = Screen::Create(on);
+            if let Err(e) = cx.installed.grant_all() {
+                l.form.problem = Some(format!("Could not record Trust: {e}"));
+                l.version += 1;
+                return;
+            }
+            go(l, cx.installed, cx.previewer, to);
+        }
         Act::Next => {
             if let Screen::Create(step) = l.screen
                 && let Some(next) = step.next()
@@ -198,6 +210,9 @@ pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Preview
     if let Some(game) = l.form.game.clone() {
         l.clashes = installed.clashes(&game, &l.form.mods);
     }
+    if current == Step::Game && target > Step::Game && !game_trusted(l, installed, target) {
+        return;
+    }
     // Biomes is gated by `read_biomes`, which also covers a jump there from Review.
     if current <= Step::Mods && target > Step::Biomes && !mods_trusted(l, installed) {
         return;
@@ -206,6 +221,22 @@ pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Preview
         return;
     }
     l.show(Screen::Create(target));
+}
+
+/// Whether the chosen Game may run. Its previews on the later steps run its Generator, so leaving
+/// the Game step asks for its Trust in a dialog when it is missing.
+fn game_trusted(l: &mut Launcher, installed: &mut Installed, to: Step) -> bool {
+    let ids: Vec<String> = l.form.game.iter().cloned().collect();
+    if let Err(e) = installed.prepare_trust(&ids) {
+        l.form.problem = Some(format!("Could not check Trust: {e}"));
+        l.show(Screen::Create(Step::Game));
+        return false;
+    }
+    if installed.untrusted.is_empty() {
+        return true;
+    }
+    l.show(Screen::StepTrust { on: Step::Game, to });
+    false
 }
 
 /// Whether the chosen Game and Mods may run. Leaving the Mods step reads their Biomes, which runs

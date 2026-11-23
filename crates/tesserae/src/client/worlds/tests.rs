@@ -776,6 +776,11 @@ fn picking_a_game_ticks_what_it_suggests_and_a_suggestion_can_be_unticked() {
     );
 }
 
+/// Marks `ids` untrusted, as the fake's Trust check would report them from now on.
+fn untrust(app: &mut App, ids: &[&str]) {
+    app.world_mut().resource_mut::<Installed>().untrusted = Installed::fake(None, ids).untrusted;
+}
+
 fn installed_required(app: &App) -> Vec<String> {
     app.world().resource::<Installed>().required("terra")
 }
@@ -785,11 +790,12 @@ fn the_rail_cannot_skip_trust_on_the_mods_step() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
-        Installed::fake(Some(("terra", "0.1.0")), &["terra", "lamps"]).with_mod("lamps", &[]),
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
     app.update();
     new_world(&mut app);
     act(&mut app, Act::Next);
+    untrust(&mut app, &["lamps"]);
     act(&mut app, Act::ToggleMod(0));
     for target in [Step::Biomes, Step::Review] {
         act(&mut app, Act::Step(target));
@@ -1473,12 +1479,14 @@ fn next_on_mods_asks_for_trust_in_place_and_then_shows_the_biomes() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
-        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
     app.insert_resource(Previewer(fake_preview));
     app.update();
     new_world(&mut app);
     act(&mut app, Act::Next);
+    untrust(&mut app, &["lamps"]);
+    act(&mut app, Act::ToggleMod(0));
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
     assert!(launcher(&app).trust_asked);
@@ -1495,12 +1503,13 @@ fn changing_the_mods_hides_the_trust_panel_until_next_asks_again() {
     let worlds = Directory::new();
     let mut app = app(
         &worlds,
-        Installed::fake(Some(("terra", "0.1.0")), &["terra"]).with_mod("lamps", &[]),
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
     );
     app.insert_resource(Previewer(fake_preview));
     app.update();
     new_world(&mut app);
     act(&mut app, Act::Next);
+    untrust(&mut app, &["lamps"]);
     act(&mut app, Act::Next);
     assert!(launcher(&app).trust_asked);
     act(&mut app, Act::ToggleMod(0));
@@ -2296,4 +2305,39 @@ fn a_new_world_starts_on_the_game_step_with_terra_first_and_the_choice_marked() 
         Screen::Create(Step::World),
         "the chosen Game again moves on"
     );
+}
+
+#[test]
+fn leaving_the_game_step_asks_to_trust_the_game_and_cancel_stays() {
+    let worlds = Directory::new();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.update();
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(shown(&mut app, "Trust this item to continue?"));
+    assert!(shown(&mut app, "Choose a Game"), "over the Game step");
+    assert_eq!(
+        focused_act(&app),
+        Some(Act::Back),
+        "Cancel, so Enter alone never trusts"
+    );
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert_eq!(modal_groups(&mut app), 0);
+    act(&mut app, Act::Back);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Worlds,
+        "Cancel on the Game step leaves an untouched setup"
+    );
+    act(&mut app, Act::New);
+    act(&mut app, Act::Step(Step::Review));
+    assert_eq!(modal_groups(&mut app), 1, "the rail asks too");
+    act(&mut app, Act::TrustStep);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    assert!(app.world().resource::<Installed>().untrusted.is_empty());
 }

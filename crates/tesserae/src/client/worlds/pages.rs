@@ -45,7 +45,7 @@ pub(super) fn spawn(
     let page = match &l.screen {
         Screen::Delete(_) if l.from_menu => Screen::Worlds,
         Screen::Delete(path) => Screen::Edit(path.clone()),
-        Screen::Discard(step) => Screen::Create(*step),
+        Screen::Discard(step) | Screen::StepTrust { on: step, .. } => Screen::Create(*step),
         screen => screen.clone(),
     };
     // Screens move onto the frame one at a time; the rest keep the old header and footer.
@@ -98,7 +98,7 @@ pub(super) fn spawn(
                 Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
                 Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
                 Screen::Create(Step::Review) => review(main, l, installed, scroll),
-                Screen::Delete(_) | Screen::Discard(_) => None,
+                Screen::Delete(_) | Screen::Discard(_) | Screen::StepTrust { .. } => None,
                 Screen::Edit(path) => edit(main, l, installed, path, scroll),
                 Screen::Trust(next) => trust(main, l, installed, next, scroll),
                 Screen::Opening(name) => {
@@ -117,6 +117,7 @@ pub(super) fn spawn(
         match &l.screen {
             Screen::Delete(path) => focus = delete(root, l, path),
             Screen::Discard(_) => focus = discard(root),
+            Screen::StepTrust { .. } => focus = step_trust(root, installed),
             _ if resetting => focus = reset(root),
             _ => {}
         }
@@ -3756,6 +3757,53 @@ fn discard(root: &mut ChildSpawnerCommands) -> Option<Entity> {
                 },
             );
             keep
+        },
+    )
+}
+
+/// Trust before a step that runs the chosen items; Cancel is focused, so Enter alone never grants.
+fn step_trust(root: &mut ChildSpawnerCommands, installed: &Installed) -> Option<Entity> {
+    let items = &installed.untrusted;
+    let title = if items.len() == 1 {
+        "Trust this item to continue?".to_owned()
+    } else {
+        format!("Trust {} items to continue?", items.len())
+    };
+    dialog(
+        root,
+        &title,
+        |d| {
+            cine::dialog_text(
+                d,
+                "The next steps preview what these items make, which runs them. Only trust ones you know.",
+                theme::muted(),
+            );
+            trust_rows(d, items);
+        },
+        |row| {
+            let cancel = buttons::button(
+                row,
+                "Cancel",
+                Act::Back,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
+            );
+            buttons::button(
+                row,
+                if items.len() == 1 {
+                    "Trust and continue".to_owned()
+                } else {
+                    format!("Trust all {} and continue", items.len())
+                },
+                Act::TrustStep,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Primary,
+                    align: Align::Centre,
+                },
+            );
+            cancel
         },
     )
 }
