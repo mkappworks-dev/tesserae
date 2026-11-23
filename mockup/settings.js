@@ -22,6 +22,7 @@ const settingsDefaults = {
   compass: false,
   minimap: false,
   minimapSize: "Medium",
+  windowMode: "Windowed",
   sync: "Display synced",
   aa: "SMAA",
   renderScale: "100%",
@@ -536,6 +537,14 @@ function settingsBody() {
       );
     case "Display":
       return (
+        group("Window") +
+        row(
+          "Window mode",
+          "windowMode",
+          "select",
+          ["Windowed", "Borderless fullscreen", "Fullscreen"],
+          "Borderless fullscreen covers the screen without changing its mode, so switching away is instant. Fullscreen takes over the display.",
+        ) +
         group("Frame presentation") +
         row(
           "Display sync",
@@ -801,7 +810,7 @@ for (const type of ["focusin", "mouseover"])
 // Changes apply as they are made, as a game's options do. Display changes are
 // the exception: a mode the screen cannot show would leave the Player stranded,
 // so they revert unless kept within ten seconds.
-const DISPLAY_KEYS = ["sync", "fps", "aa", "renderScale"];
+const DISPLAY_KEYS = ["windowMode", "sync", "fps", "aa", "renderScale"];
 const KEEP_SECONDS = 10;
 let keepTimer = null;
 
