@@ -1,10 +1,11 @@
-//! The death screen, centred over the darkened World: the World and distance
-//! from spawn, the cause and what it means, where the Items lie and for how
-//! long, then Respawn (Enter) and Return to Worlds. Escape does nothing there.
+//! The death screen, centred over the darkened World: the cause and what it
+//! means, the World and distance from spawn, where the Items lie and for how
+//! long, then Respawn with its Enter cap and Return to Worlds. It has no prompt
+//! bar, and Escape does nothing there.
 //! Drawn from Server messages only
 //! (`docs/adr/0002-client-server-from-day-one.md`).
 
-use crate::client::buttons::{self, Align, ButtonStyle};
+use crate::client::buttons::{self, ButtonStyle};
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
@@ -15,7 +16,7 @@ use tesserae_core::save::DeathCause;
 
 use super::actions::{Actions, Bindings};
 use super::camera::FlyCamera;
-use super::cinematic::{self as cine, Kind};
+use super::cinematic::Kind;
 use super::menu_ui as ui;
 use super::theme;
 use crate::server::death::{DeathChanged, DeathReport};
@@ -131,7 +132,7 @@ fn receive(
             ui::notify_for(
                 &mut commands,
                 &respawn_notice(was),
-                ui::Tone::Change,
+                ui::Tone::Info,
                 RESPAWN_NOTICE_S,
             );
             for mut cursor in &mut cursor {
@@ -302,6 +303,7 @@ fn render(
     commands
         .spawn((
             Screen,
+            super::frame::Frame,
             GlobalZIndex(9),
             BackgroundColor(theme::DEATH_DIM),
             BackgroundGradient::from(LinearGradient::to_bottom(vec![
@@ -333,23 +335,6 @@ fn render(
                     },
                 ))
                 .with_children(|centre| {
-                    let eyebrow = centred(
-                        centre,
-                        format!(
-                            "{} · {} M FROM THE WORLD SPAWN",
-                            place.to_uppercase(),
-                            report.from_spawn_m.round()
-                        ),
-                        theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
-                        theme::DEATH_EYEBROW,
-                    );
-                    centre.commands().entity(eyebrow).insert((
-                        bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
-                        Node {
-                            margin: UiRect::bottom(Val::Px(12.0)),
-                            ..default()
-                        },
-                    ));
                     let heading = centred(
                         centre,
                         title,
@@ -360,39 +345,59 @@ fn render(
                         .commands()
                         .entity(heading)
                         .insert(bevy::text::LetterSpacing::Px(theme::DEATH_TITLE_TRACKING));
-                    let cause = Node {
-                        margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(10.0), Val::Px(20.0)),
+                    if !detail.is_empty() {
+                        centre
+                            .spawn(Node {
+                                margin: UiRect::top(Val::Px(10.0)),
+                                ..default()
+                            })
+                            .with_children(|cause| {
+                                centred(
+                                    cause,
+                                    detail,
+                                    theme::font(theme::TEXT_BODY),
+                                    theme::DEATH_CAUSE,
+                                );
+                            });
+                    }
+                    let quiet = |margin: UiRect| Node {
+                        margin,
                         ..default()
                     };
-                    if detail.is_empty() {
-                        centre.spawn(Node {
-                            height: Val::Px(20.0),
-                            ..default()
-                        });
-                    } else {
-                        centre.spawn(cause).with_children(|cause| {
+                    centre
+                        .spawn(quiet(UiRect::top(Val::Px(14.0))))
+                        .with_children(|line| {
                             centred(
-                                cause,
-                                detail,
-                                theme::font(theme::TEXT_BODY),
-                                theme::DEATH_CAUSE,
+                                line,
+                                format!(
+                                    "{place} \u{00b7} {} m from the World spawn",
+                                    report.from_spawn_m.round()
+                                ),
+                                theme::font(theme::TEXT_SMALL),
+                                theme::muted(),
                             );
                         });
-                    }
                     centre
                         .spawn((
                             ItemsLine,
-                            Node {
-                                align_self: AlignSelf::Stretch,
-                                flex_direction: FlexDirection::Column,
-                                ..default()
-                            },
+                            quiet(UiRect::new(
+                                Val::ZERO,
+                                Val::ZERO,
+                                Val::Px(6.0),
+                                Val::Px(28.0),
+                            )),
                         ))
-                        .with_children(|line| cine::notice(line, items_line(report)));
+                        .with_children(|line| {
+                            centred(
+                                line,
+                                items_line(report),
+                                theme::font(theme::TEXT_SMALL),
+                                theme::muted(),
+                            );
+                        });
                     centre
                         .spawn(Node {
                             column_gap: Val::Px(10.0),
-                            margin: UiRect::top(Val::Px(22.0)),
                             justify_content: JustifyContent::Center,
                             ..default()
                         })
@@ -403,22 +408,28 @@ fn render(
                                 Respawn,
                                 ButtonStyle::Cinematic {
                                     kind: Kind::Primary,
-                                    align: Align::Centre,
                                 },
                             );
-                            // The prototype's key hint is quieter than a button's
-                            // own glyph, so it is drawn here and not in `buttons`.
-                            actions.commands().entity(respawn).with_child((
-                                Text::new("Enter"),
-                                theme::weighted(theme::TEXT_KEY, theme::SEMIBOLD),
-                                TextColor(theme::SAGE_INK.with_alpha(0.7)),
-                                Node {
-                                    margin: UiRect::left(Val::Px(2.0)),
-                                    ..default()
-                                },
-                                Pickable::IGNORE,
-                            ));
-                            super::save::return_buttons_as(actions, Kind::Ghost);
+                            // Without a prompt bar, the button carries its own key.
+                            actions
+                                .commands()
+                                .entity(respawn)
+                                .insert(super::frame::Autofocus)
+                                .with_children(|button| {
+                                    super::frame::key_cap(
+                                        button,
+                                        "Enter",
+                                        theme::SAGE_INK.with_alpha(0.75),
+                                    );
+                                });
+                            let leave = super::save::to_list_button(actions, Kind::Ghost);
+                            for button in [respawn, leave] {
+                                actions
+                                    .commands()
+                                    .entity(button)
+                                    .entry::<Node>()
+                                    .and_modify(|mut node| node.min_width = Val::Px(180.0));
+                            }
                         });
                 });
         });
@@ -449,6 +460,7 @@ mod tests {
             .init_resource::<super::super::drops::Looks>()
             .init_resource::<super::super::menu_ui::Searches>()
             .init_resource::<Time<Real>>()
+            .init_resource::<Time>()
             .init_resource::<super::super::edit::Catalogue>()
             .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<super::super::settings::Settings>()
@@ -471,6 +483,7 @@ mod tests {
                 super::super::inventory_window::plugin,
                 crate::server::inventory::plugin,
             ));
+        super::super::frame::testing::support(&mut app);
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -540,6 +553,28 @@ mod tests {
         app.update();
     }
 
+    /// A key as the window reports it, which focus dispatch hands to the focused control.
+    fn typed(app: &mut App, code: KeyCode) {
+        use bevy::input::ButtonState;
+        use bevy::input::keyboard::{Key, KeyboardInput, NativeKey};
+        let window = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        for state in [ButtonState::Pressed, ButtonState::Released] {
+            app.world_mut().write_message(KeyboardInput {
+                key_code: code,
+                logical_key: Key::Unidentified(NativeKey::Unidentified),
+                state,
+                text: None,
+                repeat: false,
+                window,
+            });
+            app.update();
+        }
+    }
+
     fn texts(app: &mut App) -> Vec<String> {
         app.world_mut()
             .query::<&Text>()
@@ -593,8 +628,8 @@ mod tests {
         assert!(!grabbed(&mut app), "the buttons need the cursor");
         let on_screen = texts(&mut app);
         for line in [
-            "RIVER BEND · 140 M FROM THE WORLD SPAWN",
             "You fell too far",
+            "River bend \u{00b7} 140 m from the World spawn",
             "Fell 25 m. Falls over 3 m hurt.",
             "64 items in 2 stacks lie where you fell, at 412, 63, \u{2212}88. They stay for 5:00.",
             "Respawn",
@@ -618,6 +653,40 @@ mod tests {
             );
         }
         assert_eq!(respawns(&mut app), 0, "only Enter or the button respawns");
+    }
+
+    #[test]
+    fn the_death_screen_opens_on_respawn_with_its_enter_cap_and_no_prompt_bar() {
+        let mut app = app();
+        tell(&mut app, fell(stones(), false));
+        app.update();
+        let respawn = app
+            .world_mut()
+            .query_filtered::<Entity, With<Respawn>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            Some(respawn),
+            "Respawn is focused"
+        );
+        let world = app.world();
+        let says: Vec<String> = world
+            .get::<Children>(respawn)
+            .unwrap()
+            .iter()
+            .flat_map(|c| {
+                std::iter::once(c).chain(world.get::<Children>(c).into_iter().flatten().copied())
+            })
+            .filter_map(|e| world.get::<Text>(e).map(|t| t.0.clone()))
+            .collect();
+        assert_eq!(says, ["Respawn", "Enter"]);
+        assert!(super::super::frame::testing::prompts(&mut app).is_empty());
+        let shown = texts(&mut app);
+        assert!(
+            !shown.iter().any(|t| t == "Save & Quit"),
+            "Return to Worlds is the only way out: {shown:?}"
+        );
     }
 
     #[test]
@@ -651,9 +720,17 @@ mod tests {
     #[test]
     fn enter_respawns_and_the_servers_answer_closes_the_screen_with_a_notice() {
         let mut app = app();
+        app.add_message::<bevy::input::keyboard::KeyboardInput>()
+            .add_message::<bevy::input::gamepad::GamepadButtonChangedEvent>()
+            .add_message::<bevy::input::mouse::MouseWheel>()
+            .add_plugins((
+                bevy::input_focus::InputDispatchPlugin,
+                bevy::ui_widgets::ButtonPlugin,
+            ));
         tell(&mut app, fell(stones(), false));
-        press(&mut app, KeyCode::Enter);
-        assert_eq!(respawns(&mut app), 1);
+        app.update();
+        typed(&mut app, KeyCode::Enter);
+        assert_eq!(respawns(&mut app), 1, "Enter on the focused Respawn");
         assert!(shown(&mut app), "until the Server answers");
 
         tell(&mut app, DeathChanged(None));

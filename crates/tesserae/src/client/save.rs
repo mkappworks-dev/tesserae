@@ -1,5 +1,5 @@
 //! Save controls send intents; only the Server sees persistence or World data.
-use crate::client::buttons::{self, Align, ButtonStyle};
+use crate::client::buttons::{self, ButtonStyle};
 use crate::server::persistence::{SaveAction, SaveStatus};
 use bevy::prelude::*;
 
@@ -17,30 +17,20 @@ struct Action(SaveAction);
 #[derive(Component)]
 pub(super) struct ToList;
 
-/// The Menu's two ways out: back to the Worlds, or Save & Quit to the desktop.
-pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
-    return_buttons_as(parent, Kind::Plain);
+/// The pause menu's two ways out: back to the Worlds, or Save & Quit to the desktop.
+pub(super) fn return_items(list: &mut ChildSpawnerCommands) {
+    super::frame::list_item(list, "Return to Worlds", None, ToList);
+    super::frame::list_item(list, "Save & Quit", None, Action(SaveAction::SaveQuit));
 }
 
-pub(super) fn return_buttons_as(parent: &mut ChildSpawnerCommands, kind: Kind) {
+/// Back to the Worlds, saving first, as a button.
+pub(super) fn to_list_button(parent: &mut ChildSpawnerCommands, kind: Kind) -> Entity {
     buttons::button(
         parent,
         "Return to Worlds",
         ToList,
-        ButtonStyle::Cinematic {
-            kind,
-            align: Align::Glyph("→"),
-        },
-    );
-    buttons::button(
-        parent,
-        "Save & Quit",
-        Action(SaveAction::SaveQuit),
-        ButtonStyle::Cinematic {
-            kind,
-            align: Align::Glyph("→"),
-        },
-    );
+        ButtonStyle::Cinematic { kind },
+    )
 }
 
 #[derive(Clone, PartialEq)]
@@ -100,15 +90,21 @@ fn activate(
     event: On<Activate>,
     buttons: Query<&Action>,
     to_list: Query<(), With<ToList>>,
+    choices: Query<&super::menu::Choice>,
     mut relaunch: Option<ResMut<crate::launch::Switch>>,
     mut actions: MessageWriter<SaveAction>,
 ) {
+    let action = if let Ok(super::menu::Choice::SaveQuit) = choices.get(event.entity) {
+        Some(SaveAction::SaveQuit)
+    } else {
+        buttons.get(event.entity).ok().map(|action| action.0)
+    };
     let target = if to_list.contains(event.entity) {
         actions.write(SaveAction::SaveQuit);
         Some(crate::launch::Target::List)
-    } else if let Ok(action) = buttons.get(event.entity) {
-        actions.write(action.0);
-        if !matches!(action.0, SaveAction::SaveQuit) {
+    } else if let Some(action) = action {
+        actions.write(action);
+        if !matches!(action, SaveAction::SaveQuit) {
             return;
         }
         None
@@ -126,7 +122,7 @@ fn notice(mut commands: Commands, mut status: ResMut<SaveStatus>) {
         return;
     }
     if let Some(message) = status.notice.take() {
-        super::menu_ui::notify_for(&mut commands, &message, super::menu_ui::Tone::Alert, 8.0);
+        super::menu_ui::notify(&mut commands, &message, super::menu_ui::Tone::Error);
     }
 }
 
@@ -206,10 +202,7 @@ fn show(
                                     actions,
                                     "Exit without saving",
                                     Action(SaveAction::ConfirmUnsafe),
-                                    ButtonStyle::Cinematic {
-                                        kind: Kind::Danger,
-                                        align: Align::Centre,
-                                    },
+                                    ButtonStyle::Cinematic { kind: Kind::Danger },
                                 );
                                 initial_focus = Some(buttons::button(
                                     actions,
@@ -274,10 +267,7 @@ fn show(
                                         actions,
                                         "Exit without saving…",
                                         Action(SaveAction::AskUnsafe),
-                                        ButtonStyle::Cinematic {
-                                            kind: Kind::Danger,
-                                            align: Align::Centre,
-                                        },
+                                        ButtonStyle::Cinematic { kind: Kind::Danger },
                                     );
                                 });
                         }

@@ -11,6 +11,7 @@ use bevy::input_focus::{
     tab_navigation::TabGroup,
 };
 use bevy::math::CompassOctant;
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
@@ -33,6 +34,7 @@ const LOOK_EXPONENT: f32 = 1.5;
 const SONY_VENDOR: u16 = 0x054C;
 const REPEAT_DELAY_S: f32 = 0.4;
 const REPEAT_INTERVAL_S: f32 = 0.12;
+const READ_STEP_PX: f32 = 40.0;
 
 /// Menus own these buttons, so they never drive gameplay actions there.
 const NAVIGATION: [GamepadButton; 9] = [
@@ -309,10 +311,14 @@ type Focusables<'w, 's> = Query<
         &'static InheritedVisibility,
     ),
     (
-        Or<(With<Button>, With<Slider>)>,
+        Or<(With<Button>, With<Slider>, With<Reader>, With<Surface>)>,
         Without<super::menu_ui::SearchField>,
+        Without<super::frame::PromptKey>,
+        Without<super::frame::PointerOnly>,
     ),
 >;
+type Readers<'w, 's> =
+    Query<'w, 's, (&'static ComputedNode, &'static mut ScrollPosition), With<Reader>>;
 type Sliders<'w, 's> = Query<
     'w,
     's,
@@ -337,9 +343,46 @@ type Structure<'w, 's> = (
     Sliders<'w, 's>,
     Query<'w, 's, (Entity, &'static super::settings::Operation)>,
     Query<'w, 's, (), With<bevy::ui_widgets::TextInput>>,
+    Query<'w, 's, (), With<Stepper>>,
+    Query<'w, 's, (), With<Plane>>,
+    Query<'w, 's, (), With<Surface>>,
 );
 struct Candidate {
     area: FocusableArea,
+}
+
+/// A control that Left and Right change, as a slider's value, instead of
+/// moving focus off it.
+#[derive(Component)]
+pub(super) struct Stepper;
+
+/// A point on a map that all four arrow keys move, as a text field keeps them for its caret.
+/// The D-pad still navigates, so a controller never gets stuck on it.
+#[derive(Component)]
+pub(super) struct Plane;
+
+/// A scrolling panel of text that takes focus so keys and the controller can read it: Up and Down
+/// scroll it while it has more to show that way, and move focus on at its ends.
+#[derive(Component)]
+pub(super) struct Reader;
+
+/// A control that every direction changes, keys, D-pad and stick alike, as a colour square: focus
+/// leaves it only by Tab.
+#[derive(Component)]
+pub(super) struct Surface;
+
+/// A direction on a focused [`Surface`]: `by` is one of the four unit steps, up positive.
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub(super) struct Nudge {
+    pub entity: Entity,
+    pub by: IVec2,
+}
+
+/// Left (`by` -1) or Right (+1) on a focused [`Stepper`].
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub(super) struct Step {
+    pub entity: Entity,
+    pub by: i32,
 }
 
 fn area(entity: Entity, node: &ComputedNode, transform: &UiGlobalTransform) -> FocusableArea {
@@ -356,8 +399,8 @@ fn navigate(
     (input, ownership, labels, settings, keys): Context,
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
-    focusables: Focusables,
-    (groups, parents, disabled, sliders, tabs, typing): Structure,
+    (focusables, mut readers): (Focusables, Readers),
+    (groups, parents, disabled, sliders, tabs, typing, steppers, planes, surfaces): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
     let owner = ownership.owner;
@@ -402,7 +445,11 @@ fn navigate(
         .and_then(|entity| candidates.iter().find(|c| c.area.entity == entity));
     // Arrows move menu focus as the D-pad does, except in a text field, where they move the caret.
     let arrow = keys
-        .filter(|_| !focus.get().is_some_and(|entity| typing.contains(entity)))
+        .filter(|_| {
+            !focus
+                .get()
+                .is_some_and(|entity| typing.contains(entity) || planes.contains(entity))
+        })
         .and_then(|keys| {
             [
                 (KeyCode::ArrowUp, CompassOctant::North),
@@ -481,14 +528,31 @@ fn navigate(
     let entity = current.area.entity;
     if step && let Some(direction) = direction {
         visible.0 = true;
-        if matches!(direction, CompassOctant::East | CompassOctant::West)
-            && let Ok((value, range, slider_step)) = sliders.get(entity)
-        {
-            let sign = if direction == CompassOctant::East {
-                1.0
-            } else {
-                -1.0
+        let sign = if direction == CompassOctant::East {
+            1.0
+        } else {
+            -1.0
+        };
+        let sideways = matches!(direction, CompassOctant::East | CompassOctant::West);
+        if surfaces.contains(entity) {
+            let by = match direction {
+                CompassOctant::North => IVec2::Y,
+                CompassOctant::South => IVec2::NEG_Y,
+                CompassOctant::East => IVec2::X,
+                _ => IVec2::NEG_X,
             };
+            commands.trigger(Nudge { entity, by });
+        } else if sideways && steppers.contains(entity) {
+            commands.trigger(Step {
+                entity,
+                by: sign as i32,
+            });
+        } else if !sideways
+            && let Ok((node, mut scroll)) = readers.get_mut(entity)
+            && let Some(to) = read_on(node, scroll.y, direction == CompassOctant::South)
+        {
+            scroll.y = to;
+        } else if sideways && let Ok((value, range, slider_step)) = sliders.get(entity) {
             commands.trigger(ValueChange {
                 source: entity,
                 value: range.clamp(value.0 + sign * slider_step.0),
@@ -525,6 +589,15 @@ fn navigate(
     }
 }
 
+/// Where a [`Reader`] scrolled to `y` lands one step down or up, or `None` at that end.
+fn read_on(node: &ComputedNode, y: f32, down: bool) -> Option<f32> {
+    let by = if down { 1.0 } else { -1.0 };
+    let scale = node.inverse_scale_factor();
+    let end = ((node.content_size.y - node.size.y + node.scrollbar_size.y) * scale).max(0.0);
+    let to = (y + by * READ_STEP_PX).clamp(0.0, end);
+    (to != y.clamp(0.0, end)).then_some(to)
+}
+
 /// Where focus lands when a menu opens or its focused entity is rebuilt: near
 /// the last focused place, else the first entry.
 fn initial(candidates: &[Candidate], last: Option<Vec2>) -> Option<Entity> {
@@ -551,16 +624,19 @@ fn initial(candidates: &[Candidate], last: Option<Vec2>) -> Option<Entity> {
         .map(|c| c.area.entity)
 }
 
+/// Scrolls a newly focused control into view when a key or the controller moved focus there; the
+/// pointer's own item is already where the Player is looking.
 fn reveal_focus(
-    focus: Res<InputFocus>,
+    (focus, visible): (Res<InputFocus>, Res<InputFocusVisible>),
     labels: Res<super::actions::Labels>,
-    nodes: Query<(&ComputedNode, &UiGlobalTransform)>,
+    (nodes, hovered): (Query<(&ComputedNode, &UiGlobalTransform)>, Query<&Hovered>),
     parents: Query<&ChildOf>,
     mut scrolls: Query<(&mut ScrollPosition, &Node)>,
     mut shown: Local<Option<Entity>>,
 ) {
     let target = focus.get();
-    if *shown == target || labels.device != Device::Pad {
+    let by_pointer = target.is_some_and(|e| hovered.get(e).is_ok_and(|h| h.0));
+    if *shown == target || (labels.device != Device::Pad && !visible.0) || by_pointer {
         *shown = target;
         return;
     }
@@ -893,6 +969,79 @@ mod tests {
         assert_eq!(initial(&candidates, None), entity(3));
         assert_eq!(initial(&candidates[..2], None), entity(2));
         assert_eq!(initial(&candidates, Some(Vec2::new(45.0, 95.0))), entity(1));
+    }
+
+    #[test]
+    fn left_and_right_step_a_focused_selector_instead_of_moving_focus() {
+        #[derive(Resource, Default)]
+        struct Steps(Vec<i32>);
+        let mut app = App::new();
+        app.add_plugins((bevy::time::TimePlugin, bevy::input::InputPlugin));
+        launcher(&mut app);
+        app.init_resource::<InputFocus>()
+            .init_resource::<Steps>()
+            .add_observer(|step: On<Step>, mut steps: ResMut<Steps>| steps.0.push(step.by));
+        let window = app
+            .world_mut()
+            .spawn((
+                PrimaryWindow,
+                Window {
+                    focused: true,
+                    ..default()
+                },
+            ))
+            .id();
+        let control = |app: &mut App, x: f32| {
+            app.world_mut()
+                .spawn((
+                    Button,
+                    ComputedNode {
+                        size: Vec2::new(40.0, 20.0),
+                        ..default()
+                    },
+                    UiGlobalTransform::from_translation(Vec2::new(x, 0.0)),
+                    InheritedVisibility::VISIBLE,
+                ))
+                .id()
+        };
+        let (selector, plain, beside) = (
+            control(&mut app, 0.0),
+            control(&mut app, 200.0),
+            control(&mut app, 100.0),
+        );
+        app.world_mut().entity_mut(selector).insert(Stepper);
+        let arrow = |app: &mut App, key_code: KeyCode| {
+            for state in [
+                bevy::input::ButtonState::Pressed,
+                bevy::input::ButtonState::Released,
+            ] {
+                app.world_mut()
+                    .write_message(bevy::input::keyboard::KeyboardInput {
+                        key_code,
+                        logical_key: bevy::input::keyboard::Key::Unidentified(
+                            bevy::input::keyboard::NativeKey::Unidentified,
+                        ),
+                        state,
+                        text: None,
+                        repeat: false,
+                        window,
+                    });
+                app.update();
+            }
+        };
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(selector, FocusCause::Navigated);
+        arrow(&mut app, KeyCode::ArrowRight);
+        arrow(&mut app, KeyCode::ArrowLeft);
+        assert_eq!(app.world().resource::<Steps>().0, [1, -1]);
+        assert_eq!(app.world().resource::<InputFocus>().get(), Some(selector));
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(plain, FocusCause::Navigated);
+        arrow(&mut app, KeyCode::ArrowLeft);
+        assert_eq!(app.world().resource::<InputFocus>().get(), Some(beside));
+        assert_eq!(app.world().resource::<Steps>().0.len(), 2);
     }
 
     #[test]

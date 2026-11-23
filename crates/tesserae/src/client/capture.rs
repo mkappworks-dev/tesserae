@@ -281,14 +281,17 @@ pub(super) fn plugin(app: &mut App) {
     if let Some(menu) = std::env::var_os("TESSERAE_SCREENSHOT_MENU") {
         app.insert_resource(super::menu::Menu::opened(menu == "details"));
     }
-    // `TESSERAE_SCREENSHOT_LAYOUT` opens the Layout menu with the mode on.
-    if std::env::var_os("TESSERAE_SCREENSHOT_LAYOUT").is_some() {
-        app.insert_resource(super::layout::LayoutMode::turned_on())
-            .insert_resource(super::layout_menu::LayoutMenu::opened());
+    // `TESSERAE_SCREENSHOT_LAYOUT` opens the Layout menu with the mode on; `=ready` turns the
+    // mode on with the panel compact.
+    if let Some(layout) = std::env::var_os("TESSERAE_SCREENSHOT_LAYOUT") {
+        app.insert_resource(super::layout::LayoutMode::turned_on());
+        if layout != "ready" {
+            app.insert_resource(super::layout_menu::LayoutMenu::opened());
+        }
     }
-    // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window with its
-    // details; `=crafting` brings the Crafting tab to the front, `=station`
-    // the Workbench's pane, and `=container` a Chest's slots holding Wood.
+    // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window; `=crafting`
+    // brings the Crafting tab to the front, `=station` the Workbench's pane,
+    // and `=container` a Chest's slots holding Wood.
     if let Some(inventory) = std::env::var_os("TESSERAE_SCREENSHOT_INVENTORY") {
         app.insert_resource(super::inventory_window::InventoryWindow::opened());
         if inventory == "crafting" {
@@ -442,8 +445,8 @@ fn drops_fixture(
 }
 
 /// `TESSERAE_SCREENSHOT_MAP_STATE` drives the Map window into one state before the shutter:
-/// `default`, `add` (add mode), `add-popover`, `edit`, `death`, `explore` or `tooltip` (the add
-/// button focused). `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` types into the popover's name field.
+/// `default`, `add` (add mode), `add-popover`, `edit`, `death` or `explore`.
+/// `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` types into the popover's name field.
 /// The Waypoints come from `waypoint_fixture`; `death` adds a death marker to the list shown.
 #[allow(clippy::too_many_arguments)]
 fn map_state_fixture(
@@ -456,11 +459,6 @@ fn map_state_fixture(
         ResMut<super::waypoints::Draft>,
     ),
     mut lists: MessageWriter<crate::server::waypoint::WaypointsChanged>,
-    (mut focus, mut visible): (
-        Option<ResMut<bevy::input_focus::InputFocus>>,
-        Option<ResMut<bevy::input_focus::InputFocusVisible>>,
-    ),
-    adds: Query<(Entity, &super::map_window::Control)>,
     mut fields: Query<&mut bevy::text::EditableText, With<super::map_pop::NameField>>,
     mut step: Local<u8>,
 ) {
@@ -495,16 +493,6 @@ fn map_state_fixture(
             super::map_pop::open_edit(&mut window, &mut marks, &mut draft, first.id, eye)
         }
         ("explore", 0) => window.tab = super::waypoint_panel::PanelTab::Explore,
-        ("tooltip", 0) => {
-            if let (Some(focus), Some(visible)) = (focus.as_mut(), visible.as_mut())
-                && let Some((button, _)) = adds
-                    .iter()
-                    .find(|(_, c)| **c == super::map_window::Control::AddMode)
-            {
-                focus.set(button, bevy::input_focus::FocusCause::Navigated);
-                visible.0 = true;
-            }
-        }
         ("death", 0) => {
             let kinds = marks.kinds();
             let Some(kind) = kinds
@@ -645,7 +633,22 @@ type HudWriters<'w> = (
 /// `TESSERAE_SCREENSHOT_VITALS=<health>,<hunger>,<air s>`,
 /// `TESSERAE_SCREENSHOT_DEATH=fall|drowning|lava|starvation[,kept]`,
 /// `TESSERAE_SCREENSHOT_PICKUP=<taken>[,<left>]` and
-/// `TESSERAE_SCREENSHOT_NOTICE=<text>`. Messages only; the World is untouched.
+/// `TESSERAE_SCREENSHOT_NOTICE=[info:|alert:|error:]<text>[|...]`, one toast each. Messages
+/// only; the World is untouched.
+/// Each `|`-separated notice as a toast, toned by an `info:`, `alert:` or `error:` prefix.
+pub(super) fn notify_each(commands: &mut Commands, notices: &str) {
+    use super::menu_ui::Tone;
+    for notice in notices.split('|') {
+        let (tone, text) = match notice.split_once(':') {
+            Some(("info", text)) => (Tone::Info, text),
+            Some(("alert", text)) => (Tone::Alert, text),
+            Some(("error", text)) => (Tone::Error, text),
+            _ => (Tone::Change, notice),
+        };
+        super::menu_ui::notify_for(commands, text, tone, 10.0);
+    }
+}
+
 fn hud_fixture(
     mut commands: Commands,
     time: Res<Time<Real>>,
@@ -775,8 +778,8 @@ fn hud_fixture(
             });
         }
     }
-    if let Some(text) = notice {
-        super::menu_ui::notify_for(&mut commands, &text, super::menu_ui::Tone::Change, 10.0);
+    if let Some(notices) = notice {
+        notify_each(&mut commands, &notices);
     }
 }
 
@@ -1070,7 +1073,7 @@ fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
 }
 
 /// `TESSERAE_SCREENSHOT_PLACE` holds the Game's place Tool, and `=list` opens
-/// its Template list too.
+/// its panel full too.
 fn capture_holding(
     catalogue: Res<super::edit::Catalogue>,
     mut hotbar: ResMut<super::edit::Hotbar>,

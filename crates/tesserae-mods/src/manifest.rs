@@ -34,6 +34,8 @@ pub struct Manifest {
     pub category: Option<String>,
     /// Display only: one line saying what the Mod holds.
     pub description: Option<String>,
+    /// Display only: a PNG inside the Mod's folder, shown in menus even before Trust.
+    pub thumbnail: Option<String>,
 }
 
 /// A Mod found on disk with a valid Manifest; its content is not yet read.
@@ -62,6 +64,7 @@ impl Found {
             manifest_bytes,
         };
         found.source_path()?;
+        found.thumbnail()?;
         Ok(found)
     }
 
@@ -140,6 +143,14 @@ impl Manifest {
             return Err(manifest_error(id, "declaration requires api 0.3".into()));
         }
         self.validate_source_path()?;
+        if let Some(name) = &self.thumbnail
+            && !inside(name)
+        {
+            return Err(manifest_error(
+                id,
+                format!("thumbnail `{name}` must be a relative path inside the mod's directory"),
+            ));
+        }
         for (field, text, max) in [
             ("category", &self.category, MAX_CATEGORY_CHARS),
             ("description", &self.description, MAX_DESCRIPTION_CHARS),
@@ -178,8 +189,7 @@ impl Manifest {
 
     fn validate_source_path(&self) -> Result<(), ModError> {
         let (field, name) = self.source();
-        let path = Path::new(name);
-        if !name.is_empty() && path.components().all(|c| matches!(c, Component::Normal(_))) {
+        if inside(name) {
             Ok(())
         } else {
             Err(manifest_error(
@@ -188,6 +198,14 @@ impl Manifest {
             ))
         }
     }
+}
+
+/// Relative, with no `..`: confinement after symlinks is checked when the file is read.
+fn inside(name: &str) -> bool {
+    !name.is_empty()
+        && Path::new(name)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
 }
 
 fn valid_id(id: &str) -> bool {
@@ -394,6 +412,8 @@ fn read_folder(folder: &Path, role: Role) -> Result<Option<Found>, String> {
         manifest_bytes,
     };
     entry.source_path().map_err(|e| e.to_string())?;
+    // Decoded here and again when shown: a refused picture must refuse the folder up front.
+    entry.thumbnail().map_err(|e| e.to_string())?;
     Ok(Some(entry))
 }
 

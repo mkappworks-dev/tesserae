@@ -91,7 +91,6 @@ function recipesFor(station) {
 function sidePane() {
   ensureCrafting();
   const use = state.useTarget && usables[state.useTarget];
-  if (use?.kind === "container") return containerSide(use);
   if (use?.kind === "station") return craftingSide(use);
   const tabs = creativeAccess() ? ["catalogue", "crafting"] : ["crafting"];
   const pane = tabs.includes(state.sidePane) ? state.sidePane : tabs[0];
@@ -100,10 +99,7 @@ function sidePane() {
       ? ""
       : `<div class="side-tabs" role="tablist" aria-label="Side pane">${tabs.map((t) => `<button role="tab" data-action="side-pane" data-value="${t}" aria-selected="${t === pane}" class="${t === pane ? "active" : ""}">${icon(t === "catalogue" ? "catalogue" : "craft", 16)}${t === "catalogue" ? "Catalogue" : "Crafting"}</button>`).join("")}</div>`;
   return pane === "catalogue"
-    ? catalogueSide().replace(
-        'aria-label="Catalogue">',
-        `aria-label="Catalogue">${strip}`,
-      )
+    ? catalogueSide(strip)
     : craftingSide(null, strip);
 }
 
@@ -138,37 +134,16 @@ new MutationObserver(() => hydrateBlockIcons(document)).observe(document.body, {
   childList: true,
   subtree: true,
 });
-function recipeRow(r) {
+function recipeTile(r) {
   const can = affordable(r),
     out = stackItem({ id: r.out });
-  const inputs = r.in
-    .map(([id, n]) => {
-      const have = holding(id);
-      return `<span class="recipe-input ${have < n ? "short" : ""}">${blockIcon(id)}${n} ${esc(itemName(id))}</span>`;
-    })
-    .join("");
-  return `<button class="recipe-row ${r.i === state.recipe ? "selected" : ""} ${can ? "" : "unaffordable"}" data-action="recipe-pick" data-value="${r.i}" aria-pressed="${r.i === state.recipe}" aria-label="${esc(out.name)} × ${r.n}, needs ${r.in.map(([id, n]) => n + " " + itemName(id)).join(" and ")}${can ? "" : ", missing items"}" title="Click to select · Double-click crafts 1 · Shift-click crafts ${can || "as many as you can"}">${blockIcon(r.out)}<span class="recipe-text"><b>${esc(out.name)}${r.n > 1 ? ` <small>× ${r.n}</small>` : ""}</b><span class="recipe-inputs">${inputs}</span></span></button>`;
+  return `<button class="recipe-tile ${can ? "" : "unaffordable"}" data-action="recipe-pick" data-value="${r.i}" data-tip="recipe:${r.i}" aria-label="${esc(out.name)} × ${r.n}, needs ${r.in.map(([id, n]) => n + " " + itemName(id)).join(" and ")}${can ? "" : ", missing items"}">${blockIcon(r.out)}${r.n > 1 ? `<span class="stack-count">${r.n}</span>` : ""}</button>`;
 }
 function craftingSide(station, strip = "") {
   const list = recipesFor(station?.tag || "hand");
-  if (!list.some((x) => x.i === state.recipe) && list.length)
-    state.recipe = list[0].i;
-  const r = recipes[state.recipe],
-    selectable = list.some((x) => x.i === state.recipe);
-  const can = selectable ? affordable(r) : 0;
-  const rows = list.map(recipeRow).join("");
-  const footer = selectable
-    ? `<footer class="transfer craft-footer"><div class="transfer-item">${blockIcon(r.out)}<span><b>${esc(itemName(r.out))} × ${r.n}</b><small>${r.station === "hand" ? "By hand" : "Needs a " + esc(usables[r.station].name)}</small></span></div><dl class="craft-needs">${r.in.map(([id, n]) => `<div class="${holding(id) < n ? "short" : ""}"><dt>${esc(itemName(id))}</dt><dd>${holding(id)} / ${n}</dd></div>`).join("")}</dl><div class="transfer-actions">${button(can > 1 ? `Craft ${can}` : "Craft all", "craft", { value: "max", ghost: true, disabled: can < 2 })}${button("Craft 1", "craft", { value: 1, primary: true, disabled: !can })}</div></footer>`
-    : "";
-  const reach = station
-    ? `<button class="sim-inline" data-action="use-walk-away">Simulate: walk out of reach</button>`
-    : "";
-  return `<aside class="catalogue-side crafting-side" aria-label="${station ? esc(station.name) : "Crafting"}">${strip}<header><p class="item-eyebrow">${station ? "STATION" : "BY HAND"}</p><h2>${station ? esc(station.name) : "Crafting"}</h2><small>${station ? `Recipes that need a ${esc(station.name)}` : "Recipes you can make anywhere"}</small></header><div class="catalogue-search side-search">${icon("search", 16)}<input class="input" data-bind="craftQuery" value="${esc(state.craftQuery || "")}" placeholder="Search Recipes…" aria-label="Search Recipes"></div><div class="recipe-list" id="recipe-list">${rows || '<p class="quick-add-empty">No Recipes match.</p>'}</div>${reach}${footer}</aside>`;
-}
-
-function containerSide(use) {
-  const used = state.chest.filter(Boolean).length;
-  return `<aside class="catalogue-side container-side" aria-label="${esc(use.name)}"><header><p class="item-eyebrow">CONTAINER</p><h2>${esc(use.name)}</h2><small>${used} / ${use.slots} slots · stays here when you leave</small></header><div class="container-grid storage-grid">${state.chest.map((_, i) => renderCarriedSlot("chest", i)).join("")}</div><div class="container-actions">${button("Take all", "chest-take-all", { small: true, ghost: true, disabled: !used })}${button("Sort", "chest-sort", { small: true, ghost: true, disabled: !used })}</div><button class="sim-inline" data-action="use-walk-away">Simulate: walk out of reach</button></aside>`;
+  const tiles = list.map(recipeTile).join("");
+  const title = station ? esc(station.name) : "Crafting";
+  return `<aside class="catalogue-side crafting-side" aria-label="${title}">${sideTop(strip, title, sideSearch("craftQuery", state.craftQuery, "Search Recipes"))}<div class="side-grid recipe-grid" id="recipe-list">${tiles || '<p class="quick-add-empty">No Recipes match.</p>'}</div>${station ? simReach() : ""}</aside>`;
 }
 
 function craft(count) {
@@ -253,7 +228,7 @@ function craftingAction(name, value) {
   }
   if (name === "recipe-pick") {
     state.recipe = Number(value);
-    refreshInventory();
+    craft(1);
     return true;
   }
   if (name === "craft") {
@@ -331,13 +306,6 @@ document.addEventListener("click", (e) => {
   e.stopImmediatePropagation();
   state.recipe = Number(row.dataset.value);
   craft("max");
-});
-document.addEventListener("dblclick", (e) => {
-  const row = e.target.closest("[data-action=recipe-pick]");
-  if (!row) return;
-  e.preventDefault();
-  state.recipe = Number(row.dataset.value);
-  craft(1);
 });
 document.addEventListener("input", (e) => {
   if (e.target.dataset.bind !== "craftQuery") return;

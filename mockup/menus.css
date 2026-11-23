@@ -1,0 +1,550 @@
+/* Menus as a game shows them: no web header, no card chrome, a title over the
+   scenery and the actions in the bottom prompt bar. */
+.game .game-header {
+  display: none;
+}
+.game #screen {
+  padding-top: 40px;
+}
+.game .menu-sheet {
+  background: linear-gradient(90deg, rgb(10 11 12 / 0.9), rgb(10 11 12 / 0.78));
+  backdrop-filter: blur(6px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.game .menu-sheet .sheet-header {
+  border: 0;
+  padding: 28px 32px 8px;
+}
+.game .menu-sheet .sheet-header h2 {
+  font-size: calc(34px * var(--text-scale, 1));
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.game .menu-sheet .sheet-header .muted {
+  margin-top: 8px;
+}
+.game .menu-sheet .body {
+  padding: 16px 32px 24px;
+}
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 32px 24px;
+}
+.game .workspace.wide {
+  max-width: 1280px;
+}
+
+.game .game-footer .prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px;
+  padding: 4px 6px;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.game .game-footer .prompt:hover,
+.game .game-footer .prompt:focus-visible {
+  background: rgb(255 255 255 / 0.08);
+}
+.game .game-footer .prompt:disabled {
+  cursor: default;
+}
+
+/* One highlight for keys, controller and mouse alike. */
+.game .menu-sheet .body button:focus-visible,
+.game .slot-tile:focus-visible {
+  outline: 2px solid #e2d5ab;
+  outline-offset: 2px;
+}
+.game .menu-sheet .sheet-header {
+  background: none;
+}
+.game .workspace .rail {
+  background: rgb(10 11 12 / 0.82);
+  backdrop-filter: blur(6px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  align-self: stretch;
+}
+
+.title-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-left: 4vw;
+}
+.title-brand {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 0 0 28px;
+}
+.title-logo {
+  width: 64px;
+  height: 64px;
+}
+.title-word {
+  margin: 0;
+  font-family: "Aileron", var(--font, sans-serif);
+  font-size: calc(64px * var(--text-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 24px rgb(0 0 0 / 0.45);
+}
+.title-menu {
+  display: grid;
+  gap: 4px;
+  width: min(340px, 100%);
+}
+.title-menu button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  font: inherit;
+  font-size: calc(20px * var(--text-scale, 1));
+  font-weight: 550;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.5);
+}
+.title-menu button small {
+  font-size: calc(13px * var(--text-scale, 1));
+  font-weight: 400;
+  color: var(--muted);
+}
+.title-menu button:focus,
+.title-menu button:hover {
+  background: rgb(10 11 12 / 0.72);
+  outline: 0;
+}
+.title-version {
+  position: absolute;
+  right: 34px;
+  bottom: 56px;
+  color: var(--muted);
+}
+
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.slot-tile {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 8px 8px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.slot-tile .world-preview {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 5px;
+}
+.slot-tile b {
+  padding: 0 4px;
+  font-size: calc(15px * var(--text-scale, 1));
+}
+.slot-tile small {
+  padding: 0 4px;
+  color: var(--muted);
+}
+.slot-tile:hover,
+.slot-tile:focus {
+  background: rgb(255 255 255 / 0.08);
+  border-color: #c1cdb5;
+}
+.slot-new {
+  place-content: center;
+  justify-items: center;
+  min-height: 180px;
+  border: 1px dashed var(--edge);
+}
+.slot-plus {
+  font-size: 40px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.loading-screen {
+  position: relative;
+  width: 100%;
+  align-self: stretch;
+}
+.loading-title {
+  position: absolute;
+  left: 4vw;
+  bottom: 96px;
+  max-width: 720px;
+  text-shadow: 0 2px 20px rgb(0 0 0 / 0.5);
+}
+.loading-game {
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.loading-title h1 {
+  margin: 6px 0 14px;
+  font-size: calc(52px * var(--text-scale, 1));
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.loading-tip {
+  margin: 0;
+  color: var(--ink);
+  opacity: 0.85;
+}
+.loading-bar {
+  position: absolute;
+  left: 4vw;
+  right: 4vw;
+  bottom: 40px;
+  display: grid;
+  gap: 8px;
+}
+.loading-bar .opening-stage {
+  font-size: 12px;
+  color: var(--muted);
+}
+.loading-bar .opening-track {
+  height: 3px;
+}
+.proto-tool {
+  position: absolute;
+  top: 0;
+  right: 34px;
+  padding: 10px;
+  border: 1px dashed #8a8a6a;
+  border-radius: 6px;
+  background: rgb(20 20 16 / 0.7);
+}
+.inline-action {
+  position: static;
+  display: inline-grid;
+  transform: none;
+  width: 24px;
+  height: 24px;
+  vertical-align: middle;
+}
+.loading-screen.opening-hidden .loading-title,
+.loading-screen.opening-hidden .loading-bar {
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+.loading-title,
+.loading-bar {
+  text-align: left;
+}
+.game .menu-sheet {
+  align-self: flex-start;
+  max-height: 100%;
+}
+.game[data-view="opening"] #screen {
+  position: relative;
+}
+.game[data-view="opening"] .loading-screen {
+  position: absolute;
+  inset: 0;
+}
+.game[data-view="opening"] .proto-tool {
+  top: 24px;
+}
+
+/* A side rail (Create World steps, Settings categories) is part of the panel,
+   not a box of its own, so the two always share one height. */
+.game .workspace:has(.menu-sheet) {
+  gap: 0;
+  align-self: flex-start;
+  max-height: 100%;
+}
+.game .workspace:has(.menu-sheet) > .menu-sheet {
+  align-self: stretch;
+}
+.game .workspace:has(.menu-sheet) > .rail {
+  background: rgb(10 11 12 / 0.9);
+  border-right: 1px solid var(--edge);
+  padding: 28px 12px;
+}
+
+.game-pause {
+  position: relative;
+  width: 100%;
+  background: linear-gradient(90deg, rgb(6 8 7 / 0.75), transparent 55%);
+  margin: -40px -34px -22px;
+  padding: 40px 34px 22px;
+}
+.pause-list {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding-left: 4vw;
+}
+.pause-list h2 {
+  margin: 0;
+  font-size: calc(44px * var(--text-scale, 1));
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-shadow: 0 2px 20px rgb(0 0 0 / 0.5);
+}
+.pause-list > small {
+  margin: 6px 0 24px;
+  color: var(--muted);
+}
+.pause-list .title-menu button {
+  align-items: center;
+}
+.pause-list .title-menu kbd {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* Tabs switched with Q and E, shared by Key bindings and the Map legend. */
+.game-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.game-tabs button {
+  padding: 8px 14px;
+  font: inherit;
+  font-size: calc(14px * var(--text-scale, 1));
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+.game-tabs button.active {
+  color: var(--ink);
+  border-bottom-color: #c1cdb5;
+  font-weight: 600;
+}
+.game-tabs kbd {
+  opacity: 0.8;
+}
+
+.dialog.wide-dialog {
+  width: 520px;
+  padding: 24px 28px;
+  background: rgb(12 13 14 / 0.96);
+  border: 0;
+  border-radius: 8px;
+}
+.dialog.wide-dialog h2 {
+  font-size: calc(26px * var(--text-scale, 1));
+  font-weight: 650;
+}
+.details-dialog .world-preview {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 20 / 9;
+  margin-bottom: 18px;
+  border-radius: 6px;
+}
+.details-dialog .review-rows {
+  font-size: 13px;
+}
+.details-dialog .form-label {
+  margin: 18px 0 8px;
+}
+.details-biomes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.details-biomes li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  font-size: 12px;
+  background: rgb(255 255 255 / 0.05);
+  border-radius: 999px;
+}
+.details-biomes i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.dialog.wide-dialog {
+  width: 600px;
+}
+.details-dialog .world-preview {
+  aspect-ratio: 3 / 1;
+  margin-bottom: 16px;
+}
+.details-dialog .review-rows {
+  grid-template-columns: auto 1fr auto 1fr;
+  gap: 8px 14px;
+}
+.dialog.wide-dialog .row {
+  margin-top: 18px;
+}
+
+.death-centre .death-where,
+.death-centre .death-items {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+.death-centre .death-items {
+  margin-bottom: 28px;
+}
+.death-centre .death-actions .btn {
+  min-width: 180px;
+}
+.death-centre .death-actions .btn kbd {
+  margin-left: 10px;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* Edit and Delete sit on the tile for the mouse; E and Del do the same from the keys. */
+.world-slot {
+  position: relative;
+}
+.world-slot .slot-tile {
+  width: 100%;
+  height: 100%;
+}
+.slot-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.world-slot:hover .slot-actions,
+.world-slot:focus-within .slot-actions {
+  opacity: 1;
+}
+.slot-actions .field-action {
+  position: static;
+  transform: none;
+  width: 30px;
+  height: 30px;
+  color: var(--ink);
+  background: rgb(10 11 12 / 0.82);
+}
+.slot-actions .field-action.danger:hover {
+  color: #f4c3ba;
+}
+/* A stepped screen keeps one height, so its main button never moves between steps. */
+.game .workspace:has(.menu-sheet):has(> .rail) {
+  align-self: stretch;
+}
+.game .workspace:has(> .rail) > .menu-sheet .body {
+  flex: 1;
+}
+.fixed-label {
+  display: block;
+  margin-top: 22px;
+}
+.fixed-rows {
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  font-size: 13px;
+}
+.sheet-secondary {
+  margin-right: auto;
+}
+/* Edit World's buttons span the form column, so Save changes ends where the
+   fields end; the preview column (260 px and a 32 px gap) stays clear. */
+.game[data-view="edit"] .sheet-actions {
+  padding-right: calc(32px + 260px + 32px);
+}
+@media (max-width: 900px) {
+  .game[data-view="edit"] .sheet-actions {
+    padding-right: 32px;
+  }
+}
+.seed-number {
+  font-variant-numeric: tabular-nums;
+}
+.seed-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.review-rows dt {
+  white-space: nowrap;
+}
+.review-rows dd {
+  min-width: 0;
+}
+/* The fixed-settings list needs room for a 20-digit seed and its copy button. */
+.game[data-view="edit"] .world-form {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+.game[data-view="edit"] .sheet-actions {
+  padding-right: calc(32px + 320px + 32px);
+}
+@media (max-width: 900px) {
+  .game[data-view="edit"] .world-form {
+    grid-template-columns: 1fr;
+  }
+  .game[data-view="edit"] .sheet-actions {
+    padding-right: 32px;
+  }
+}
+
+/* World details is lighter than the sheet's 0.9 because it sits on an already-dimmed pause screen. */
+.game .dialog:has(.details-dialog) {
+  background: linear-gradient(90deg, rgb(10 11 12 / 0.62), rgb(10 11 12 / 0.5));
+  background-color: transparent;
+  backdrop-filter: blur(6px);
+  border: 0;
+  box-shadow: none;
+}
+.game .overlay:has(.details-dialog) {
+  background: rgb(9 10 12 / 0.3);
+}
+
+/* The Client's `pages::Reading` note: a quiet line, no spinner — the read takes ~0.3 s. */
+.reading-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.reading-sim {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  margin: 0;
+  padding: 6px 8px;
+}

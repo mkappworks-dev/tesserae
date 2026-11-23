@@ -162,14 +162,22 @@ mod tests {
     }
 
     #[test]
-    fn a_world_with_no_biome_colours_sends_nothing() {
-        for biomes in [vec![], vec![biome("a", 0.9, None), biome("b", 0.1, None)]] {
-            let mut app = app(&biomes);
-            for x in [0.0, 120.0, 800.0] {
-                move_eye(&mut app, x);
-                assert!(tick(&mut app).is_empty());
-            }
+    fn a_world_with_no_biomes_sends_nothing() {
+        let mut app = app(&[]);
+        for x in [0.0, 120.0, 800.0] {
+            move_eye(&mut app, x);
+            assert!(tick(&mut app).is_empty());
         }
+    }
+
+    #[test]
+    fn biomes_with_no_colours_send_the_default_sky_blue_and_white() {
+        let mut app = app(&[biome("a", 0.9, None), biome("b", 0.1, None)]);
+        let sent = tick(&mut app);
+        let bytes = |c: [f32; 3]| c.map(|v| (v * 255.0).round() as u8);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(bytes(sent[0].sky), [0x87, 0xce, 0xeb]);
+        assert_eq!(bytes(sent[0].fog), [0xff, 0xff, 0xff]);
     }
 
     #[test]

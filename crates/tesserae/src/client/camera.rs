@@ -136,10 +136,14 @@ fn show_hint(
     labels: Res<super::actions::Labels>,
     touch: Res<super::touch::TouchFrame>,
     covers: super::menu::Covers,
-    dead: Option<Res<super::death::Dead>>,
+    (dead, layout): (
+        Option<Res<super::death::Dead>>,
+        Option<Res<super::layout_menu::LayoutMenu>>,
+    ),
 ) {
-    // Covering screens and the death screen free the cursor too, but say where to go themselves.
-    let covered = super::menu::covered(&covers);
+    // Covering screens and the death screen free the cursor too, but say where to go themselves;
+    // Quick layout's prompt bar takes the corner the hint sits in.
+    let covered = super::menu::covered(&covers) || layout.is_some_and(|layout| layout.open);
     let wanted =
         if cursor.grab_mode == CursorGrabMode::None && !covered && super::death::alive(dead) {
             Visibility::Inherited
@@ -336,7 +340,7 @@ fn fly(
         let level = preferences.speed_level.next();
         preferences.speed_level = level;
         pending.0 = Some(super::view::SAVE_AFTER_S);
-        super::menu_ui::notify(&mut commands, level.label(), super::menu_ui::Tone::Change);
+        super::menu_ui::notify(&mut commands, level.label(), super::menu_ui::Tone::Info);
     }
     intents.write(MovementIntent {
         cancelled: !playing || actions.started(Action::Respawn),
@@ -356,6 +360,37 @@ fn fly(
 mod tests {
     use super::*;
     use bevy::input::gamepad::GamepadButton;
+
+    #[test]
+    fn the_look_around_hint_gives_way_to_quick_layout_s_prompt_bar() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .init_resource::<super::super::actions::Labels>()
+            .init_resource::<super::super::touch::TouchFrame>()
+            .init_resource::<super::super::layout_menu::LayoutMenu>();
+        app.world_mut().spawn((
+            Window::default(),
+            PrimaryWindow,
+            CursorOptions {
+                grab_mode: CursorGrabMode::None,
+                ..default()
+            },
+        ));
+        let hint = app
+            .world_mut()
+            .spawn((CursorHint, Visibility::Hidden, Text::default()))
+            .id();
+        let shown = |app: &mut App| {
+            app.world_mut().run_system_once(show_hint).unwrap();
+            app.world().get::<Visibility>(hint).copied()
+        };
+        assert_eq!(shown(&mut app), Some(Visibility::Inherited));
+        app.world_mut()
+            .resource_mut::<super::super::layout_menu::LayoutMenu>()
+            .open = true;
+        assert_eq!(shown(&mut app), Some(Visibility::Hidden));
+    }
 
     fn pad_app(mode: crate::server::player::MovementMode) -> App {
         let mut app = App::new();
@@ -623,7 +658,8 @@ mod tests {
             .iter(app.world())
             .map(|text| text.0.clone())
             .collect();
-        assert_eq!(toasts, ["Speed 1"], "each press names the new level");
+        assert_eq!(toasts.len(), 5, "each press names the new level");
+        assert_eq!(toasts.last().map(String::as_str), Some("Speed 1"));
         // Nothing but another press changes it, a stop and a respawn included.
         app.update();
         let after = app

@@ -32,6 +32,7 @@ mod sandbox;
 mod settlement;
 mod sound;
 mod template;
+mod thumbnail;
 mod trust;
 mod underground;
 
@@ -66,13 +67,17 @@ pub use manifest::{
 pub use marker::{MAX_MARKER_KINDS_PER_MOD, resolve_markers};
 pub use package::{Staged, stage};
 pub use plant::{DeclaredPlants, MAX_PLANTS, MAX_PLANTS_PER_MOD};
-pub use prompt::{confirm_trust, trust_prompt};
+pub use prompt::{ABILITIES, INABILITY, LimitRow, confirm_trust, limit_rows, trust_prompt};
 pub use recipe::{DeclaredRecipes, MAX_RECIPES, MAX_RECIPES_PER_MOD};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
 pub use settlement::DeclaredSettlements;
 pub use sound::{Sound, Sounds, Soundscape, resolve_sounds};
 pub use template::DeclaredTemplates;
+pub use thumbnail::{
+    MAX_SUMMARY_DECLARATION_BYTES, MAX_THUMBNAIL_BYTES, Summary, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH,
+    Thumbnail,
+};
 pub use trust::{CheckedPayload, Trust, Untrusted, Verdict};
 pub use underground::DeclaredUnderground;
 

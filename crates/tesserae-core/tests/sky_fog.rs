@@ -2,7 +2,7 @@
 //! space, through the generator's public query.
 
 use tesserae_core::{
-    Biome, BiomeName, BiomeTable, ClimateParams, SkyFog, Worldgen, WorldgenParams,
+    Biome, BiomeName, BiomeSelectors, BiomeTable, ClimateParams, SkyFog, Worldgen, WorldgenParams,
 };
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
@@ -64,11 +64,70 @@ fn bytes(c: [f32; 3]) -> [f32; 3] {
 }
 
 #[test]
-fn a_world_with_no_biome_colours_has_none_to_send() {
-    let uncoloured = [biome("a", 0.8, 0.2, None), biome("b", 0.1, 0.6, None)];
-    for biomes in [&[][..], &uncoloured[..]] {
-        let g = generator(biomes);
-        assert!(grid().all(|(x, z)| g.sky_fog_at(x, z).is_none()));
+fn a_world_with_no_biomes_has_none_to_send() {
+    let g = generator(&[]);
+    assert!(grid().all(|(x, z)| g.sky_fog_at(x, z).is_none()));
+}
+
+#[test]
+fn the_default_is_sky_blue_and_white() {
+    assert_eq!(SkyFog::DEFAULT.sky, [0x87, 0xce, 0xeb]);
+    assert_eq!(SkyFog::DEFAULT.fog, [0xff, 0xff, 0xff]);
+}
+
+#[test]
+fn biomes_that_declare_no_colours_give_the_default_everywhere() {
+    let g = generator(&[biome("a", 0.8, 0.2, None), biome("b", 0.1, 0.6, None)]);
+    for (x, z) in grid() {
+        let got = g.sky_fog_at(x, z).unwrap();
+        assert_eq!(
+            bytes(got.sky).map(f32::round),
+            SkyFog::DEFAULT.sky.map(f32::from)
+        );
+        assert_eq!(
+            bytes(got.fog).map(f32::round),
+            SkyFog::DEFAULT.fog.map(f32::from)
+        );
+    }
+}
+
+#[test]
+fn a_biome_without_colours_does_not_dilute_the_ones_that_have_them() {
+    let mixed = [
+        biome("dry", 0.8, 0.2, Some(DRY)),
+        biome("bare", 0.1, 0.6, None),
+    ];
+    let g = generator(&mixed);
+    for (x, z) in grid() {
+        let got = g.sky_fog_at(x, z).unwrap();
+        assert_eq!(bytes(got.sky).map(f32::round), DRY.sky.map(f32::from));
+    }
+}
+
+#[test]
+fn a_colourless_landform_biome_carries_on_the_sky_around_it() {
+    let everywhere = BiomeSelectors {
+        altitude_m: Some([-1.0e6, 1.0e6]),
+        ..Default::default()
+    };
+    let table = BiomeTable::new(&[
+        biome("dry", 0.8, 0.2, Some(DRY)),
+        biome("mountain", 0.5, 0.5, None),
+    ])
+    .unwrap()
+    .with_selectors(&[BiomeSelectors::default(), everywhere])
+    .unwrap();
+    let g = Worldgen::new(
+        SEED,
+        1.0,
+        WorldgenParams {
+            biomes: table,
+            ..WorldgenParams::default()
+        },
+    );
+    for (x, z) in grid() {
+        let got = g.sky_fog_at(x, z).unwrap();
+        assert_eq!(bytes(got.sky).map(f32::round), DRY.sky.map(f32::from));
     }
 }
 
@@ -168,17 +227,4 @@ fn the_colours_are_a_pure_function_of_the_seed() {
     assert!(grid().all(|(x, z)| a.sky_fog_at(x, z) == b.sky_fog_at(x, z)));
     let other = generator_with(SEED + 1, 1.0, &two_coloured());
     assert!(grid().any(|(x, z)| a.sky_fog_at(x, z) != other.sky_fog_at(x, z)));
-}
-
-#[test]
-fn a_biome_without_colours_does_not_dilute_the_ones_that_have_them() {
-    let mixed = [
-        biome("dry", 0.8, 0.2, Some(DRY)),
-        biome("bare", 0.1, 0.6, None),
-    ];
-    let g = generator(&mixed);
-    for (x, z) in grid() {
-        let got = g.sky_fog_at(x, z).unwrap();
-        assert_eq!(bytes(got.sky).map(f32::round), DRY.sky.map(f32::from));
-    }
 }

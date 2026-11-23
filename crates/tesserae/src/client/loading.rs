@@ -7,8 +7,6 @@ use bevy::prelude::*;
 
 use super::camera::{FlyCamera, MainCamera};
 use super::chunk_view::ChunkEntities;
-use super::cinematic as cine;
-use super::menu_ui as ui;
 use super::theme;
 use super::worlds::pages::fill;
 use crate::open::{Load, OpenRequest, Stage};
@@ -24,6 +22,8 @@ struct Loading {
     /// The furthest the bar has reached: the ring follows the Eye, so the
     /// share of it held can fall.
     reached: f32,
+    /// When the ground was drawn and the screen began to fade.
+    fading_since_s: Option<f32>,
 }
 
 #[derive(Component)]
@@ -32,17 +32,24 @@ struct StageText;
 #[derive(Component)]
 struct BarFill;
 
-/// The scenery behind the card, opaque so nothing of the unfinished World shows through.
+/// The scenery behind the screen, opaque so nothing of the unfinished World shows through.
 #[derive(Component)]
 struct Backdrop;
 
+/// The Game and World name and the tip, at the lower left.
 #[derive(Component)]
-struct Card;
+struct Title;
 
 /// The scenery the World list last painted, handed to the loading screen so it opens over the
 /// same landscape without painting it again.
 #[derive(Resource)]
 pub(super) struct Landscape(pub(super) Handle<Image>);
+
+/// The Game of the World the list is opening, named over the World's name.
+#[derive(Resource)]
+pub(super) struct Heading {
+    pub(super) game: Option<String>,
+}
 
 /// The screen is drawn before the World has a camera of its own.
 #[derive(Component)]
@@ -51,10 +58,24 @@ struct LoadingCamera;
 /// Longest the loading screen waits for the ground, e.g. for a World saved without a Game.
 const LOADING_TIMEOUT_S: f32 = 15.0;
 
-const CARD_WIDTH_PX: f32 = 300.0;
-const CARD_PAD_PX: f32 = 25.0;
-/// The card's width inside its padding and frame.
-const BAR_WIDTH_PX: f32 = CARD_WIDTH_PX - 2.0 * (CARD_PAD_PX + theme::FRAME);
+/// How long the screen takes to fade into the World once the ground is drawn.
+const FADE_S: f32 = 0.4;
+
+/// Inset of the title and the bar from the screen's sides.
+const INSET_VW: f32 = 4.0;
+
+/// Tips that name no key, so a rebound key or a controller never makes one wrong.
+const TIPS: [&str; 3] = [
+    "Waypoints stay on the Map where you leave them.",
+    "The Catalogue lists every Material the Game declares.",
+    "A World keeps the Game and Mods it was created with.",
+];
+
+/// Chosen by the World's name, so the list's Opening screen and the loading screen after it
+/// show the same tip.
+pub(super) fn tip(world: &str) -> &'static str {
+    TIPS[world.bytes().map(usize::from).sum::<usize>() % TIPS.len()]
+}
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(OnEnter(AppState::Loading), show_loading)
@@ -95,14 +116,16 @@ fn hand_behind_loading(
 fn show_loading(
     mut commands: Commands,
     request: Option<Res<OpenRequest>>,
-    landscape: Option<Res<Landscape>>,
+    (landscape, heading): (Option<Res<Landscape>>, Option<Res<Heading>>),
     time: Res<Time<Real>>,
 ) {
     commands.remove_resource::<Landscape>();
+    commands.remove_resource::<Heading>();
     let Some(request) = request.filter(|r| r.from_list) else {
         return;
     };
     let name = request.name.clone().unwrap_or_default();
+    let game = heading.and_then(|h| h.game.clone());
     commands.spawn((Camera2d, LoadingCamera));
     commands
         .spawn((
@@ -111,6 +134,7 @@ fn show_loading(
                 stage: Stage::ReadingSave,
                 stage_since_s: time.elapsed_secs(),
                 reached: 0.0,
+                fading_since_s: None,
             },
             GlobalZIndex(200),
             Node {
@@ -126,43 +150,7 @@ fn show_loading(
                 backdrop.insert(ImageNode::new(landscape.0.clone()));
             }
             screen.spawn((theme::shade(), fill()));
-            opening(screen, &name, Card, |card| {
-                card.spawn((
-                    StageText,
-                    Text::new(Stage::ReadingSave.label()),
-                    TextFont {
-                        font_size: bevy::text::FontSize::Px(12.0),
-                        ..default()
-                    },
-                    TextColor(theme::muted()),
-                    Node {
-                        margin: UiRect::top(Val::Px(14.0)),
-                        ..default()
-                    },
-                ));
-                card.spawn((
-                    Node {
-                        width: Val::Px(BAR_WIDTH_PX),
-                        height: Val::Px(4.0),
-                        margin: UiRect::top(Val::Px(8.0)),
-                        border_radius: BorderRadius::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BackgroundColor(theme::RAISED),
-                ))
-                .with_children(|track| {
-                    track.spawn((
-                        BarFill,
-                        Node {
-                            width: Val::Px(0.0),
-                            height: Val::Percent(100.0),
-                            border_radius: BorderRadius::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(theme::SAGE),
-                    ));
-                });
-            });
+            opening(screen, game.as_deref(), &name);
         });
 }
 
@@ -172,58 +160,96 @@ fn drop_camera(mut commands: Commands, cameras: Query<Entity, With<LoadingCamera
     }
 }
 
-/// The Opening card, where the Menu's panel sits. The World list draws it until the loader takes
-/// over, and the loading screen draws it again with the loader's stages `below` its lines.
-pub(super) fn opening(
-    main: &mut ChildSpawnerCommands,
-    name: &str,
-    marker: impl Bundle,
-    below: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    main.spawn(Node {
-        flex_grow: 1.0,
-        align_items: AlignItems::Center,
-        padding: UiRect::horizontal(Val::Vw(5.0)),
-        ..default()
-    })
-    .with_children(|screen| {
-        screen
-            .spawn((
-                marker,
-                cine::surface(theme::panel()),
-                cine::framed(Node {
-                    width: Val::Px(CARD_WIDTH_PX),
-                    padding: UiRect::all(Val::Px(CARD_PAD_PX)),
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                }),
-            ))
-            .with_children(|card| {
-                card.spawn((
-                    Text::new(format!("Opening {name}\u{2026}")),
-                    theme::weighted(theme::TEXT_PANEL_TITLE, theme::BOOK),
-                    bevy::text::LineHeight::RelativeToFont(1.2),
-                    TextColor(theme::INK),
-                    Node {
-                        margin: UiRect::new(
-                            Val::Px(0.0),
-                            Val::Px(0.0),
-                            Val::Px(10.0),
-                            Val::Px(6.0),
-                        ),
-                        ..default()
-                    },
+/// The opening World's Game and name with a tip at the lower left, and a slim bar along the
+/// bottom. The World list draws it until the loader takes over, and the loading screen draws it
+/// again with the loader's stages on the bar.
+pub(super) fn opening(screen: &mut ChildSpawnerCommands, game: Option<&str>, name: &str) {
+    let shadow = TextShadow {
+        offset: Vec2::new(0.0, 2.0),
+        color: Color::BLACK.with_alpha(0.5),
+    };
+    screen
+        .spawn((
+            Title,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Vw(INSET_VW),
+                bottom: Val::Px(96.0),
+                max_width: Val::Px(720.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        ))
+        .with_children(|title| {
+            if let Some(game) = game {
+                title.spawn((
+                    Text::new(game.to_uppercase()),
+                    theme::font(theme::TEXT_SMALL),
+                    bevy::text::LetterSpacing::Px(0.2 * theme::TEXT_SMALL),
+                    TextColor(theme::muted()),
+                    shadow,
                     Pickable::IGNORE,
                 ));
-                ui::paragraph(
-                    card,
-                    "Loading the World.",
-                    theme::TEXT_SMALL,
-                    theme::muted(),
-                );
-                below(card);
+            }
+            title.spawn((
+                Text::new(name),
+                theme::weighted(52.0, theme::STRONG),
+                bevy::text::LetterSpacing::Px(-0.02 * 52.0),
+                TextColor(theme::INK),
+                shadow,
+                Node {
+                    margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(6.0), Val::Px(14.0)),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+            title.spawn((
+                Text::new(tip(name)),
+                theme::font(theme::TEXT_BODY),
+                TextColor(theme::INK.with_alpha(0.85)),
+                shadow,
+                Pickable::IGNORE,
+            ));
+        });
+    screen
+        .spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Vw(INSET_VW),
+            right: Val::Vw(INSET_VW),
+            bottom: Val::Px(40.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|bar| {
+            bar.spawn((
+                StageText,
+                Text::new(Stage::ReadingSave.label()),
+                theme::font(12.0),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+            ));
+            bar.spawn((
+                Node {
+                    height: Val::Px(3.0),
+                    border_radius: BorderRadius::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(theme::RAISED),
+            ))
+            .with_children(|track| {
+                track.spawn((
+                    BarFill,
+                    Node {
+                        width: Val::Percent(0.0),
+                        height: Val::Percent(100.0),
+                        border_radius: BorderRadius::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(theme::SAGE),
+                ));
             });
-    });
+        });
 }
 
 /// Inside a stage the bar sweeps toward the next one without reaching it: the
@@ -300,22 +326,90 @@ fn progress(
             text.0 = stage.label().into();
         }
         for mut node in &mut fill {
-            node.width = Val::Px(BAR_WIDTH_PX * screen.reached);
+            node.width = Val::Percent(100.0 * screen.reached);
         }
     }
 }
 
+/// Each colour as drawn before the fade began, which every frame of it scales.
+#[derive(Component, Clone)]
+struct Unfaded {
+    background: Option<Color>,
+    text: Option<Color>,
+    image: Option<Color>,
+    gradient: Option<BackgroundGradient>,
+}
+
+type Paint = (
+    Option<&'static mut BackgroundColor>,
+    Option<&'static mut TextColor>,
+    Option<&'static mut ImageNode>,
+    Option<&'static mut BackgroundGradient>,
+    Option<&'static Unfaded>,
+);
+
+/// Once the ground is drawn, or at the timeout, the screen fades into the World and goes.
 fn hide_loading(
     mut commands: Commands,
     time: Res<Time<Real>>,
     drawn: Option<Res<GroundDrawn>>,
-    screens: Query<(Entity, &Loading)>,
+    mut screens: Query<(Entity, &mut Loading)>,
+    children: Query<&Children>,
+    mut paint: Query<Paint>,
 ) {
-    for (screen, loading) in &screens {
-        if drawn.is_some() || time.elapsed_secs() - loading.since_s >= LOADING_TIMEOUT_S {
+    let now = time.elapsed_secs();
+    for (screen, mut loading) in &mut screens {
+        let done = drawn.is_some() || now - loading.since_s >= LOADING_TIMEOUT_S;
+        let Some(since) = loading.fading_since_s.or(done.then_some(now)) else {
+            continue;
+        };
+        loading.fading_since_s = Some(since);
+        let left = 1.0 - (now - since) / FADE_S;
+        if left <= 0.0 {
             commands.entity(screen).despawn();
+            continue;
+        }
+        for entity in std::iter::once(screen).chain(children.iter_descendants(screen)) {
+            let Ok((background, text, image, gradient, unfaded)) = paint.get_mut(entity) else {
+                continue;
+            };
+            let unfaded = unfaded.cloned().unwrap_or_else(|| {
+                let first = Unfaded {
+                    background: background.as_ref().map(|b| b.0),
+                    text: text.as_ref().map(|t| t.0),
+                    image: image.as_ref().map(|i| i.color),
+                    gradient: gradient.as_deref().cloned(),
+                };
+                commands.entity(entity).insert(first.clone());
+                first
+            });
+            let scaled = |c: Color| c.with_alpha(c.alpha() * left);
+            if let (Some(mut b), Some(c)) = (background, unfaded.background) {
+                b.0 = scaled(c);
+            }
+            if let (Some(mut t), Some(c)) = (text, unfaded.text) {
+                t.0 = scaled(c);
+            }
+            if let (Some(mut i), Some(c)) = (image, unfaded.image) {
+                i.color = scaled(c);
+            }
+            if let (Some(mut g), Some(from)) = (gradient, unfaded.gradient) {
+                *g = faded(from, left);
+            }
         }
     }
+}
+
+fn faded(mut gradient: BackgroundGradient, left: f32) -> BackgroundGradient {
+    let scale = |c: &mut Color| *c = c.with_alpha(c.alpha() * left);
+    for layer in &mut gradient.0 {
+        match layer {
+            Gradient::Linear(g) => g.stops.iter_mut().for_each(|s| scale(&mut s.color)),
+            Gradient::Radial(g) => g.stops.iter_mut().for_each(|s| scale(&mut s.color)),
+            Gradient::Conic(g) => g.stops.iter_mut().for_each(|s| scale(&mut s.color)),
+        }
+    }
+    gradient
 }
 
 /// Inserted by the Client once any terrain is drawn.
@@ -361,6 +455,9 @@ mod tests {
                 what: crate::open::What::Direct,
                 name: Some("Test".into()),
                 from_list: true,
+            })
+            .insert_resource(Heading {
+                game: Some("Terra".into()),
             });
         add_screen_systems(&mut app);
         app.world_mut().spawn((
@@ -401,16 +498,16 @@ mod tests {
             .is_some()
     }
 
-    fn bar_px(app: &mut App) -> f32 {
+    fn bar(app: &mut App) -> f32 {
         let node = app
             .world_mut()
             .query_filtered::<&Node, With<BarFill>>()
             .single(app.world())
             .unwrap();
-        let Val::Px(px) = node.width else {
-            panic!("the bar is sized in pixels");
+        let Val::Percent(share) = node.width else {
+            panic!("the bar runs across the screen");
         };
-        px
+        share
     }
 
     fn count<C: Component>(app: &mut App) -> usize {
@@ -437,14 +534,14 @@ mod tests {
             1.0,
             "nothing of the World shows before the landscape is drawn"
         );
-        assert_eq!(count::<Card>(&mut app), 1);
+        assert_eq!(count::<Title>(&mut app), 1);
         let world = app.world_mut();
         let root = world
             .query_filtered::<Entity, With<Loading>>()
             .single(world)
             .unwrap();
         let card = world
-            .query_filtered::<Entity, With<Card>>()
+            .query_filtered::<Entity, With<Title>>()
             .single(world)
             .unwrap();
         let mut parents = world.query::<&ChildOf>();
@@ -469,12 +566,13 @@ mod tests {
         let mut app = screen();
         app.update();
         assert_eq!(count::<Backdrop>(&mut app), 1);
-        assert_eq!(count::<Card>(&mut app), 1);
+        assert_eq!(count::<Title>(&mut app), 1);
         let ring = ring(&app);
         land(&mut app, ring.iter().map(|&c| (0, c)));
         app.update();
+        app.update();
         assert_eq!(count::<Backdrop>(&mut app), 0);
-        assert_eq!(count::<Card>(&mut app), 0);
+        assert_eq!(count::<Title>(&mut app), 0);
     }
 
     #[test]
@@ -492,16 +590,64 @@ mod tests {
         assert!(!app.world().contains_resource::<GroundDrawn>());
     }
 
+    fn backdrop_alpha(app: &mut App) -> f32 {
+        app.world_mut()
+            .query_filtered::<&BackgroundColor, With<Backdrop>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .alpha()
+    }
+
     #[test]
-    fn the_screen_hides_when_every_cell_of_the_ring_holds_a_level_zero_mesh() {
+    fn the_screen_fades_out_when_every_cell_of_the_ring_holds_a_level_zero_mesh() {
         let mut app = screen();
         let ring = ring(&app);
         app.update();
         assert!(shown(&mut app));
+        assert_eq!(backdrop_alpha(&mut app), 1.0);
         land(&mut app, ring.iter().map(|&c| (0, c)));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            100,
+        )));
         app.update();
-        assert!(!shown(&mut app));
         assert!(app.world().contains_resource::<GroundDrawn>());
+        app.update();
+        let fading = backdrop_alpha(&mut app);
+        assert!(0.0 < fading && fading < 1.0, "{fading}");
+        app.update();
+        assert!(backdrop_alpha(&mut app) < fading, "it keeps fading");
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(!shown(&mut app));
+    }
+
+    fn texts(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_screen_names_the_game_and_the_world_with_a_tip_over_a_slim_bar() {
+        let mut app = screen();
+        app.update();
+        let shown = texts(&mut app);
+        for line in [
+            "TERRA",
+            "Test",
+            "A World keeps the Game and Mods it was created with.",
+            Stage::Ground.label(),
+        ] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        assert!(
+            !shown.iter().any(|t| t.starts_with("Opening")),
+            "no card: {shown:?}"
+        );
     }
 
     #[test]
@@ -517,6 +663,7 @@ mod tests {
         assert!(!active(&app));
         let ring = ring(&app);
         land(&mut app, ring.iter().map(|&c| (0, c)));
+        app.update();
         app.update();
         assert!(!shown(&mut app));
         assert!(active(&app));
@@ -540,19 +687,19 @@ mod tests {
     fn the_bar_follows_the_ground_held_and_never_moves_back() {
         let mut app = screen();
         app.update();
-        let swept = bar_px(&mut app);
+        let swept = bar(&mut app);
         let ring = ring(&app);
         land(
             &mut app,
             ring[..ring.len() * 19 / 20].iter().map(|&c| (0, c)),
         );
         app.update();
-        let counted = bar_px(&mut app);
+        let counted = bar(&mut app);
         assert!(
             counted > swept,
             "{counted} leads the sweep {swept} once most of the ring is held"
         );
-        assert!(counted < BAR_WIDTH_PX);
+        assert!(counted < 100.0);
         // The Eye moves on, so little of the ring around it is held.
         app.world_mut()
             .query::<&mut FlyCamera>()
@@ -560,7 +707,7 @@ mod tests {
             .unwrap()
             .eye = EYE + Vec3::X * 1_000.0;
         app.update();
-        assert!(bar_px(&mut app) >= counted);
+        assert!(bar(&mut app) >= counted);
     }
 
     #[test]

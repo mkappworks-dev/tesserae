@@ -9,10 +9,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::template::Turn;
 
@@ -22,7 +20,7 @@ use super::edit::{Catalogue, Holding, Hotbar};
 use super::input::Ownership;
 use crate::content::{CatalogueTemplate, ContentCatalogue};
 use crate::server::edit::{
-    RejectReason, StructureAim, StructureAnswer, StructureCell, StructureIntent,
+    RejectReason, StructureAim, StructureAnswer, StructureBuilt, StructureCell, StructureIntent,
 };
 use crate::server::tool::ToolKind;
 use crate::session::SessionApp;
@@ -49,15 +47,6 @@ pub(super) enum Tint {
 
 impl Tint {
     pub(super) const ALL: [Tint; 4] = [Tint::Free, Tint::Ground, Tint::Water, Tint::Blocked];
-
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Tint::Free => "Free",
-            Tint::Ground => "Replaces ground",
-            Tint::Water => "Replaces water",
-            Tint::Blocked => "Blocked",
-        }
-    }
 
     /// The prototype's tint and its opacity.
     pub(super) fn color(self) -> Color {
@@ -119,7 +108,10 @@ pub(super) enum Outcome {
 impl Outcome {
     pub(super) fn text(self) -> String {
         match self {
-            Outcome::Whole(count) => format!("{} Voxels, placed whole, free.", grouped(count)),
+            Outcome::Whole(count) => format!(
+                "{} Voxels, placed whole, free.",
+                super::menu_ui::grouped(count as u64)
+            ),
             Outcome::Waiting => "Waiting for Chunks to load…".to_owned(),
             // The shared reason speaks of single Voxels placed without an Item.
             Outcome::Refused(RejectReason::CreativeOnly) => {
@@ -128,19 +120,6 @@ impl Outcome {
             Outcome::Refused(reason) => reason.message().to_owned(),
         }
     }
-}
-
-/// A count with its thousands set apart, as the prototype writes them.
-pub(super) fn grouped(count: usize) -> String {
-    let digits = count.to_string();
-    let mut out = String::new();
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
 }
 
 /// The Tool's choices: which Template, how turned, and whether the list is up.
@@ -152,6 +131,10 @@ pub(super) struct PlaceTool {
     /// The preview the Player pinned: its anchor, and the heading it was aimed along, which
     /// centres it as it did then.
     pub(super) pinned: Option<([i32; 3], Vec3)>,
+    /// The last Template was built whole: none is chosen until the Player picks again.
+    spent: bool,
+    /// Set by a build, for the panel to open full to pick the next.
+    pub(super) reopen: bool,
 }
 
 /// The presses [`intercept`] took this frame, for [`act`] to answer once the camera is placed.
@@ -164,20 +147,49 @@ pub(super) struct Pressed {
 }
 
 impl PlaceTool {
-    /// The chosen Template, or the first the World declares.
+    /// The chosen Template, or the first the World declares; none once one is built.
     pub(super) fn chosen<'a>(
         &self,
         catalogue: &'a ContentCatalogue,
     ) -> Option<&'a CatalogueTemplate> {
-        let named = self
-            .template
+        if self.spent {
+            return None;
+        }
+        self.named(catalogue).or(catalogue.templates.first())
+    }
+
+    fn named<'a>(&self, catalogue: &'a ContentCatalogue) -> Option<&'a CatalogueTemplate> {
+        self.template
             .as_ref()
-            .and_then(|name| catalogue.templates.iter().find(|t| t.name == *name));
-        named.or(catalogue.templates.first())
+            .and_then(|name| catalogue.templates.iter().find(|t| t.name == *name))
     }
 
     pub(super) fn choose(&mut self, name: &str) {
         self.template = Some(name.to_owned());
+        self.spent = false;
+    }
+
+    /// Chooses the Template `by` places on from the last one, round the list; after a build
+    /// the first step picks the one beside it.
+    pub(super) fn step(&mut self, catalogue: &ContentCatalogue, by: i32) {
+        let count = catalogue.templates.len() as i32;
+        if count == 0 {
+            return;
+        }
+        let shown = self.named(catalogue).or(self.chosen(catalogue));
+        let at = shown
+            .and_then(|t| catalogue.templates.iter().position(|o| o == t))
+            .map_or(if by > 0 { -1 } else { 0 }, |at| at as i32);
+        let name = catalogue.templates[(at + by).rem_euclid(count) as usize]
+            .name
+            .clone();
+        self.choose(&name);
+    }
+
+    /// Built whole: the Template is spent and the panel opens to pick the next.
+    pub(super) fn spend(&mut self) {
+        self.spent = true;
+        self.reopen = true;
     }
 
     pub(super) fn intent(
@@ -303,13 +315,11 @@ pub(super) fn intercept(
         actions.cancel(Action::Respawn);
         actions.cancel(Action::Turn);
     }
-    // A stray click elsewhere never throws the preview away; the keys cancel it from anywhere.
-    if tool.pinned.is_some()
-        && (actions.started(Action::ClearTool) || actions.started(Action::Structures))
-    {
+    // A stray click elsewhere never throws the preview away; the clear key cancels it from
+    // anywhere.
+    if tool.pinned.is_some() && actions.started(Action::ClearTool) {
         tool.pinned = None;
         actions.cancel(Action::ClearTool);
-        actions.cancel(Action::Structures);
     }
     *pressed = Pressed {
         place: ready && actions.started(Action::Place),
@@ -326,6 +336,7 @@ pub(super) fn intercept(
 /// preview where the Server's fresh answer anchors it; near the pinned preview Use sends the
 /// Structure intent; Remove aimed at it cancels it.
 pub(super) fn act(
+    mut commands: Commands,
     ownership: Res<Ownership>,
     (hotbar, catalogue): (Res<Hotbar>, Res<Catalogue>),
     camera: Single<&GlobalTransform, With<FlyCamera>>,
@@ -346,14 +357,30 @@ pub(super) fn act(
     let on_pin =
         pinned && ghost.is_some_and(|g| aimed_at(&camera, g.corner, g.size, world.voxel_size));
     let near = pinned && ghost.is_some_and(|g| near(&camera, g.corner, g.size, world.voxel_size));
-    if pressed.place && !pinned {
-        pin(
+    if pressed.place
+        && !pinned
+        && let Some(intent) = &intent
+        && !pin(
             &mut tool,
             &preview,
             &catalogue.0,
             &camera,
             time.elapsed_secs_f64(),
-        );
+        )
+    {
+        // The Server never sees a pin, so its refusal is the aim's.
+        let refused = match preview.fresh(intent, time.elapsed_secs_f64()) {
+            Some(StructureAnswer {
+                ghost: Err(reason), ..
+            }) => *reason,
+            _ => RejectReason::OutOfReach,
+        };
+        let outcome = if waits(refused) {
+            Outcome::Waiting
+        } else {
+            Outcome::Refused(refused)
+        };
+        super::menu_ui::notify(&mut commands, &outcome.text(), super::menu_ui::Tone::Alert);
     }
     if pressed.use_
         && near
@@ -366,6 +393,23 @@ pub(super) fn act(
         tool.pinned = None;
     }
     prompt.set_if_neq(PinPrompt(tool.pinned.is_some() && near));
+}
+
+/// Unselects the Template once the Server says it was built whole, so a refused build keeps it
+/// chosen for another try.
+fn confirm_built(
+    mut confirmed: MessageReader<StructureBuilt>,
+    mut tool: ResMut<PlaceTool>,
+    catalogue: Res<Catalogue>,
+) {
+    for built in confirmed.read() {
+        if tool
+            .chosen(&catalogue.0)
+            .is_some_and(|chosen| chosen.name == built.template)
+        {
+            tool.spend();
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -593,54 +637,17 @@ impl Ghost {
 pub(super) struct GhostMesh(usize);
 
 const GHOST_INSET: f32 = 0.01;
-/// How solid the ghost's own colours stand: the World shows through.
-const GHOST_ALPHA: f32 = 0.7;
+/// How solid the ghost's own colours stand: low enough that the World under it
+/// reads through on bright sand and dark rock alike.
+const GHOST_ALPHA: f32 = 0.45;
 /// Wide enough to keep its depth apart from the face under it at 0.25 m.
 const GHOST_OUTSET: f32 = 0.02;
 
-/// Texels across a cell face, and how many of them its edge line takes.
-const EDGE_TEXELS: u32 = 32;
-const EDGE_LINE: u32 = 2;
-/// The prototype's cell edge.
-const EDGE: [u8; 4] = [0x10, 0x14, 0x10, 0xff];
-
 /// The prototype's opacity for a face looking along each axis, as a share of
-/// the top's: the sides read apart without light.
+/// the top's: the sides read apart without light or edge lines.
 const FACE_SHARE: [f32; 3] = [0.6, 1.0, 0.8];
 
-/// White with a dark rim, which the tint multiplies: every cell drawn with its
-/// edges, as the prototype's ghost is.
-fn edge_image() -> Image {
-    let mut data = Vec::with_capacity((EDGE_TEXELS * EDGE_TEXELS * 4) as usize);
-    for y in 0..EDGE_TEXELS {
-        for x in 0..EDGE_TEXELS {
-            let rim = [x, y]
-                .iter()
-                .any(|&t| !(EDGE_LINE..EDGE_TEXELS - EDGE_LINE).contains(&t));
-            data.extend(if rim { EDGE } else { [0xff; 4] });
-        }
-    }
-    let mut image = Image::new(
-        Extent3d {
-            width: EDGE_TEXELS,
-            height: EDGE_TEXELS,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::linear();
-    image
-}
-
-fn spawn_meshes(
-    mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    let edges = images.add(edge_image());
+fn spawn_meshes(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     // The Template's own colours ride on each cell; a refused cell keeps its tint.
     let looks = Tint::ALL.map(|tint| {
         let base_color = match tint {
@@ -649,7 +656,6 @@ fn spawn_meshes(
         };
         materials.add(StandardMaterial {
             base_color,
-            base_color_texture: Some(edges.clone()),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
@@ -675,7 +681,7 @@ fn hull(cells: &[([i32; 3], [f32; 3])], voxel_size: f32, grown: f32) -> Option<M
     }
     let present: HashSet<[i32; 3]> = cells.iter().map(|&(at, _)| at).collect();
     let (mut positions, mut normals, mut indices) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut uvs, mut shares) = (Vec::new(), Vec::new());
+    let mut shares = Vec::new();
     for &(cell, [r, g, b]) in cells {
         for axis in 0..3 {
             for up in [false, true] {
@@ -706,7 +712,6 @@ fn hull(cells: &[([i32; 3], [f32; 3])], voxel_size: f32, grown: f32) -> Option<M
                 let mut normal = [0.0; 3];
                 normal[axis] = if up { 1.0 } else { -1.0 };
                 normals.extend([normal; 4]);
-                uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
                 shares.extend([[r, g, b, FACE_SHARE[axis]]; 4]);
                 // u × v points along +axis, so the far side winds the other way.
                 if up {
@@ -724,7 +729,6 @@ fn hull(cells: &[([i32; 3], [f32; 3])], voxel_size: f32, grown: f32) -> Option<M
         )
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, shares)
         .with_inserted_indices(Indices::U32(indices)),
     )
@@ -800,7 +804,16 @@ pub(super) fn plugin(app: &mut App) {
                     .before(super::camera::reset)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (learn_palette, act, report, receive, track, build, outline)
+                (
+                    learn_palette,
+                    act,
+                    confirm_built,
+                    report,
+                    receive,
+                    track,
+                    build,
+                    outline,
+                )
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -860,6 +873,7 @@ mod tests {
             .init_resource::<PinPrompt>()
             .insert_resource(WorldSettings::default())
             .add_message::<StructureIntent>()
+            .add_message::<StructureBuilt>()
             .add_message::<StructureAim>()
             .add_message::<StructureAnswer>()
             .insert_resource(Catalogue(catalogue()));
@@ -880,7 +894,10 @@ mod tests {
                 Transform::from_xyz(1.0, 2.0, 3.0).looking_to(Vec3::NEG_Y, Vec3::Z),
             ),
         ));
-        app.add_systems(Update, (intercept, act, report, receive, track).chain());
+        app.add_systems(
+            Update,
+            (intercept, act, confirm_built, report, receive, track).chain(),
+        );
         // The first frame only notes that the cursor was already grabbed.
         app.update();
         app
@@ -978,7 +995,54 @@ mod tests {
             intent.direction.abs_diff_eq(Vec3::NEG_Y, 1e-6),
             "along the heading it was pinned with"
         );
-        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        let catalogue = app.world().resource::<Catalogue>().0.clone();
+        let tool = app.world().resource::<PlaceTool>();
+        assert!(tool.pinned.is_none());
+        assert!(
+            tool.chosen(&catalogue).is_some() && !tool.reopen,
+            "sent, not yet built: a refusal keeps the Template"
+        );
+        app.world_mut().write_message(StructureBuilt {
+            template: "terra:well".into(),
+        });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<PlaceTool>()
+                .chosen(&catalogue)
+                .is_some(),
+            "another Template's build leaves the choice"
+        );
+        app.world_mut().write_message(StructureBuilt {
+            template: "terra:cottage".into(),
+        });
+        app.update();
+        let tool = app.world().resource::<PlaceTool>();
+        assert!(tool.chosen(&catalogue).is_none(), "built, so unselected");
+        assert!(tool.reopen, "and the panel asked to open");
+        assert!(
+            frame(&mut app, None, Some(MouseButton::Right)).is_empty() && aims(&mut app).is_empty(),
+            "with none chosen there is no ghost to pin"
+        );
+    }
+
+    #[test]
+    fn stepping_after_a_build_picks_the_template_beside_the_last() {
+        let catalogue = catalogue();
+        let mut tool = PlaceTool::default();
+        tool.choose(&catalogue.templates[0].name);
+        tool.spend();
+        tool.step(&catalogue, 1);
+        assert_eq!(
+            tool.chosen(&catalogue).map(|t| &t.name),
+            Some(&catalogue.templates[1].name)
+        );
+        tool.step(&catalogue, 1);
+        assert_eq!(
+            tool.chosen(&catalogue).map(|t| &t.name),
+            Some(&catalogue.templates[0].name),
+            "round the list"
+        );
     }
 
     #[test]
@@ -1029,24 +1093,18 @@ mod tests {
     }
 
     #[test]
-    fn the_clear_and_structures_keys_cancel_the_pinned_preview_from_anywhere_and_are_taken() {
-        for key in [KeyCode::Backspace, KeyCode::KeyK] {
-            let mut app = pinned_app();
-            look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key);
-            app.update();
-            assert!(
-                app.world().resource::<PlaceTool>().pinned.is_none(),
-                "{key:?}"
-            );
-            let actions = app.world().resource::<Actions>();
-            assert!(
-                !actions.started(Action::ClearTool) && !actions.started(Action::Structures),
-                "{key:?}: the Tool stays in hand"
-            );
-        }
+    fn the_clear_key_cancels_the_pinned_preview_from_anywhere_and_is_taken() {
+        let mut app = pinned_app();
+        look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Backspace);
+        app.update();
+        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        assert!(
+            !app.world().resource::<Actions>().started(Action::ClearTool),
+            "the Tool stays in hand"
+        );
     }
 
     #[test]
@@ -1173,6 +1231,30 @@ mod tests {
         app.update();
         assert!(!app.world().resource::<Actions>().started(Action::Remove));
         assert!(frame(&mut app, None, None).is_empty());
+    }
+
+    #[test]
+    fn place_with_nothing_in_reach_pins_nothing_and_says_why_in_a_toast() {
+        use super::super::menu_ui::{Tone, showing};
+        let mut app = app(Holding::Tool(PLACE));
+        assert!(frame(&mut app, None, Some(MouseButton::Right)).is_empty());
+        let said = ("Nothing in reach.".to_owned(), Tone::Alert);
+        assert_eq!(
+            showing(app.world_mut()),
+            std::slice::from_ref(&said),
+            "no answer yet"
+        );
+        answer(&mut app, Err(RejectReason::InsidePlayer));
+        frame(&mut app, None, Some(MouseButton::Right));
+        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        assert_eq!(
+            showing(app.world_mut()),
+            [
+                said,
+                (RejectReason::InsidePlayer.message().to_owned(), Tone::Alert)
+            ],
+            "the Server's reason, as the status line words it"
+        );
     }
 
     #[test]
@@ -1368,6 +1450,38 @@ mod tests {
     }
 
     #[test]
+    fn ghost_faces_are_see_through_and_unrimmed() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>();
+        app.world_mut().run_system_once(spawn_meshes).unwrap();
+        let looks: Vec<StandardMaterial> = app
+            .world_mut()
+            .query::<(&GhostMesh, &MeshMaterial3d<StandardMaterial>)>()
+            .iter(app.world())
+            .map(|(_, look)| {
+                app.world()
+                    .resource::<Assets<StandardMaterial>>()
+                    .get(&look.0)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        assert_eq!(looks.len(), Tint::ALL.len());
+        for look in &looks {
+            assert!(look.base_color_texture.is_none(), "no dark rim on a face");
+            assert_eq!(look.alpha_mode, AlphaMode::Blend);
+        }
+        let alphas: Vec<f32> = looks.iter().map(|l| l.base_color.alpha()).collect();
+        assert!(
+            alphas
+                .iter()
+                .all(|&a| a <= 0.5 || a == Tint::Blocked.color().alpha())
+        );
+        assert!(alphas.contains(&Tint::Blocked.color().alpha()));
+    }
+
+    #[test]
     fn cells_that_replace_something_stand_proud_of_its_faces() {
         use bevy::ecs::system::RunSystemOnce;
         for voxel_size in [1.0, 0.5, 0.25] {
@@ -1378,7 +1492,6 @@ mod tests {
             })
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
-            .init_resource::<Assets<Image>>()
             .add_systems(Update, build.after(track));
             app.world_mut().run_system_once(spawn_meshes).unwrap();
             answer(
@@ -1417,17 +1530,5 @@ mod tests {
         assert_eq!(turned_size_m(cottage, Turn::NONE), [7.0, 8.0, 5.0]);
         assert_eq!(turned_size_m(cottage, Turn::new(1)), [5.0, 8.0, 7.0]);
         assert_eq!(turned_size_m(cottage, Turn::new(2)), [7.0, 8.0, 5.0]);
-    }
-
-    #[test]
-    fn counts_set_their_thousands_apart() {
-        for (n, text) in [
-            (0, "0"),
-            (999, "999"),
-            (1000, "1,000"),
-            (1234567, "1,234,567"),
-        ] {
-            assert_eq!(grouped(n), text);
-        }
     }
 }

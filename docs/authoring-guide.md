@@ -1448,6 +1448,22 @@ error: mod `starter_data`: declaration: appearance[1].texture: `art/turf.png` is
 error: mod `starter_data`: declaration: appearance[0].texture: `art/missing.png`: No such file or directory (os error 2)
 ```
 
+### Thumbnail
+
+`thumbnail = "thumbnail.png"` in `mod.toml` names the picture menus show for a
+Mod or Game: a PNG, exactly 512 by 288 pixels, at most 512 KiB, inside the
+folder. It is shown before Trust and is not part of the build, so changing the
+picture needs no new Trust. `package` copies it. A bad one refuses the folder:
+
+```text
+error: mod `starter_data`: mod.toml: thumbnail `thumb.png` is 256 by 144 pixels, expected 512 by 288
+error: mod `starter_data`: mod.toml: thumbnail `thumb.png` is larger than 524288 bytes
+```
+
+Without one, a data Mod is drawn as one swatch per Material, coloured from its
+`appearance` rows. The demo Games' and Mods' thumbnails come from
+`scripts/generate-thumbnails`.
+
 ## Confinement
 
 Every path in a Manifest or Declaration must be relative and stay inside the
@@ -1478,9 +1494,9 @@ exits 2). These are real outputs, each from one edit to the data starter:
 need it: the Engine asks on first use (or take `--trust-all` /
 `TESSERAE_TRUST_MODS=1` for a script) and records the build's hash. A build is
 the Manifest bytes, the Declaration or component bytes, and every PNG the
-Declaration references. Editor files, notes and unreferenced images are not part
-of it, so they never ask again or break anything. Changing a referenced PNG, or
-one byte of the Declaration, does.
+Declaration references. The `thumbnail` file is not. Editor files, notes and
+unreferenced images are not part of it, so they never ask again or break
+anything. Changing a referenced PNG, or one byte of the Declaration, does.
 
 A saved World requires the exact builds it was created with, dependencies
 included. Reopening with a changed build, or a Mod that is gone, is refused

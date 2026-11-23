@@ -4,10 +4,26 @@ Run `python3 server.py` from this directory, then open <http://127.0.0.1:8133>.
 Use `--port` to choose another port. No dependencies or network services are
 required. Use the server so direct page URLs work on reload.
 
-Screens: title screen, Worlds, create World, edit World, Mods, Biomes, Review,
-in-game menu, settings and an illustrative gameplay backdrop. Cinematic is the
-only theme. It uses neutral charcoal surfaces, warm-white text and a muted sage
-accent. The canvas landscape is illustrative; no external assets are required.
+Screens: title screen, Worlds, create World (Game, World, Mods, Biomes, Review),
+edit World, Mods, Biomes, Review, in-game menu, settings and an illustrative
+gameplay backdrop. Cinematic is the only theme. It uses neutral charcoal
+surfaces, warm-white text and a muted sage accent. The canvas landscape is
+illustrative; no external assets are required.
+
+Menus follow game conventions rather than web ones: no header bar or
+breadcrumbs, a title over the scenery, at most one main button, and Back and the
+other actions as prompts in the bottom bar (clickable, and letter and Delete
+prompts answer their key). Every menu opens with an item highlighted, and the
+mouse moves that same highlight. Worlds are save-slot tiles; Settings uses ◀
+value ▶ selectors and one help panel; Inventory uses slot tooltips and input
+actions; the Map is full screen; Quick layout is a bottom toolbar. Shared shell
+styles are in `menus.css`, with one stylesheet per area.
+
+World cards, Create World and Edit World show a terrain thumbnail, and Create
+World, Review and Edit World list the Mods in the World with their material
+swatches and what each adds. The thumbnail is a seeded noise illustration in
+`preview.js`, not the engine's generator; it redraws live as the Game, seed and
+biomes change. The Mod swatches and counts are sample data.
 
 Drafts, created Worlds and preferences survive reload in this browser tab
 through session storage. They are not real game saves. Clear this site's session
@@ -29,16 +45,19 @@ menus: Behavior, Key bindings, Controller (including touch), Display, Distance,
 Audio and Accessibility. The first five reflect current engine settings;
 Distance (step 22) is implemented, with Low the Game's own rings, Medium the
 default and High each level held twice as far. Audio and Accessibility remain
-proposed additions. Draft values survive category changes. Apply, discard, reset
-and keyboard rebinding are interactive in this prototype. Navigation containers
-fit their contents and scroll if needed.
+proposed additions. Each change applies at once; a display change asks to be
+kept within ten seconds or reverts. Reset and keyboard rebinding are interactive
+in this prototype. Navigation containers fit their contents and scroll if
+needed.
 
-Direct URLs include `/worlds`, `/worlds/new`, `/worlds/new/mods`,
-`/worlds/new/biomes`, `/worlds/new/review`, `/worlds/1/edit`, `/mods`, `/menu`,
-`/settings/behavior`, `/settings/key-bindings`, `/settings/controller`,
-`/settings/display`, `/settings/distance`, `/settings/audio` and
-`/settings/accessibility`. Browser Back and Forward navigate between screens
-while retaining the draft. Reloading restores the screen and the session draft.
+Direct URLs include `/worlds`, `/worlds/new` (Game), `/worlds/new/world`,
+`/worlds/new/mods`, `/worlds/new/biomes`, `/worlds/new/review`,
+`/worlds/1/edit`, `/mods`, `/menu`, `/settings/behavior`,
+`/settings/key-bindings`, `/settings/controller`, `/settings/display`,
+`/settings/distance`, `/settings/audio`, `/settings/accessibility`, `/layout`,
+`/structures` and `/place` (the Place Tool overlay). Browser Back and Forward
+navigate between screens while retaining the draft. Reloading restores the
+screen and the session draft.
 
 Cinematic refinements include keyboard arrows, simulated controller D-pad/A/B
 and shoulder handling, persistent field validation, modal focus isolation and
@@ -333,10 +352,13 @@ runs a stream under every column a bridge spans in the open.
 - A Tool, not an Item: it takes a hand slot beside the hotbar. Use (G) opens the
   Template list, R turns the Structure a quarter, and Place (right mouse) lays
   the whole Structure or nothing. Z removes it in one step.
-- In play the HUD card shows the Template, its facing, size, tallies, outcome
-  and key hints, but no preview and no buttons: the cursor is grabbed, G and
-  right mouse do those jobs, and the ghost stands in the World. The list window
-  keeps its Place here and Put the Tool away buttons.
+- One panel for the Tool, docked right while it is in hand: full size to pick a
+  Template (`/place`, K from play), compact while aiming in play with the
+  Template, its facing, size, Voxel count, outcome and K Edit, Esc Exit, RMB
+  Place, but no buttons: the cursor is grabbed, so keys and right mouse do those
+  jobs. Building a Structure unselects the Template and reopens the full panel.
+  Quick layout's panel works the same way with L. The list window
+  (`/structures`) keeps its Place here and Put the Tool away buttons.
 - The ghost tints each cell by what placing it does: free, replaces ground,
   replaces water, or blocked. The Voxel tallies are for this World's Voxel size;
   a Template is authored on a 1.0 m grid and sampled to it.

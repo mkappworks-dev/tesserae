@@ -14,6 +14,7 @@ function currentPath() {
   if (state.screen === "wizard")
     return [
       "/worlds/new",
+      "/worlds/new/world",
       "/worlds/new/mods",
       "/worlds/new/biomes",
       "/worlds/new/review",
@@ -44,6 +45,8 @@ function currentPath() {
       vegetation: "/vegetation",
       map: "/map",
       structures: "/structures",
+      place: "/place",
+      toasts: "/toasts",
     }[state.screen] || "/"
   );
 }
@@ -55,7 +58,7 @@ function syncRoute() {
   if (location.pathname !== path) history.pushState(null, "", path);
   const title =
     state.screen === "wizard"
-      ? ["World", "Mods", "Biomes", "Review"][state.step]
+      ? ["Game", "World", "Mods", "Biomes", "Review"][state.step]
       : state.screen === "settings"
         ? `Settings · ${state.settingsTab}`
         : state.screen === "edit"
@@ -90,7 +93,11 @@ function syncRoute() {
                                     ? "Map"
                                     : state.screen === "structures"
                                       ? "Structures"
-                                      : "Worlds";
+                                      : state.screen === "place"
+                                        ? "Place Tool"
+                                        : state.screen === "toasts"
+                                          ? "Toasts"
+                                          : "Worlds";
   document.title = `${title} — Tesserae prototype`;
 }
 
@@ -99,6 +106,7 @@ function restoreRoute() {
   const path = location.pathname.replace(/\/$/, "") || "/";
   const wizard = [
     "/worlds/new",
+    "/worlds/new/world",
     "/worlds/new/mods",
     "/worlds/new/biomes",
     "/worlds/new/review",
@@ -163,6 +171,8 @@ function restoreRoute() {
       "/vegetation": "vegetation",
       "/map": "map",
       "/structures": "structures",
+      "/place": "place",
+      "/toasts": "toasts",
     }[path] || "home";
 }
 

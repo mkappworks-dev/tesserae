@@ -274,3 +274,29 @@ fn burn_uses_the_vitals_volume_trim() {
     };
     assert_eq!(detail.for_cause(Cause::Burn), 0.25);
 }
+
+#[test]
+fn interface_sets_menu_sounds_apart_from_effects_and_0_mutes_them() {
+    let volumes = Volumes::default();
+    assert_eq!(volumes.interface, 100);
+    assert!(close(volumes.interface_gain(0.4), 0.4));
+    let no_effects = Volumes {
+        effects: 0,
+        master: 50,
+        interface: 50,
+        ..volumes
+    };
+    assert!(close(no_effects.interface_gain(1.0), 0.25));
+    let muted = Volumes {
+        interface: 0,
+        ..volumes
+    };
+    assert_eq!(muted.interface_gain(1.0), 0.0);
+    assert!(
+        !Volumes {
+            interface: 101,
+            ..volumes
+        }
+        .valid()
+    );
+}

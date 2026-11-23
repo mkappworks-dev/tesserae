@@ -21,7 +21,7 @@ fn feedback(mut messages: MessageReader<MovementFeedback>, mut commands: Command
         let tone = if message.refused() {
             super::menu_ui::Tone::Alert
         } else {
-            super::menu_ui::Tone::Change
+            super::menu_ui::Tone::Info
         };
         super::menu_ui::notify(&mut commands, message.message(), tone);
     }

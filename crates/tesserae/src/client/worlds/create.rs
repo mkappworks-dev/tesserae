@@ -22,34 +22,14 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             // In the field, so the seed is seen and can be copied before the World is made.
             l.form.seed = l.form.random_seed.to_string();
             l.initial = l.form.clone();
-            l.show(Screen::Create(Step::World));
+            l.show(Screen::Create(Step::Game));
         }
-        Act::ReCreate => {
-            let Some(details) = l.selected().and_then(Entry::details).cloned() else {
-                return;
-            };
-            // A different Game or Mod version would silently change the content.
-            if details.game.is_none() || !cx.installed.unmet(&details).is_empty() {
-                return;
+        Act::ReCreate if unsaved(l) => {
+            if let Screen::Edit(path) = l.screen.clone() {
+                l.show(Screen::SaveFirst(path));
             }
-            let copy = format!("{} (copy)", details.name);
-            l.form = Form {
-                name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
-                seed: details.seed.to_string(),
-                voxel_size_m: details.voxel_size_m,
-                more: details.voxel_size_m != 1.0,
-                game_mode: details.game_mode,
-                game: details.game.as_ref().map(|g| g.id.clone()),
-                mods: details.mods.iter().map(|m| m.id.clone()).collect(),
-                seeded: details.biomes.clone(),
-                ..Form::default()
-            };
-            if let Some(game) = l.form.game.clone() {
-                l.clashes = cx.installed.clashes(&game, &l.form.mods);
-            }
-            l.initial = l.form.clone();
-            l.show(Screen::Create(Step::World));
         }
+        Act::ReCreate => recreate(l, cx),
         Act::CopyResolved => {
             if let Ok(seed) = l.form.seed() {
                 copy(cx.commands, cx.clipboard.as_deref_mut(), seed);
@@ -59,18 +39,21 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             l.form.seed = tesserae_core::seed::random().to_string();
             l.version += 1;
         }
-        Act::More => {
-            l.form.more = !l.form.more;
-            l.version += 1;
-        }
         Act::PickGame(index) => {
             let Some(game) = cx.installed.games.get(index) else {
                 return;
             };
+            if l.form.game.as_ref() == Some(&game.id) {
+                if l.screen == Screen::Create(Step::Game) {
+                    go(l, cx.installed, Step::World);
+                }
+                return;
+            }
             l.form.game = Some(game.id.clone());
+            l.form.climate = None;
+            l.terrain = None;
             // Each Game starts from the Mods it suggests; picks made for another do not carry over.
             l.form.mods = cx.installed.suggested(&game.id);
-            l.trust_asked = false;
             l.version += 1;
         }
         Act::ToggleMod(index) => {
@@ -79,6 +62,9 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             };
             if cx.installed.blocked(&game, &m.id).is_some() {
                 return;
+            }
+            if l.clashes_for != reads::clash_key(&l.form) {
+                clashes_now(l, cx.installed);
             }
             if let Some(clash) = l.clashes.get(&m.id) {
                 // A Mod that clashes with a pick swaps it out; one that clashes with what the
@@ -95,65 +81,77 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                     l.form.mods.insert(m.id.clone());
                 }
             }
-            l.clashes = cx.installed.clashes(&game, &l.form.mods);
-            // The panel lists the old picks; Next asks again for the new ones.
-            l.trust_asked = false;
+            clashes_now(l, cx.installed);
+            l.refocus = Some(Act::ToggleMod(index));
             l.version += 1;
         }
-        Act::TrustMods => {
-            if l.screen != Screen::Create(Step::Mods) {
+        Act::TrustStep => {
+            let Screen::StepTrust { on, to } = l.screen else {
                 return;
-            }
-            let ids = chosen_ids(&l.form, cx.installed);
-            let granted = cx
-                .installed
-                .prepare_trust(&ids)
-                .and_then(|()| cx.installed.grant_all());
-            if let Err(e) = granted {
+            };
+            l.screen = Screen::Create(on);
+            if let Err(e) = cx.installed.grant_all() {
                 l.form.problem = Some(format!("Could not record Trust: {e}"));
                 l.version += 1;
                 return;
             }
-            go(l, cx.installed, cx.previewer, Step::Biomes);
+            go(l, cx.installed, to);
         }
         Act::Next => {
             if let Screen::Create(step) = l.screen
                 && let Some(next) = step.next()
             {
-                go(l, cx.installed, cx.previewer, next);
+                go(l, cx.installed, next);
             }
         }
-        Act::Step(target) => go(l, cx.installed, cx.previewer, target),
+        Act::Step(target) => go(l, cx.installed, target),
         Act::ToggleBiome(at) => edit_biomes(l, |d| {
             if let Some(choice) = d.choices.get_mut(at) {
                 choice.enabled = !choice.enabled;
             }
         }),
-        Act::SelectBiome(at) => edit_biomes(l, |d| d.select(at)),
-        Act::CycleGround(layer) => edit_biomes(l, |d| cycle(d, layer)),
-        Act::ResetBiomes => edit_biomes(l, |d| d.resetting = true),
-        Act::ConfirmReset => edit_biomes(l, BiomesDraft::reset),
-        Act::KeepBiomes => edit_biomes(l, |d| d.resetting = false),
-        Act::KeepEditing => {
-            if let Screen::Discard(step) = l.screen {
-                l.show(Screen::Create(step));
-            }
+        Act::SelectBiome(at) => edit_biomes(l, |d| {
+            d.select(at);
+            d.editing = true;
+        }),
+        Act::CloseBiome => edit_biomes(l, |d| d.editing = false),
+        Act::ResetBiome => edit_biomes(l, |d| d.reset_one(d.selected)),
+        Act::PickGround(layer, name) => {
+            edit_biomes(l, |d| pick(d, layer, name));
+            l.refocus = Some(Act::GroundPop(layer));
         }
+        Act::ResetBiomes => edit_biomes(l, |d| d.resetting = true),
+        Act::ConfirmReset => {
+            if l.screen == Screen::Create(Step::Biomes)
+                && let Some(climate) = l.form.climate.as_mut()
+            {
+                climate.set(climate.declared);
+            }
+            edit_biomes(l, BiomesDraft::reset);
+        }
+        Act::KeepBiomes => edit_biomes(l, |d| d.resetting = false),
+        Act::KeepEditing => match l.screen.clone() {
+            Screen::Discard(step) => l.show(Screen::Create(step)),
+            Screen::DiscardEdits(path) => l.show(Screen::Edit(path)),
+            _ => {}
+        },
         Act::DiscardSetup => {
             if matches!(l.screen, Screen::Discard(_)) {
                 l.show(Screen::Worlds);
             }
         }
-        Act::Voxel(size) => {
+        Act::VoxelSize(size) => {
             l.form.voxel_size_m = size;
+            l.refocus = Some(Act::VoxelSize(size));
             l.version += 1;
         }
         Act::Mode(mode) => {
             l.form.game_mode = mode;
+            l.refocus = Some(Act::Mode(mode));
             l.version += 1;
         }
         Act::Create => {
-            if !matches!(l.screen, Screen::Create(_)) {
+            if !matches!(l.screen, Screen::Create(_)) || reads::pending(l, cx.installed) {
                 return;
             }
             let ids = chosen_ids(&l.form, cx.installed);
@@ -173,9 +171,36 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
     }
 }
 
+/// Opens Create World on Review with a World's settings and a fresh name.
+pub(super) fn recreate(l: &mut Launcher, cx: &mut Acting) {
+    let Some(details) = l.selected().and_then(Entry::details).cloned() else {
+        return;
+    };
+    // A different Game or Mod version would silently change the content.
+    if details.game.is_none() || !cx.installed.unmet(&details).is_empty() {
+        return;
+    }
+    let copy = format!("{} \u{2014} new world", details.name);
+    l.form = Form {
+        name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
+        seed: details.seed.to_string(),
+        voxel_size_m: details.voxel_size_m,
+        game_mode: modes(&details).default,
+        game: details.game.as_ref().map(|g| g.id.clone()),
+        mods: details.mods.iter().map(|m| m.id.clone()).collect(),
+        seeded: details.biomes.clone(),
+        ..Form::default()
+    };
+    l.initial = l.form.clone();
+    // On Review, an exact copy is one press away and any change one jump back to its step.
+    // It passes every step's Trust on the way, as the rail would.
+    l.show(Screen::Create(Step::Game));
+    go(l, cx.installed, Step::Review);
+}
+
 /// Moves Create World to `target`. Moving forward passes every step before it,
 /// so an invalid one holds the player there with its message.
-pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Previewer, target: Step) {
+pub(super) fn go(l: &mut Launcher, installed: &mut Installed, target: Step) {
     let Screen::Create(current) = l.screen else {
         return;
     };
@@ -189,22 +214,74 @@ pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Preview
         }
     }
     l.form.problem = None;
-    if let Some(game) = l.form.game.clone() {
-        l.clashes = installed.clashes(&game, &l.form.mods);
-    }
-    // Biomes is gated by `read_biomes`, which also covers a jump there from Review.
-    if current <= Step::Mods && target > Step::Biomes && !mods_trusted(l, installed) {
+    if current == Step::Game && target > Step::Game && !game_trusted(l, installed, target) {
         return;
     }
-    if target == Step::Biomes && !read_biomes(l, installed, previewer) {
+    // Review lists the Biomes, so a jump past the Biomes step reads them too. A read runs the Game
+    // and Mods, so Trust revoked since the last one is caught here, even from Review.
+    let ids = chosen_ids(&l.form, installed);
+    let unread = !l.form.biomes.as_ref().is_some_and(|d| d.ids == ids);
+    let passes_mods = current <= Step::Mods && target > Step::Biomes;
+    if target >= Step::Biomes && (unread || passes_mods) && !mods_trusted(l, installed, target) {
         return;
+    }
+    // A draft read for other Mods is replaced by the new read, as the Biomes it lists change.
+    if target >= Step::Biomes && unread {
+        l.form.biomes = None;
     }
     l.show(Screen::Create(target));
 }
 
+/// The clash check for the set as it stands, on the main thread: a toggle decides on it.
+pub(super) fn clashes_now(l: &mut Launcher, installed: &Installed) {
+    if let Some(key) = reads::clash_key(&l.form) {
+        l.clashes = installed.clashes(&key.0, &key.1);
+        l.clashes_for = Some(key);
+    }
+}
+
+/// Whether the chosen Game may run. Its previews on the later steps run its Generator, so leaving
+/// the Game step asks for its Trust in a dialog when it is missing.
+fn game_trusted(l: &mut Launcher, installed: &mut Installed, to: Step) -> bool {
+    let ids = game_ids(&l.form, installed);
+    if let Err(e) = installed.prepare_trust(&ids) {
+        l.form.problem = Some(format!("Could not check Trust: {e}"));
+        l.show(Screen::Create(Step::Game));
+        return false;
+    }
+    if installed.untrusted.is_empty() {
+        return true;
+    }
+    l.show(Screen::StepTrust { on: Step::Game, to });
+    false
+}
+
+/// Lands the read of the chosen Game, for the World step's Climate sizes and terrain preview. One
+/// that failed sends the player back to the Game step to read why.
+pub(super) fn game_read(
+    l: &mut Launcher,
+    ids: Vec<String>,
+    declared: Result<BiomePreview, String>,
+) {
+    match declared {
+        Ok(declared) => {
+            let mut climate = ClimateDraft::new(declared.climate);
+            if let Some(seeded) = l.form.seeded.as_ref().and_then(|e| e.climate) {
+                climate.set(seeded);
+            }
+            l.form.climate = Some(climate);
+            l.terrain = declared.source.map(|source| (ids, source));
+        }
+        Err(e) => {
+            l.show(Screen::Create(Step::Game));
+            l.form.problem = Some(format!("Could not read the Game: {e}"));
+        }
+    }
+}
+
 /// Whether the chosen Game and Mods may run. Leaving the Mods step reads their Biomes, which runs
-/// them, so Trust comes first; when it is missing the player stays on Mods with the Trust panel.
-fn mods_trusted(l: &mut Launcher, installed: &mut Installed) -> bool {
+/// them, so Trust comes first; when it is missing a dialog over the Mods step asks for it.
+fn mods_trusted(l: &mut Launcher, installed: &mut Installed, to: Step) -> bool {
     let ids = chosen_ids(&l.form, installed);
     if let Err(e) = installed.prepare_trust(&ids) {
         l.form.problem = Some(format!("Could not check Trust: {e}"));
@@ -214,39 +291,31 @@ fn mods_trusted(l: &mut Launcher, installed: &mut Installed) -> bool {
     if installed.untrusted.is_empty() {
         return true;
     }
-    l.show(Screen::Create(Step::Mods));
-    l.trust_asked = true;
+    l.show(Screen::StepTrust { on: Step::Mods, to });
     false
 }
 
-/// Reads the Biomes the chosen Game and Mods declare, unless already read for
-/// exactly them. `false` when the player must stay on Mods, to trust them or to read why not.
-pub(super) fn read_biomes(
+/// Lands the read of the Biomes the chosen Game and Mods declare. One that failed sends the player
+/// back to the Mods step to read why.
+pub(super) fn biomes_read(
     l: &mut Launcher,
-    installed: &mut Installed,
-    previewer: Previewer,
-) -> bool {
-    let ids = chosen_ids(&l.form, installed);
-    if l.form.biomes.as_ref().is_some_and(|d| d.ids == ids) {
-        return true;
-    }
-    // Reached from Review or Biomes this skips `go`'s check, so Trust revoked since is caught here.
-    if !mods_trusted(l, installed) {
-        return false;
-    }
-    match (previewer.0)(installed, &ids) {
-        Ok(declared) => {
+    ids: Vec<String>,
+    declared: Result<BiomePreview, String>,
+) {
+    match declared {
+        Ok(mut declared) => {
+            if let Some(source) = declared.source.take() {
+                l.terrain = Some((ids.clone(), source));
+            }
             let mut draft = BiomesDraft::new(ids, declared);
             if let Some(seeded) = l.form.seeded.take() {
                 draft.seed(&seeded);
             }
             l.form.biomes = Some(draft);
-            true
         }
         Err(e) => {
-            l.form.problem = Some(format!("Could not read the Biomes: {e}"));
             l.show(Screen::Create(Step::Mods));
-            false
+            l.form.problem = Some(format!("Could not read the Biomes: {e}"));
         }
     }
 }
@@ -293,10 +362,9 @@ pub(super) fn set(draft: &mut BiomesDraft, knob: Knob, value: f32) {
     }
 }
 
-/// The next of the selection's solid Materials for one ground layer; a Biome
-/// still on the World's ground starts from it.
-pub(super) fn cycle(draft: &mut BiomesDraft, layer: Layer) {
-    let materials = &draft.declared.materials;
+/// Sets one ground layer of the selected Biome; a Biome still on the World's ground takes the rest
+/// of it.
+pub(super) fn pick(draft: &mut BiomesDraft, layer: Layer, name: String) {
     let fallback = draft.declared.ground.clone();
     let Some(choice) = draft.choices.get_mut(draft.selected) else {
         return;
@@ -304,31 +372,34 @@ pub(super) fn cycle(draft: &mut BiomesDraft, layer: Layer) {
     let Some(mut ground) = choice.ground.clone().or(fallback) else {
         return;
     };
-    let slot = match layer {
+    *match layer {
         Layer::Rock => &mut ground.rock,
         Layer::Soil => &mut ground.soil,
         Layer::Surface => &mut ground.surface,
-    };
-    let at = materials.iter().position(|m| m == slot);
-    if let Some(next) = materials.get(at.map_or(0, |i| (i + 1) % materials.len())) {
-        *slot = next.clone();
-        choice.ground = Some(ground);
-    }
+    } = name;
+    choice.ground = Some(ground);
 }
 
 /// Why a step cannot be left forward, if it cannot.
 pub(super) fn check(step: Step, form: &Form, installed: &Installed) -> Result<(), String> {
     match step {
-        Step::World => {
+        Step::Game => {
             let installed_game = form
                 .game
                 .as_ref()
                 .is_some_and(|id| installed.games.iter().any(|g| &g.id == id));
-            if !installed_game {
-                return Err(NO_GAME.into());
+            if installed_game {
+                Ok(())
+            } else {
+                Err(NO_GAME.into())
             }
-            validate(form).map(|_| ())
         }
+        Step::World => validate(form).and_then(|_| {
+            form.climate
+                .as_ref()
+                .and_then(ClimateDraft::problem)
+                .map_or(Ok(()), Err)
+        }),
         Step::Biomes => form
             .biomes
             .as_ref()
@@ -341,13 +412,19 @@ pub(super) fn check(step: Step, form: &Form, installed: &Installed) -> Result<()
 impl Form {
     /// Equal but for a problem shown on it.
     pub(super) fn unchanged_from(&self, initial: &Form) -> bool {
-        Form {
+        // Reading the Game fills in its Climate sizes; only typing over them is a change.
+        let climate = |f: &Form| {
+            f.climate
+                .as_ref()
+                .filter(|c| c.sizes != ClimateDraft::new(c.declared).sizes)
+                .cloned()
+        };
+        let bare = |f: &Form| Form {
             problem: None,
-            ..self.clone()
-        } == Form {
-            problem: None,
-            ..initial.clone()
-        }
+            climate: climate(f),
+            ..f.clone()
+        };
+        bare(self) == bare(initial)
     }
 }
 
@@ -362,6 +439,16 @@ pub(super) fn too_long() -> String {
 pub(super) fn validate(form: &Form) -> Result<(String, u64), String> {
     let name = library::valid_name(&form.name).map_err(|_| too_long())?;
     Ok((name, form.seed()?))
+}
+
+/// The chosen Game and the Mods it requires: what its Generator needs to run.
+pub(super) fn game_ids(form: &Form, installed: &Installed) -> Vec<String> {
+    let Some(game) = &form.game else {
+        return Vec::new();
+    };
+    std::iter::once(game.clone())
+        .chain(installed.closure_for(game, &Default::default()))
+        .collect()
 }
 
 /// The Game and every Mod, dependencies included, a World made from this form would load.
@@ -388,7 +475,7 @@ pub(super) fn create(
         .cloned()
     else {
         l.form.problem = Some(NO_GAME.into());
-        l.show(Screen::Create(Step::World));
+        l.show(Screen::Create(Step::Game));
         return;
     };
     let missing = installed.missing(&game.id);
@@ -399,7 +486,7 @@ pub(super) fn create(
             missing.join(", "),
             if missing.len() == 1 { "is" } else { "are" }
         ));
-        l.show(Screen::Create(Step::World));
+        l.show(Screen::Create(Step::Game));
         return;
     }
     let mods: Vec<_> = installed
@@ -431,13 +518,17 @@ pub(super) fn create(
         world: tesserae_core::save::WorldId::new(),
         pending: true,
         game_mode: l.form.game_mode,
-        biomes: l.form.biomes.as_ref().and_then(BiomesDraft::edits),
+        biomes: l.form.edits(),
         player_mode: None,
         mode_changes: Default::default(),
     };
     match library::create(worlds, &sidecar) {
         Ok(path) => {
+            if let Some((_, source)) = &l.terrain {
+                saved::draw(path.clone(), std::sync::Arc::clone(source), &sidecar);
+            }
             relaunch.0 = Some(Target::World(path));
+            l.opening_game = sidecar.game.as_ref().map(|g| game_title(Some(g)));
             l.show(Screen::Opening(name));
         }
         Err(e) => {

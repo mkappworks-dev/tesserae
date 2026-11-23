@@ -345,19 +345,9 @@ function handMarkup(stack) {
   return `${crack}${burst}<div class="hand ${motion}" aria-hidden="true"><i class="arm"></i>${item ? voxelIcon(item) : ""}</div>`;
 }
 
-/* The engine's notice card (menu_ui::notify): top right, one at a time, 2.6 s by default. */
-function notice(text, tone = "info", seconds = 2.6) {
-  const card = $("#notice-card");
-  card.textContent = text;
-  card.dataset.tone = tone;
-  card.classList.remove("show");
-  void card.offsetWidth;
-  card.classList.add("show");
-  clearTimeout(notice.timer);
-  notice.timer = setTimeout(
-    () => card.classList.remove("show"),
-    seconds * 1000,
-  );
+/* The engine's notice card (menu_ui::notify), drawn by the shared toast component. */
+function notice(text, tone = "info") {
+  notify(text, tone === "warn" ? "refused" : "info");
   log(text);
 }
 const feedRows = [];
@@ -442,28 +432,29 @@ function deathScreen() {
     : d.dropped.length
       ? `${count} items in ${d.dropped.length} stacks lie where you fell, at ${d.at}.`
       : "You carried nothing.";
-  const actions = `${button("Respawn <span>Enter</span>", "respawn", { primary: true })}${button("Return to Worlds", "leave", { ghost: true })}`;
+  // The death screen has no prompt bar, so each button carries its own key.
+  const actions = `${button("Respawn <kbd>Enter</kbd>", "respawn", { primary: true })}${button("Return to Worlds", "leave", { ghost: true })}`;
   const where = `${activeWorld()?.name || "Your World"} · ${d.distance} m from the World spawn`;
-  return `<div class="death-screen"><section class="death-centre" role="alertdialog" aria-labelledby="death-title"><p class="eyebrow">${esc(where).toUpperCase()}</p><h1 id="death-title">${esc(d.cause.title)}</h1><p class="death-cause">${esc(d.cause.detail)}</p><div class="notice">${esc(items)}${!kept && d.dropped.length ? ` <span id="despawn-left" aria-live="off">${left ? `They stay for ${clock(left)}.` : "They have despawned."}</span>` : ""}</div><div class="death-actions">${actions}</div></section></div>`;
+  return `<div class="death-screen"><section class="death-centre" role="alertdialog" aria-labelledby="death-title"><h1 id="death-title">${esc(d.cause.title)}</h1><p class="death-cause">${esc(d.cause.detail)}</p><p class="death-where">${esc(where)}</p><p class="death-items">${esc(items)}${!kept && d.dropped.length ? ` <span id="despawn-left" aria-live="off">${left ? `They stay for ${clock(left)}.` : "They have despawned."}</span>` : ""}</p><div class="death-actions">${actions}</div></section></div>`;
 }
 
-function modePicks(key, value, { legend, hint, compact }) {
+function modePicks(key, value, { legend, hint, compact, quiet }) {
   const modes = {
     Creative:
       "Take any Material from the Catalogue. Placing spends Items, as in Survival. No damage or hunger.",
     Survival:
       "Gather what you place. Health and hunger matter, and the Catalogue is closed.",
   };
-  return `<fieldset class="mode-picks ${compact ? "compact" : ""}"><legend class="section-label">${legend}</legend><div class="mode-options">${Object.entries(
+  return `<fieldset class="mode-picks ${compact ? "compact" : ""}"><legend class="section-label">${legend}</legend><div class="segmented" role="radiogroup" aria-label="${legend}">${Object.keys(
     modes,
   )
     .map(
-      ([name, about]) =>
-        `<button type="button" class="mode-pick ${value === name ? "selected" : ""}" data-action="pick-mode" data-value="${key}:${name}" aria-pressed="${value === name}"><b>${name}${value === name ? " ✓" : ""}</b><small>${about}</small></button>`,
+      (name) =>
+        `<button type="button" role="radio" class="${value === name ? "selected" : ""}" data-action="pick-mode" data-value="${key}:${name}" aria-checked="${value === name}">${name}</button>`,
     )
     .join(
       "",
-    )}</div>${hint ? `<small class="mode-hint">${hint}</small>` : ""}</fieldset>`;
+    )}</div>${quiet ? "" : `<small class="mode-hint">${modes[value] || ""}${hint ? `<br>${hint}` : ""}</small>`}</fieldset>`;
 }
 
 function simPanel() {
@@ -475,7 +466,7 @@ function simPanel() {
   return `<aside class="sim-panel" aria-label="Prototype simulation"><header><b>Simulate</b><span>${mode} · not part of the design</span><button data-action="sim-toggle" aria-expanded="${!state.simCollapsed}">${state.simCollapsed ? "Show" : "Hide"}</button></header>${
     state.simCollapsed
       ? ""
-      : `<div class="sim-group"><small>Items</small>${b("Place held (right-click)", "sim-place")}${b("Break Stone", "sim-break")}${b("Undo (Z)", "sim-undo")}${b("Pick up 12 Dirt", "sim-pickup", "dirt:12")}${b("Fill every slot", "sim-fill")}</div>${useSimGroup(b)}<div class="sim-group"><small>Body</small>${b("Fall 9 m", "sim-fall", 9)}${b("Fall 25 m", "sim-fall", 25)}${b(v.underwater ? "Surface" : "Dive", "sim-dive")}${b("2 s underwater", "sim-breath")}${b("Touch lava 1 s", "sim-lava")}${b("Sprint 10 s", "sim-time", "sprint")}${b("Wait 60 s", "sim-time", "idle")}${b("Eat held (G)", "sim-eat")}${b("Starve", "sim-starve")}${b("Die, items despawned", "sim-despawned")}</div><div class="sim-group"><small>Engine states</small>${b("Hold remove", "sim-aim", "breaking")}${b("Place hint", "sim-aim", "place")}${b("Measure tool", "sim-aim", "measure")}${b("Place tool", "sim-tool", "Place")}${b("Hold Fire", "sim-tool", "Fire")}${b("Saving", "sim-save", "saving")}${b("Save failed", "sim-save", "error")}${b("Save failed on quit", "sim-save", "quit-error")}${b("Exit without saving", "sim-save", "confirm")}</div><div class="sim-group"><small>Game declares</small><small>Melon: food 6 · regeneration ${rules.regenPerSecond} health/s at hunger ${rules.regenAbove}+</small><label><input type="checkbox" data-bind="keepInventory" ${state.keepInventory ? "checked" : ""}> keep_inventory</label></div><div class="sim-group"><small>Map policy</small><label><input type="checkbox" data-bind="mapForbidden" ${state.mapForbidden ? "checked" : ""}> Game forbids the Map</label></div><pre class="sim-state">health ${v.health}/${rules.maxHealth}  hunger ${v.hunger}/${rules.maxHunger}  air ${v.air}/${rules.maxAir}${v.underwater ? " (underwater)" : ""}
+      : `<div class="sim-group"><small>Items</small>${b("Place held (right-click)", "sim-place")}${b("Break Stone", "sim-break")}${b("Undo (Z)", "sim-undo")}${b("Pick up 12 Dirt", "sim-pickup", "dirt:12")}${b("Fill every slot", "sim-fill")}</div>${useSimGroup(b)}<div class="sim-group"><small>Body</small>${b("Fall 9 m", "sim-fall", 9)}${b("Fall 25 m", "sim-fall", 25)}${b(v.underwater ? "Surface" : "Dive", "sim-dive")}${b("2 s underwater", "sim-breath")}${b("Touch lava 1 s", "sim-lava")}${b("Sprint 10 s", "sim-time", "sprint")}${b("Wait 60 s", "sim-time", "idle")}${b("Eat held (G)", "sim-eat")}${b("Starve", "sim-starve")}${b("Die, items despawned", "sim-despawned")}</div><div class="sim-group"><small>Engine states</small>${b("Hold remove", "sim-aim", "breaking")}${b("Place hint", "sim-aim", "place")}${b("Measure tool", "sim-aim", "measure")}${b("Place tool", "sim-tool", "Place")}${state.heldTool === "Place" && state.structure?.chosen ? b("Build the Structure (G)", "structure-build-now") : ""}${b("Hold Fire", "sim-tool", "Fire")}${b("Saving", "sim-save", "saving")}${b("Save failed", "sim-save", "error")}${b("Save failed on quit", "sim-save", "quit-error")}${b("Exit without saving", "sim-save", "confirm")}</div><div class="sim-group"><small>Game declares</small><small>Melon: food 6 · regeneration ${rules.regenPerSecond} health/s at hunger ${rules.regenAbove}+</small><label><input type="checkbox" data-bind="keepInventory" ${state.keepInventory ? "checked" : ""}> keep_inventory</label></div><div class="sim-group"><small>Map policy</small><label><input type="checkbox" data-bind="mapForbidden" ${state.mapForbidden ? "checked" : ""}> Game forbids the Map</label></div><pre class="sim-state">health ${v.health}/${rules.maxHealth}  hunger ${v.hunger}/${rules.maxHunger}  air ${v.air}/${rules.maxAir}${v.underwater ? " (underwater)" : ""}
 journal ${
           state.journal
             .map((j) => j.kind + ":" + j.id)
@@ -491,6 +482,11 @@ function survivalAction(name, value) {
   if (name === "pick-mode") {
     const [key, mode] = value.split(":");
     state[key] = mode;
+    // While the Player is the World's only one, the World's default follows them.
+    if (key === "worldMode") {
+      state.mode = mode;
+      state.playerMode = mode;
+    }
     state.dirty = true;
     const y = $(".body")?.scrollTop;
     render();
@@ -721,18 +717,3 @@ document.addEventListener("contextmenu", (e) => {
     placeHeld();
   }
 });
-
-function placeToast() {
-  const hud = state.screen === "play" && $(".hud-bottom"),
-    t = $("#toast");
-  if (!hud) {
-    t.style.bottom = "";
-    return;
-  }
-  t.style.bottom =
-    $("#game").getBoundingClientRect().bottom -
-    hud.getBoundingClientRect().top +
-    10 +
-    "px";
-}
-window.addEventListener("resize", () => placeToast());

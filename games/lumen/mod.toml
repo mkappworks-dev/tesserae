@@ -6,3 +6,4 @@ root = true
 depends = ["strata", "waters", "flora", "crops", "glassworks", "frost", "crystals"]
 suggests = ["wanderer"]
 wasm = "lumen.wasm"
+thumbnail = "thumbnail.png"

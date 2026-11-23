@@ -251,6 +251,8 @@ struct Shown<'w, 's> {
     roots: Query<'w, 's, Entity, With<MinimapRoot>>,
     hotbar: Option<Res<'w, super::edit::Hotbar>>,
     catalogue: Option<Res<'w, super::edit::Catalogue>>,
+    layout: Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    mode: Option<Res<'w, super::layout::LayoutMode>>,
 }
 
 type Sources<'w> = (
@@ -277,14 +279,18 @@ fn sync(
         roots,
         hotbar,
         catalogue,
+        layout,
+        mode,
     } = shown;
-    // The place Tool's card stands where the minimap would.
+    // Each tool's panel stands where the minimap would, full or compact.
     let placing = hotbar
         .zip(catalogue)
         .is_some_and(|(hotbar, catalogue)| super::structure::holding_place(&hotbar, &catalogue.0));
     let hidden = !allowed.0
         || !preferences.minimap
         || placing
+        || layout.is_some_and(|layout| layout.open)
+        || mode.is_some_and(|mode| mode.on)
         || super::menu::covered(&covers)
         || !super::death::alive(dead);
     let Some((eye, bearing)) = spot.0.filter(|_| !hidden) else {
@@ -802,6 +808,36 @@ mod tests {
         app.insert_resource(super::super::death::Dead::after_a_fall());
         app.update();
         assert!(pixels(&mut app).is_none());
+    }
+
+    #[test]
+    fn it_gives_way_to_quick_layout_s_side_panel() {
+        let mut app = app();
+        app.init_resource::<super::super::layout_menu::LayoutMenu>();
+        show(&mut app);
+        pose(&mut app, Vec3::ZERO, 0.0);
+        assert!(pixels(&mut app).is_some());
+        app.world_mut()
+            .resource_mut::<super::super::layout_menu::LayoutMenu>()
+            .open = true;
+        app.update();
+        assert!(pixels(&mut app).is_none());
+    }
+
+    #[test]
+    fn it_stays_hidden_while_quick_layout_s_compact_panel_shows() {
+        let mut app = app();
+        let mut mode = super::super::layout::LayoutMode::default();
+        mode.on = true;
+        app.insert_resource(mode);
+        show(&mut app);
+        pose(&mut app, Vec3::ZERO, 0.0);
+        assert!(pixels(&mut app).is_none());
+        app.world_mut()
+            .resource_mut::<super::super::layout::LayoutMode>()
+            .on = false;
+        app.update();
+        assert!(pixels(&mut app).is_some());
     }
 
     #[test]

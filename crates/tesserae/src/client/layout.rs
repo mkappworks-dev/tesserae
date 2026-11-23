@@ -6,7 +6,7 @@
 //! sees them. It never reads World storage: the preview is drawn from the
 //! Server's [`LayoutAnswer`].
 use super::{
-    actions::{Action, Actions, Bindings, Labels},
+    actions::{Action, Actions},
     camera::FlyCamera,
     edit::{Holding, Hotbar},
     input::Ownership,
@@ -52,6 +52,8 @@ pub(crate) enum Kind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct LayoutPreferences {
+    /// Not saved: the panel opens on Count each time, as the user chose.
+    #[serde(skip)]
     pub kind: Kind,
     /// Voxels along X, Y and Z. A length of 1 leaves that axis out, so one axis
     /// above 1 is a line, two a flat rectangle and three a box.
@@ -147,6 +149,8 @@ pub(super) struct LayoutMode {
     /// Place went down on A and is still held: letting go on another cell sets B.
     dragging: bool,
     commit: bool,
+    /// A Place found nothing to pick, so [`send`] says why.
+    missed: bool,
     was_grabbed: bool,
 }
 impl LayoutMode {
@@ -274,7 +278,7 @@ pub(super) fn intercept(
             }
         } else if ready && actions.started(Action::Place) {
             let first = mode.points.is_empty();
-            pick_point(&mut mode, &layout);
+            mode.missed = !pick_point(&mut mode, &layout);
             mode.dragging = first && mode.points.len() == 1;
         } else if mode.dragging && actions.state(Action::Place).released {
             // Let go somewhere else and that is B; let go where it began and A
@@ -309,7 +313,8 @@ pub(super) fn intercept(
 
 /// Place in point to point: the aimed cell becomes the next corner, and with
 /// both set it commits. A corner that makes the span pass the cap is refused.
-fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) {
+/// Whether there was a cell to pick.
+fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) -> bool {
     // C is where the view line passes B, in the sky or on a surface alike.
     let picked = if mode.points.len() == 2 {
         mode.depth
@@ -317,22 +322,23 @@ fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) {
         mode.aimed
     };
     let Some(cell) = picked else {
-        return;
+        return false;
     };
     let span = match mode.points[..] {
         [] => Ok(Vec::new()),
         [a] => layout_span(a, cell, None, layout.gap),
         [a, b] => layout_span(a, b, Some(cell), layout.gap),
-        _ => return,
+        _ => return true,
     };
     if span.is_err() {
         mode.refused = true;
-        return;
+        return true;
     }
     mode.refused = false;
     mode.points.push(cell);
     // The third corner gives the depth and lays the layout.
     mode.commit = mode.points.len() == 3;
+    true
 }
 
 /// What a layout lays: the held solid.
@@ -361,20 +367,51 @@ fn current(
     })
 }
 
+/// Why the aim refuses, in the status line's words.
+fn refused_line(reason: RejectReason) -> String {
+    match reason {
+        RejectReason::NothingHeld => "Hold a solid to lay it out".to_owned(),
+        RejectReason::OutOfReach => "Nothing in reach".to_owned(),
+        RejectReason::BadLayout => format!("That is over {MAX_LAYOUT_VOXELS} Voxels"),
+        _ => "Nothing to lay out there".to_owned(),
+    }
+}
+
+/// A Place the Client cannot turn into an intent never reaches the Server, so
+/// the Client says why itself, from the hand and the Server's latest aim.
+fn missed_reason(hotbar: &Hotbar, fresh: Option<&LayoutAnswer>) -> RejectReason {
+    if held_voxel(hotbar).is_none() {
+        return RejectReason::NothingHeld;
+    }
+    fresh
+        .and_then(|answer| answer.refused)
+        .unwrap_or(RejectReason::OutOfReach)
+}
+
 pub(super) fn send(
+    mut commands: Commands,
     mut mode: ResMut<LayoutMode>,
-    preferences: Res<Preferences>,
-    hotbar: Res<Hotbar>,
+    (preferences, hotbar): (Res<Preferences>, Res<Hotbar>),
     camera: Single<&GlobalTransform, With<FlyCamera>>,
+    (preview, time): (Res<Preview>, Res<Time>),
     mut intents: MessageWriter<LayoutIntent>,
 ) {
-    if !std::mem::take(&mut mode.commit) {
-        return;
+    let mut missed = std::mem::take(&mut mode.missed);
+    if std::mem::take(&mut mode.commit) {
+        match current(&mode, &preferences.layout, &hotbar, &camera) {
+            Some(intent) => {
+                intents.write(intent);
+            }
+            None => missed = true,
+        }
+        mode.points.clear();
     }
-    if let Some(intent) = current(&mode, &preferences.layout, &hotbar, &camera) {
-        intents.write(intent);
+    if missed {
+        let fresh = current(&mode, &preferences.layout, &hotbar, &camera)
+            .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()));
+        let line = refused_line(missed_reason(&hotbar, fresh));
+        super::menu_ui::notify(&mut commands, &line, super::menu_ui::Tone::Alert);
     }
-    mode.points.clear();
 }
 
 /// The third corner of a box from the view line alone: the cell on the line
@@ -920,44 +957,29 @@ fn tally(answer: &LayoutAnswer) -> [usize; 3] {
     ]
 }
 
-/// What the menu and the status card say, in three parts that are set apart:
-/// the shape, the next step with what the aim would lay, and the keys.
+/// What the status card says, in two parts that are set apart: the shape, and
+/// the next step with what the aim would lay.
 pub(super) struct Summary {
-    /// How many Voxels the aim would lay, once the Server has said.
-    pub(super) count: Option<usize>,
     /// The span's size in Voxels and in metres.
     pub(super) size: String,
     pub(super) body: String,
-    pub(super) hint: String,
 }
 
 #[cfg(test)]
 impl Summary {
     pub(super) fn joined(&self) -> String {
-        let count = self.count.map_or("-".to_owned(), |count| count.to_string());
-        format!(
-            "{count} Voxels\n{}\n{}\n{}",
-            self.size, self.body, self.hint
-        )
+        format!("{}\n{}", self.size, self.body)
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn summary(
     mode: &LayoutMode,
     layout: &LayoutPreferences,
     hotbar: &Hotbar,
     camera: &GlobalTransform,
     preview: &Preview,
-    bindings: &Bindings,
-    labels: &Labels,
     (now, voxel_size): (f64, f32),
 ) -> Summary {
-    // The first binding only: a card has no room for every alternative.
-    let keys = |action| {
-        let all = bindings.label(action, labels);
-        all.split(" / ").next().unwrap_or_default().to_owned()
-    };
     let between = layout.kind == Kind::Between;
     let step = match mode.points.len() {
         _ if !between => None,
@@ -966,20 +988,14 @@ pub(super) fn summary(
         _ => Some("Place sets point C: the depth, and lays it"),
     };
     let tallied = |answer: &LayoutAnswer| {
-        if answer.refused == Some(RejectReason::BadLayout) {
-            return format!("That is over {MAX_LAYOUT_VOXELS} Voxels");
-        }
-        if answer.refused.is_some() {
-            return "Nothing to lay out there".to_owned();
+        if let Some(reason) = answer.refused {
+            return refused_line(reason);
         }
         let [ok, far, blocked] = tally(answer);
         format!("{ok} will be placed, {far} out of reach, {blocked} blocked")
     };
     let fresh =
         current(mode, layout, hotbar, camera).and_then(|intent| preview.fresh(&intent, now));
-    let count = fresh
-        .filter(|answer| answer.refused.is_none())
-        .map(|answer| tally(answer)[0]);
     let size = if between {
         let c = mode.points.get(2).copied().or(mode.depth);
         match mode.points[..] {
@@ -1002,44 +1018,18 @@ pub(super) fn summary(
     })
     .unwrap_or_default();
     let mut body = match held_voxel(hotbar) {
-        None => "Hold a solid to lay it out".to_owned(),
+        None => refused_line(RejectReason::NothingHeld),
         Some(_) => match (fresh, step, mode.points.is_empty()) {
             (None, ..) => "Aim at a surface".to_owned(),
-            (Some(_), Some(step), true) => step.to_owned(),
-            (Some(answer), Some(step), false) => format!("{step}\n{}", tallied(answer)),
+            (Some(answer), Some(step), true) if answer.refused.is_none() => step.to_owned(),
+            (Some(answer), Some(step), _) => format!("{step}\n{}", tallied(answer)),
             (Some(answer), None, _) => tallied(answer),
         },
     };
     if mode.refused {
         body.push_str(&format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels"));
     }
-    let leave = format!(
-        " · {} menu · {} leave",
-        keys(Action::Layout),
-        keys(Action::ClearTool)
-    );
-    let hint = if between {
-        let (place, remove) = (keys(Action::Place), keys(Action::Remove));
-        match mode.points.len() {
-            0 => format!("{place} set A, hold and drag to B · {remove} cancel{leave}"),
-            1 => format!("{place} set B, or let go on B · {remove} step back{leave}"),
-            _ => format!("{place} set C and lay it · {remove} step back{leave}"),
-        }
-    } else {
-        format!(
-            "{} place · {} cancel · {} / {} or digits for the count{leave}",
-            keys(Action::Place),
-            keys(Action::Remove),
-            keys(Action::LayoutMore),
-            keys(Action::LayoutLess),
-        )
-    };
-    Summary {
-        count,
-        size,
-        body,
-        hint,
-    }
+    Summary { size, body }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -1177,6 +1167,55 @@ mod tests {
 
     fn count(intent: &LayoutIntent) -> u32 {
         intent.layout.axes[0].unwrap().count
+    }
+
+    fn toasts(app: &mut App) -> Vec<(String, super::super::menu_ui::Tone)> {
+        super::super::menu_ui::showing(app.world_mut())
+    }
+
+    #[test]
+    fn place_with_nothing_solid_in_hand_says_so_in_a_toast_and_the_status() {
+        for kind in [Kind::Directions, Kind::Between] {
+            let mut app = app();
+            app.insert_resource(Hotbar::default());
+            saved_mut(&mut app).layout.kind = kind;
+            turn_on(&mut app);
+            step(&mut app);
+            assert!(click(&mut app, MouseButton::Right).is_empty());
+            let said = "Hold a solid to lay it out".to_owned();
+            assert_eq!(
+                toasts(&mut app),
+                [(said.clone(), super::super::menu_ui::Tone::Alert)],
+                "{kind:?}"
+            );
+            assert!(say(&mut app).contains(&said));
+        }
+    }
+
+    #[test]
+    fn a_corner_with_nothing_in_reach_says_so_in_a_toast_and_the_status() {
+        let mut app = app();
+        saved_mut(&mut app).layout.kind = Kind::Between;
+        turn_on(&mut app);
+        step(&mut app);
+        refuse_with(&mut app, RejectReason::OutOfReach);
+        assert!(click(&mut app, MouseButton::Right).is_empty());
+        assert!(mode(&app).points.is_empty());
+        let said = "Nothing in reach".to_owned();
+        assert_eq!(
+            toasts(&mut app),
+            [(said.clone(), super::super::menu_ui::Tone::Alert)]
+        );
+        assert!(say(&mut app).contains(&said), "{}", say(&mut app));
+    }
+
+    #[test]
+    fn a_picked_corner_or_a_sent_layout_shows_no_toast() {
+        let mut app = app();
+        turn_on(&mut app);
+        step(&mut app);
+        assert_eq!(click(&mut app, MouseButton::Right).len(), 1);
+        assert!(toasts(&mut app).is_empty());
     }
 
     #[test]
@@ -1654,6 +1693,12 @@ mod tests {
     }
 
     /// Answers the current aim with `cells`, as the Server would.
+    fn refuse_with(app: &mut App, reason: RejectReason) {
+        answer_with(app, &[]);
+        let mut preview = app.world_mut().resource_mut::<Preview>();
+        preview.answer.as_mut().unwrap().0.refused = Some(reason);
+    }
+
     fn answer_with(app: &mut App, cells: &[(Vec3, CellState)]) {
         let intent = {
             let mut cameras = app.world_mut().query::<(&GlobalTransform, &FlyCamera)>();
@@ -1895,8 +1940,6 @@ mod tests {
             app.world().resource::<Hotbar>(),
             &camera,
             app.world().resource::<Preview>(),
-            app.world().resource::<Bindings>(),
-            &Labels::default(),
             (0.0, 1.0),
         )
         .joined()
@@ -1916,12 +1959,11 @@ mod tests {
             ],
         );
         let said = say(&mut app);
-        assert!(said.starts_with("2 Voxels\n4 × 1 × 1 · "), "{said}");
+        assert!(said.starts_with("4 × 1 × 1 · "), "{said}");
         assert!(
             said.contains("2 will be placed, 1 out of reach, 1 blocked"),
             "{said}"
         );
-        assert!(said.contains("count"), "the keys for the counts");
         saved_mut(&mut app).layout.kind = Kind::Between;
         // The aim is asked again in the new way.
         answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
@@ -2068,30 +2110,6 @@ mod tests {
         assert!(corners_of(&mode, &directions, 1.0).is_empty());
         mode.on = false;
         assert!(corners_of(&mode, &layout, 1.0).is_empty());
-    }
-
-    #[test]
-    fn the_prompts_name_the_keys_for_the_current_step() {
-        let mut app = ghost_app();
-        saved_mut(&mut app).layout.kind = Kind::Between;
-        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
-        assert!(say(&mut app).contains("set A, hold and drag to B"));
-        app.world_mut()
-            .resource_mut::<LayoutMode>()
-            .points
-            .push([0; 3]);
-        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
-        assert!(say(&mut app).contains("set B, or let go on B"));
-        app.world_mut()
-            .resource_mut::<LayoutMode>()
-            .points
-            .push([1; 3]);
-        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
-        let said = say(&mut app);
-        assert!(
-            said.contains("set C and lay it") && said.contains("step back"),
-            "{said}"
-        );
     }
 
     #[test]

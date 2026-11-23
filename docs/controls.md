@@ -65,11 +65,15 @@ notices, brighter edges and a thicker focus ring) and a solid menu background.
 While the Menu or Settings is open the World behind it is blurred, unless the
 menu background is solid.
 
-Key bindings searches action names, categories and both assigned alternatives.
-**/** focuses search. Escape clears its text, then releases text focus, before
-it can close anything. Typing in search never activates gameplay or menu
-shortcuts. Behavior, Key bindings and Display scroll through all the space above
-the footer divider; **Restore defaults** is a button in that footer.
+Settings is a menu frame: the categories are the rail, and the prompt bar names
+Esc (Back) and R (Reset to defaults). Choices are ◀ value ▶ selectors and
+On/Off toggles; Left and Right, on the arrows, the D-pad or the stick, change
+the focused one instead of moving focus, and Enter steps it on. Sliders stay
+sliders. One help panel beside the rows explains the row that holds focus.
+
+Key bindings shows one category at a time, Movement, Building or Interface,
+which **Q** and **E** step through, and one key cap per input: Keyboard and
+Controller. Mouse buttons print as LMB, RMB and MMB.
 
 The Inventory window holds the backpack, the Hotbar beneath it and the details
 of one Stack. Click a Stack then a slot to move, merge or swap it, or drag and
@@ -86,13 +90,14 @@ details; the Item is thrown a few metres ahead, in either mode, past your pickup
 reach, and cannot be picked up for two seconds. While you drag a Stack or a
 Catalogue tile, its Item is drawn under the pointer.
 
-Each keyboard/mouse action has two alternatives. Behavior, binding and display
-changes share one draft across their pages. **Apply changes** saves and
-activates it only after a successful write. Closing with unapplied edits offers
-**Save changes**, **Discard** and **Stay**. A failed save keeps the draft and
-prompt open. Restore defaults asks for confirmation and changes only the draft.
-Escape always cancels binding capture. Capture waits for the opening inputs to
-be released.
+Each keyboard/mouse action has two alternatives; the second shows as a cap only
+once bound. Every change applies and is saved the moment it is made, so Back
+asks nothing; a dragged slider saves once it is let go. A display change (sync,
+frame rate limit, anti-aliasing, render scale) opens a keep-or-revert prompt
+that reverts after ten seconds, or when dismissed, unless kept. Reset to
+defaults asks first and restores only the open page's own preferences. Selecting
+a cap waits over its row for the next key or button: Escape cancels and Delete
+clears it. Capture waits for the opening inputs to be released.
 
 Conflicting bindings offer Replace or Cancel. Modifier sides are equivalent for
 chords; physical modifier keys can also be bound individually. Specific chords
@@ -232,11 +237,11 @@ than displacing that binding. A version 1 profile is migrated once on load: a
 binding still equal to a default version 2 gave away (Tab for the Catalogue, I
 for Help) takes the new default, every other binding is kept, and the version 1
 file stays as `.json.bak`. Invalid or unsupported profiles remain on disk and
-loading reports an error. Apply preserves the previous valid profile as
+loading reports an error. A save preserves the previous valid profile as
 `.json.bak`, or preserves corrupt data under a timestamped `.corrupt-*` name.
 Saves write and sync a temporary file, then atomically replace the destination.
-Save failure keeps the active preferences and draft distinct. Profiles contain
-no World data or Material ids.
+A failed save keeps the change in play and shows the error in Settings. Profiles
+contain no World data or Material ids.
 
 The Hotbar is the Server's and is saved with the World. The per-Game quick slots
 an older build saved in `user-profile.hotbar.json` beside the controls profile

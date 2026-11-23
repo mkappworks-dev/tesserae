@@ -29,6 +29,13 @@ attribution or license-notice requirement.
 Look packs and other Mods. They are loaded from a user directory through the WIT
 contract, ship their own WESL, and are not ours to licence.
 
+## App icon
+
+`icon.png` is the mosaic T from [`mockup/brand.svg`](../mockup/brand.svg) on a
+dark rounded tile, 1024 px, drawn for this project and covered by the CC0
+dedication above. It is embedded in the binary and set as the macOS Dock icon
+and About panel image at startup.
+
 ## Bundled UI fonts
 
 Both faces are embedded in the binary for deterministic native UI startup.

@@ -491,6 +491,7 @@ fn spawn_pop(
     marks: &Marks,
     images: &mut Assets<Image>,
 ) {
+    // Not a `frame::Popup`: a click on the Map moves the add point or opens another marker.
     view.spawn((
         PopRoot,
         Visibility::Hidden,

@@ -1,4 +1,4 @@
-//! The open Container's slots beside the Inventory, drawn from the Stacks the
+//! The open Container's slots above the backpack, drawn from the Stacks the
 //! Server last sent. Every move is an intent the Server answers; walking away
 //! or the Voxel changing closes it from the Server's side.
 
@@ -6,13 +6,10 @@ use bevy::prelude::*;
 use bevy::window::{CursorOptions, PrimaryWindow};
 use tesserae_core::inventory::Stack;
 
-use super::{Built, Control, InventoryWindow, Names, Panel, look, slot_button};
-use crate::client::buttons::{self, Eyebrow};
-use crate::client::cinematic::Kind;
+use super::{Built, InventoryWindow, Names, slot_button};
 use crate::client::drops::Looks;
 use crate::client::edit::Catalogue;
 use crate::client::menu_ui as ui;
-use crate::client::theme;
 use crate::server::container::{ContainerClosed, ContainerShown};
 use crate::server::inventory::{InventoryIntent, SlotAddress};
 use crate::server::usable::Closed;
@@ -35,7 +32,7 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 /// Opens the window on a Container's first Stacks and keeps them current;
-/// the Server's close takes the pane away with a notice.
+/// the Server's close takes its slots away with a notice.
 pub(super) fn receive(
     mut commands: Commands,
     (mut shown, mut closed): (
@@ -92,101 +89,51 @@ pub(super) fn leave(
     }
 }
 
-pub(super) fn panel(row: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
-    let Some(open) = &state.container else {
-        return;
-    };
+/// The Container's slots, above the backpack in the same panel.
+pub(super) fn section(
+    card: &mut ChildSpawnerCommands,
+    state: &Built,
+    open: &ContainerShown,
+    names: &Names,
+) {
     let used = open.slots.iter().flatten().count();
-    row.spawn((
-        Panel,
-        Node {
-            width: Val::Px(super::GRID_PX + 2.0 * PAD_PX),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(12.0),
-            padding: UiRect::all(Val::Px(PAD_PX)),
-            border: UiRect::all(Val::Px(theme::FRAME)),
-            border_radius: BorderRadius::all(Val::Px(theme::ITEM_RADIUS)),
-            ..default()
+    super::section(
+        card,
+        names.material_label(open.material),
+        used,
+        open.slots.len(),
+        |section| {
+            section
+                .spawn(Node {
+                    width: Val::Px(super::GRID_PX),
+                    flex_wrap: FlexWrap::Wrap,
+                    row_gap: Val::Px(super::SLOT_GAP_PX),
+                    column_gap: Val::Px(super::SLOT_GAP_PX),
+                    ..default()
+                })
+                .with_children(|grid| {
+                    for (at, stack) in open.slots.iter().enumerate() {
+                        let slot = SlotAddress::Container(at);
+                        slot_button(
+                            grid,
+                            slot,
+                            stack.as_ref(),
+                            names,
+                            state.picked == Some(slot),
+                        );
+                    }
+                });
         },
-        BackgroundColor(theme::ITEM_SURFACE),
-        BorderColor::all(theme::GROUT),
-        super::item_shadow(),
-    ))
-    .with_children(|pane| {
-        pane.spawn(theme::ring(theme::ITEM_RADIUS));
-        pane.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(5.0),
-            ..default()
-        })
-        .with_children(|title| {
-            buttons::eyebrow(title, "CONTAINER", Eyebrow::Inventory);
-            title.spawn(look::label(
-                names.material_label(open.material),
-                theme::ITEM_TEXT_TITLE,
-                theme::MEDIUM,
-                theme::INK,
-            ));
-            title.spawn(look::label(
-                format!(
-                    "{used} / {} slots · stays here when you leave",
-                    open.slots.len()
-                ),
-                theme::TEXT_EYEBROW,
-                theme::REGULAR,
-                theme::item_capacity(),
-            ));
-        });
-        pane.spawn(Node {
-            width: Val::Px(super::GRID_PX),
-            flex_wrap: FlexWrap::Wrap,
-            row_gap: Val::Px(super::SLOT_GAP_PX),
-            column_gap: Val::Px(super::SLOT_GAP_PX),
-            ..default()
-        })
-        .with_children(|grid| {
-            for (at, stack) in open.slots.iter().enumerate() {
-                let slot = SlotAddress::Container(at);
-                slot_button(
-                    grid,
-                    slot,
-                    stack.as_ref(),
-                    names,
-                    state.picked == Some(slot),
-                );
-            }
-        });
-        pane.spawn(Node {
-            column_gap: Val::Px(8.0),
-            ..default()
-        })
-        .with_children(|actions| {
-            look::button(
-                actions,
-                "Take all",
-                Control::TakeAll,
-                Kind::Ghost,
-                look::SMALL,
-            );
-            look::button(
-                actions,
-                "Sort",
-                Control::SortContainer,
-                Kind::Ghost,
-                look::SMALL,
-            );
-        });
-    });
+    );
 }
-
-const PAD_PX: f32 = 18.0;
 
 #[cfg(test)]
 mod tests {
     use bevy::ui_widgets::Activate;
     use tesserae_core::inventory::Slot;
 
-    use super::super::tests::{app, press, server};
+    use super::super::Control;
+    use super::super::tests::{app, bar, press, server, shown_prompts};
     use super::*;
     use crate::content::ItemLook;
 
@@ -221,13 +168,7 @@ mod tests {
         app
     }
 
-    fn texts(app: &mut App) -> Vec<String> {
-        app.world_mut()
-            .query::<&Text>()
-            .iter(app.world())
-            .map(|t| t.0.clone())
-            .collect()
-    }
+    use super::super::tests::texts;
 
     fn find(app: &mut App, wanted: Control) -> Option<Entity> {
         app.world_mut()
@@ -256,14 +197,44 @@ mod tests {
     }
 
     #[test]
-    fn the_servers_chest_opens_its_slots_beside_the_inventory() {
+    fn the_servers_chest_opens_its_slots_above_the_backpack_with_take_all_and_sort_as_prompts() {
         let mut app = opened();
         assert!(app.world().resource::<InventoryWindow>().open);
         let shown = texts(&mut app);
         assert!(shown.iter().any(|t| t == "Chest"), "{shown:?}");
-        assert!(shown.iter().any(|t| t.starts_with("1 / 4 slots")));
+        assert!(shown.iter().any(|t| t == "1 / 4"));
         assert!(find(&mut app, slot(3)).is_some());
         assert!(find(&mut app, slot(4)).is_none());
+        assert_eq!(
+            shown_prompts(&mut app),
+            bar(&[
+                ("⇧ Click", "Quick move"),
+                ("Right-click", "Split"),
+                ("Q", "Drop"),
+                ("1–9", "To hotbar"),
+                ("T", "Take all"),
+                ("S", "Sort"),
+                ("I", "Close"),
+                ("Esc", "Back"),
+            ])
+        );
+        let keyed = |app: &mut App, key| {
+            app.world_mut()
+                .resource_mut::<Messages<InventoryIntent>>()
+                .clear();
+            press(app, key);
+            let messages = app.world().resource::<Messages<InventoryIntent>>();
+            messages
+                .get_cursor()
+                .read(messages)
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keyed(&mut app, KeyCode::KeyT), [InventoryIntent::TakeAll]);
+        assert_eq!(
+            keyed(&mut app, KeyCode::KeyS),
+            [InventoryIntent::SortContainer]
+        );
     }
 
     #[test]
@@ -296,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn the_server_closing_it_takes_the_pane_away_with_a_notice() {
+    fn the_server_closing_it_takes_the_chest_away_with_a_notice() {
         for (why, notice) in [
             (Closed::OutOfReach, "Out of reach of the Chest."),
             (Closed::Changed, "The Chest changed."),

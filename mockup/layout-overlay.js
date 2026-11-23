@@ -6,6 +6,7 @@ function ensureLayout() {
     gap: 0,
     active: false,
     points: 0,
+    axis: 0,
   };
 }
 function layoutCounts() {
@@ -84,35 +85,124 @@ function layoutPreviewSvg() {
     .map((c) => c.svg)
     .join("")}</g></svg>`;
 }
-function layoutStatus() {
-  ensureLayout();
-  const s = layoutSummary();
-  return `<aside class="layout-status"><span>${icon("layout", 18)} Layout ready</span><b>${s.kind} · ${s.count}</b><small>${s.dimensions.join(" × ")} m</small><div class="row">${button("Edit · L", "layout-open", { small: true })}${button("Exit layout", "layout-exit", { small: true, ghost: true })}</div></aside>`;
+// One panel per tool, docked right the whole time it is in hand: full while
+// choosing, compact while aiming. The compact one holds nothing clickable, as
+// in play the mouse aims; both name their keys the same way.
+function toolPanel({ name, label, full, body, keys, aim }) {
+  const caps = `<div class="layout-keys">${keys
+    .map(([k, l]) => `<span><kbd>${k}</kbd> ${l}</span>`)
+    .join("")}</div>`;
+  return `<section class="layout-side tool-panel ${full ? "full" : "compact"} ${name}-side" aria-label="${label}"><h2>${icon("layout", 18)} ${label}</h2>${body}<div class="tp-foot">${full ? `<button type="button" class="btn primary tp-aim" data-action="${aim}" ${aim ? "" : "disabled"}>Aim <kbd>Enter</kbd></button>` : ""}${caps}</div></section>`;
 }
-function layoutAxis(axis) {
-  const l = state.quickLayout,
-    ways = [
-      ["East", "West"],
-      ["Up", "Down"],
-      ["South", "North"],
-    ];
-  return `<div class="layout-axis"><div class="layout-axis-label"><b>${["X", "Y", "Z"][axis]}</b><button data-action="layout-reverse" data-value="${axis}" aria-label="Reverse ${["X", "Y", "Z"][axis]} direction">${ways[axis][Number(l.negative[axis])]} ${icon("reverse", 14)}</button></div><div class="layout-stepper"><button data-action="layout-count" data-value="${axis}:-1" aria-label="Decrease ${["X", "Y", "Z"][axis]} count">−</button><input class="input" aria-label="${["X", "Y", "Z"][axis]} Voxel count" type="number" min="1" max="256" data-bind="layout-axis-${axis}" value="${l.counts[axis]}"><button data-action="layout-count" data-value="${axis}:1" aria-label="Increase ${["X", "Y", "Z"][axis]} count">+</button></div></div>`;
+function toolPanels() {
+  const screen = state.screen;
+  if (screen === "layout") return layoutPanel(true);
+  if (screen === "place") return placePanel(true);
+  if (screen !== "play") return "";
+  if (state.heldTool === "Place") return placePanel(false);
+  return state.quickLayout?.active ? layoutPanel(false) : "";
 }
-function layoutPage() {
+function layoutPanel(full) {
   ensureLayout();
   const l = state.quickLayout,
     s = layoutSummary();
-  l.active = true;
-  return `<div class="layout-workspace"><div class="layout-stage"><div class="layout-stage-label"><span class="item-eyebrow">WORLD PREVIEW</span><h1>${s.kind === "Single Voxel" ? "Single Voxel" : s.kind + " layout"}</h1><p>${s.dimensions.join(" × ")} metres · ${s.count}</p></div><div class="layout-ghost">${layoutPreviewSvg()}</div><div class="layout-preview-caption">Illustrative preview · no terrain is edited</div></div><section class="layout-panel" aria-label="Quick layout"><header><div><p class="item-eyebrow">BUILDING TOOL</p><h2>Quick layout</h2></div><button class="item-close" data-action="layout-close" aria-label="Close layout controls">${icon("close")}</button></header><div class="layout-scroll" tabindex="0"><div class="layout-method" aria-label="Layout method"><button class="${l.kind === "directions" ? "active" : ""}" data-action="layout-kind" data-value="directions">Direction & count</button><button class="${l.kind === "between" ? "active" : ""}" data-action="layout-kind" data-value="between">Point to point</button></div>${l.kind === "directions" ? `<p class="item-eyebrow">QUICK SHAPES</p><div class="layout-presets">${["Line", "Plane", "Box"].map((n, i) => `<button data-action="layout-preset" data-value="${i}" class="${s.kind === n ? "active" : ""}">${icon(["line", "plane", "box"][i], 22)}${n}</button>`).join("")}</div><p class="item-eyebrow">COUNT & DIRECTION</p>${[0, 1, 2].map(layoutAxis).join("")}` : `<div class="layout-points">${["A · Start", "B · Plane", "C · Depth"].map((n, i) => `<div class="${l.points > i ? "done" : l.points === i ? "next" : ""}"><span>${l.points > i ? icon("check", 15) : i + 1}</span>${n}</div>`).join("")}</div><p class="layout-description">Set A, then B for a flat rectangle. C adds depth and completes the layout.</p>${l.points < 3 ? button("Preview point " + ["A", "B", "C"][l.points], "layout-point") : button("Restart point preview", "layout-restart", { ghost: true })}<small>In the game, Place picks the aimed corner. The browser uses example positions.</small>`}<div class="layout-gap"><div><b>Gap</b><small>${Number((l.gap * s.voxel).toFixed(2))} m between Voxels</small></div><div class="layout-stepper"><button data-action="layout-gap" data-value="-1" aria-label="Decrease gap">−</button><span>${l.gap}</span><button data-action="layout-gap" data-value="1" aria-label="Increase gap">+</button></div></div><div class="layout-totals"><div><span>Voxels</span><b>${s.total} <small>/ 256</small></b></div><div><span>Dimensions</span><b>${s.dimensions.join(" × ")} m</b></div><div><span>Voxel size</span><b>${s.voxel} m</b></div></div>${state.layoutError ? `<div class="layout-error" role="alert">${state.layoutError}</div>` : ""}<div class="layout-totals"><div><span>In the World</span><b>${s.total} <small>Voxels</small></b></div><div><span>${s.total > 256 ? "That is over 256 Voxels" : l.kind === "between" ? ["Place sets point A", "Place sets point B: the flat rectangle", "Place sets point C: the depth, and lays it", "Laid out"][Math.min(l.points, 3)] : `${s.total} will be placed, 0 out of reach, 0 blocked`}</span></div></div></div><footer><small>Changes are kept as you adjust them.</small><small>${l.kind === "between" ? ["Right mouse set A, hold and drag to B · Left mouse cancel", "Right mouse set B, or let go on B · Left mouse step back", "Right mouse set C and lay it · Left mouse step back", "Right mouse set A · Left mouse cancel"][Math.min(l.points, 3)] : "Right mouse place · Left mouse cancel · Shift+Wheel or digits for the count"} · L menu · Backspace leave</small>${button("Ready to build", "layout-close", { primary: true })}${button("Exit layout", "layout-exit", { ghost: true })}</footer></section></div>`;
+  const body = full
+    ? layoutToolbar()
+    : `<div class="tp-sel"><span class="tp-thumb">${icon({ Line: "line", Plane: "plane" }[s.kind] || "box", 22)}</span><span><b>${s.kind} · ${s.count}</b><small>${s.dimensions.join(" × ")} m${l.gap ? ` · gap ${l.gap}` : ""}</small></span></div><div class="structure-outcome ok" role="status">${l.kind === "between" ? `Point to point · right mouse sets ${"ABC"[Math.min(l.points, 2)]}` : "Aim at a surface: right mouse lays it out."}</div>`;
+  return toolPanel({
+    name: "layout",
+    label: "Quick layout",
+    full,
+    body,
+    aim: "layout-close",
+    keys: full
+      ? [
+          ["L", "Aim"],
+          ["Esc", "Exit"],
+        ]
+      : [
+          ["L", "Edit"],
+          ["Esc", "Exit"],
+          ["RMB", "Place"],
+        ],
+  });
+}
+const LAYOUT_AXES = [
+  ["X", ["East", "West"]],
+  ["Y", ["Up", "Down"]],
+  ["Z", ["South", "North"]],
+];
+// A side panel because counts are exact numbers a mouse must be able to set;
+// the keys in the prompt bar do the same without it.
+function layoutToolbar() {
+  const l = state.quickLayout,
+    s = layoutSummary(),
+    between = l.kind === "between";
+  const step = (act, value, label, glyph) =>
+    `<button type="button" class="lp-step" data-action="${act}" data-value="${value}" aria-label="${label}">${glyph}</button>`;
+  const shapes = ["Line", "Plane", "Box"]
+    .map(
+      (n, i) =>
+        `<button type="button" class="lp-shape ${!between && s.kind === n ? "on" : ""}" data-action="layout-preset" data-value="${i}" aria-pressed="${!between && s.kind === n}">${icon(["line", "plane", "box"][i], 20)}<span>${n}</span><kbd>${i + 1}</kbd></button>`,
+    )
+    .join("");
+  const mode = [
+    ["directions", "Count"],
+    ["between", "Point to point"],
+  ]
+    .map(
+      ([id, label]) =>
+        `<button type="button" class="${l.kind === id ? "selected" : ""}" role="radio" aria-checked="${l.kind === id}" data-action="layout-kind" data-value="${id}">${label}</button>`,
+    )
+    .join("");
+  const body = between
+    ? `<ol class="lp-points">${["Start", "Plane", "Depth"].map((n, i) => `<li class="${l.points > i ? "done" : l.points === i ? "on" : ""}"><span>${l.points > i ? icon("check", 13) : "ABC"[i]}</span>${n}</li>`).join("")}</ol>`
+    : `<div class="lp-section"><span class="lp-label">Shape</span><div class="lp-shapes">${shapes}</div></div><div class="lp-section"><span class="lp-label">Count</span>${LAYOUT_AXES.map(
+        ([name, ways], i) =>
+          `<div class="lp-row ${l.axis === i ? "on" : ""}"><b>${name}</b><button type="button" class="lp-dir" data-action="layout-reverse" data-value="${i}" title="Reverse · R">${ways[Number(l.negative[i])]}</button>${step("layout-count", `${i}:-1`, `Fewer along ${name}`, "−")}<output>${l.counts[i]}</output>${step("layout-count", `${i}:1`, `More along ${name}`, "+")}</div>`,
+      ).join("")}</div>`;
+  return `<div class="segmented" role="radiogroup" aria-label="Method">${mode}</div>${state.layoutError ? `<div class="layout-error" role="alert">${state.layoutError}</div>` : ""}${body}<div class="lp-section"><div class="lp-row"><b>Gap</b><span class="lp-dir muted">${Number((l.gap * s.voxel).toFixed(2))} m</span>${step("layout-gap", -1, "Less gap", "−")}<output>${l.gap}</output>${step("layout-gap", 1, "More gap", "+")}</div></div><div class="lp-total ${s.total > 256 ? "over" : ""}"><span>${s.dimensions.join(" × ")} m</span><b>${s.total} <small>/ 256</small></b></div>`;
+}
+function layoutPrompts() {
+  const l = state.quickLayout,
+    between = l.kind === "between";
+  return [
+    ["1 2 3", "Shape"],
+    between
+      ? [
+          "Space",
+          l.points < 3 ? `Set ${"ABC"[l.points]}` : "Restart",
+          "layout-point",
+        ]
+      : ["← →", "Axis"],
+    !between && ["↑ ↓", "Count"],
+    !between && ["R", "Reverse", "layout-reverse", l.axis],
+    ["G", "Gap", "layout-gap", 1],
+    [
+      "P",
+      between ? "Direction & count" : "Point to point",
+      "layout-kind",
+      between ? "directions" : "between",
+    ],
+    ["Enter", "Aim", "layout-close"],
+    ["Esc", "Exit", "layout-exit"],
+  ];
+}
+// The full panel opens over play: the World, the hotbar and the ghost stay in
+// view, so Enter only shrinks the panel and hands back the crosshair.
+function layoutPage() {
+  ensureLayout();
+  state.quickLayout.active = true;
+  if (state.heldTool === "Place") state.heldTool = null;
+  screenPrompts = layoutPrompts();
+  return `<div class="tool-ghost">${layoutPreviewSvg()}</div>${play()}`;
 }
 function refreshLayout() {
-  const scroll = $(".layout-scroll")?.scrollTop || 0,
-    focused = document.activeElement,
+  const focused = document.activeElement,
     act = focused?.dataset.action,
     val = focused?.dataset.value;
   render();
-  if ($(".layout-scroll")) $(".layout-scroll").scrollTop = scroll;
-  [...document.querySelectorAll(".layout-panel [data-action]")]
+  [...document.querySelectorAll(".layout-side [data-action]")]
     .find((x) => x.dataset.action === act && x.dataset.value === val)
     ?.focus({ preventScroll: true });
 }
@@ -138,6 +228,9 @@ function layoutAction(name, value) {
   ensureLayout();
   const l = state.quickLayout;
   if (name === "layout-open") {
+    // Always on Count: the method is never kept from one opening to the next.
+    l.kind = "directions";
+    l.points = 0;
     l.active = true;
     state.layoutError = "";
     navigate("layout");
@@ -152,6 +245,11 @@ function layoutAction(name, value) {
     l.points = 0;
     state.layoutError = "";
     navigate("play");
+    return true;
+  }
+  if (name === "layout-axis") {
+    l.axis = Number(value);
+    refreshLayout();
     return true;
   }
   if (name === "layout-kind") {
@@ -188,57 +286,96 @@ function layoutAction(name, value) {
     return true;
   }
   if (name === "layout-point") {
-    l.points = Math.min(3, l.points + 1);
-    refreshLayout();
-    return true;
-  }
-  if (name === "layout-restart") {
-    l.points = 0;
+    l.points = l.points >= 3 ? 0 : l.points + 1;
     refreshLayout();
     return true;
   }
   return false;
 }
-document.addEventListener("input", (e) => {
-  if (e.target.dataset.bind?.startsWith("layout-axis-"))
-    e.stopImmediatePropagation();
-});
-document.addEventListener("change", (e) => {
-  const key = e.target.dataset.bind;
-  if (!key?.startsWith("layout-axis-")) return;
-  e.stopImmediatePropagation();
-  setLayoutCount(Number(key.at(-1)), Number(e.target.value));
-});
 document.addEventListener("keydown", (e) => {
   if (
     e.defaultPrevented ||
     openSelect ||
     $("#dialog-root").children.length ||
-    e.target.matches?.("input,textarea,select")
+    e.target.matches?.("input,textarea,select") ||
+    state.screen !== "play" ||
+    state.heldTool === "Place"
   )
     return;
-  if (
-    e.key.toLowerCase() === "l" &&
-    ["play", "layout"].includes(state.screen)
-  ) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    action(state.screen === "layout" ? "layout-close" : "layout-open");
-    return;
-  }
-  if (e.key === "Escape" && state.screen === "layout") {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    action("layout-close");
-    return;
-  }
-  if (
-    e.key === "Backspace" &&
-    ["play", "layout"].includes(state.screen) &&
-    state.quickLayout?.active
-  ) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    action("layout-exit");
-  }
+  // Quick layout and the place Tool are two ways to place; one at a time.
+  const act =
+    e.key.toLowerCase() === "l"
+      ? "layout-open"
+      : (e.key === "Escape" || e.key === "Backspace") &&
+          state.quickLayout?.active
+        ? "layout-exit"
+        : "";
+  if (!act) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  action(act);
 });
+/* Right mouse lays the layout out and keeps it, for the next wall or row. */
+document.addEventListener("contextmenu", (e) => {
+  if (
+    state.screen !== "play" ||
+    !state.quickLayout?.active ||
+    state.heldTool === "Place"
+  )
+    return;
+  e.preventDefault();
+  const s = layoutSummary();
+  notice(`${s.kind} laid out · ${s.count}.`, "info");
+});
+// Capture phase, so the arrow keys change the layout before interaction.js
+// would move menu focus with them.
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (
+      state.screen !== "layout" ||
+      e.metaKey ||
+      e.ctrlKey ||
+      openSelect ||
+      $("#dialog-root").children.length ||
+      e.target.matches?.("input,textarea,select")
+    )
+      return;
+    const l = state.quickLayout,
+      between = l.kind === "between";
+    let act = null;
+    if (["1", "2", "3"].includes(e.key))
+      act = ["layout-preset", Number(e.key) - 1];
+    else if (e.key === "Tab" && !between) {
+      const now = ["Line", "Plane", "Box"].indexOf(layoutSummary().kind);
+      act = ["layout-preset", (now + (e.shiftKey ? 2 : 1)) % 3];
+    } else if (!between && (e.key === "ArrowLeft" || e.key === "ArrowRight"))
+      act = ["layout-axis", (l.axis + (e.key === "ArrowLeft" ? 2 : 1)) % 3];
+    else if (!between && (e.key === "ArrowUp" || e.key === "ArrowDown"))
+      act = ["layout-count", `${l.axis}:${e.key === "ArrowUp" ? 1 : -1}`];
+    else if (e.key === "G" && e.shiftKey) act = ["layout-gap", -1];
+    else if (e.key === " " && between) act = ["layout-point"];
+    else if (
+      (e.key === "Enter" && !e.target.closest?.("button")) ||
+      e.key.toLowerCase() === "l"
+    )
+      act = ["layout-close"];
+    else if (e.key === "Escape" || e.key === "Backspace") act = ["layout-exit"];
+    if (!act) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    action(act[0], act[1]);
+  },
+  true,
+);
+document.addEventListener(
+  "wheel",
+  (e) => {
+    if (state.screen !== "layout" || state.quickLayout.kind === "between")
+      return;
+    e.preventDefault();
+    const l = state.quickLayout;
+    action("layout-count", `${l.axis}:${e.deltaY < 0 ? 1 : -1}`);
+  },
+  { passive: false },
+);

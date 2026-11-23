@@ -26,6 +26,11 @@ reversioned Game or Mod refuses the open before any write. A missing or corrupt
 sidecar never hides a folder; Rename rebuilds it from the newest commit. The
 single pre-list `worlds/default` World is adopted as "Default World".
 
+The Client writes a `thumbnail.png` beside the sidecar once, when it creates the
+World. Like the sidecar it is display data, not World state: nothing loads it, a
+missing or unreadable one shows the neutral picture, so the Server stays the
+sole authority ([ADR-0002](adr/0002-client-server-from-day-one.md)).
+
 Create writes the folder and a `pending` sidecar, then restarts on it. A folder
 without commits takes its UUID, seed and Voxel size from that sidecar and writes
 its first commit at once; any other folder without a save is refused rather than

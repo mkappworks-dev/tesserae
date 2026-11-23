@@ -320,8 +320,9 @@ impl ClimateField {
         Some(BiomeId(i as u8))
     }
 
-    /// Continuous in position, so colour never steps where [`Self::biome_at`] does. `None` where no
-    /// Biome has colours.
+    /// Continuous in position, so colour never steps where [`Self::biome_at`] does. A Biome that
+    /// declares no colours takes its neighbours'; [`SkyFog::DEFAULT`] where none declares any.
+    /// `None` only in a World with no Biomes.
     #[allow(
         clippy::disallowed_methods,
         reason = "display only: the sky and fog blend is not generation"
@@ -334,8 +335,9 @@ impl ClimateField {
         (site, (dt, dh)): (Site, (f32, f32)),
     ) -> Option<SkyFogBlend> {
         let selectors = biomes.selectors();
-        // Among the Biomes `biome_at` chooses from there: those of the land's shape that admit the
-        // column, else the rest, so the sky over a mountain is its own.
+        // Among the coloured Biomes `biome_at` chooses from there: those of the land's shape that
+        // admit the column, else the rest, so a coloured mountain has its own sky and a colourless
+        // one keeps the land's around it.
         let ranged_here = biomes.as_slice().iter().enumerate().any(|(i, b)| {
             b.sky_fog.is_some() && selectors[i].is_ranged() && selectors[i].admits(&site)
         });
@@ -354,6 +356,9 @@ impl ClimateField {
                 .filter(move |&(i, _)| considered(i))
                 .filter_map(|(_, b)| Some((b, b.sky_fog?)))
         };
+        if coloured().next().is_none() {
+            return (!biomes.as_slice().is_empty()).then(|| SkyFog::DEFAULT.into());
+        }
         // Unwarped: the warp varies fast to roughen a border, and the air would shimmer with it.
         let mut c = self.at(x_m, z_m);
         c.temperature += dt;
@@ -362,23 +367,33 @@ impl ClimateField {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
             dt.hypot(dh)
         };
-        let nearest = coloured().map(|(b, _)| distance(b)).reduce(f32::min)?;
-        let (mut sky, mut fog, mut total) = ([0.0; 3], [0.0; 3], 0.0);
-        for (b, colours) in coloured() {
-            // Relative to the nearest so nothing underflows.
-            let weight = (-(distance(b) - nearest) / SKY_BLEND_WIDTH).exp();
-            total += weight;
-            for i in 0..3 {
-                sky[i] += weight * f32::from(colours.sky[i]);
-                fog[i] += weight * f32::from(colours.fog[i]);
-            }
-        }
-        let unit = |sum: [f32; 3]| sum.map(|v| v / total / 255.0);
-        Some(SkyFogBlend {
-            sky: unit(sky),
-            fog: unit(fog),
-        })
+        blend_sky_fog(coloured().map(|(b, colours)| (distance(b), colours)))
     }
+}
+
+/// The sky and fog of Biomes at these climate distances from a point, the nearest weighing most;
+/// `None` for no Biomes.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "display only: the sky and fog blend is not generation"
+)]
+pub fn blend_sky_fog(coloured: impl Iterator<Item = (f32, SkyFog)> + Clone) -> Option<SkyFogBlend> {
+    let nearest = coloured.clone().map(|(d, _)| d).reduce(f32::min)?;
+    let (mut sky, mut fog, mut total) = ([0.0; 3], [0.0; 3], 0.0);
+    for (distance, colours) in coloured {
+        // Relative to the nearest so nothing underflows.
+        let weight = (-(distance - nearest) / SKY_BLEND_WIDTH).exp();
+        total += weight;
+        for i in 0..3 {
+            sky[i] += weight * f32::from(colours.sky[i]);
+            fog[i] += weight * f32::from(colours.fog[i]);
+        }
+    }
+    let unit = |sum: [f32; 3]| sum.map(|v| v / total / 255.0);
+    Some(SkyFogBlend {
+        sky: unit(sky),
+        fog: unit(fog),
+    })
 }
 
 /// An index, not a name: only meaningful beside the [`BiomeTable`] that made it.
@@ -1220,7 +1235,7 @@ impl SurfaceFeatures {
 /// sRGB bytes. A pair, so a Biome carries both or neither.
 ///
 /// `fog` is what the shader fogs toward and the tonemapper darkens, so it is a little lighter than
-/// `sky` (`render::fog::HAZE_FOG_SRGB`).
+/// `sky` (`render::fog::TONEMAP_DARKENING_SRGB`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkyFog {
@@ -1228,11 +1243,39 @@ pub struct SkyFog {
     pub fog: [u8; 3],
 }
 
+impl SkyFog {
+    /// Where no Biome in the blend declares colours, and in a World with no Biomes.
+    pub const DEFAULT: SkyFog = SkyFog {
+        sky: [0x87, 0xce, 0xeb],
+        fog: [0xff, 0xff, 0xff],
+    };
+}
+
 /// sRGB in `[0, 1]`, as the Client's fog settings hold it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SkyFogBlend {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
+}
+
+impl From<SkyFogBlend> for SkyFog {
+    fn from(c: SkyFogBlend) -> Self {
+        let bytes = |unit: [f32; 3]| unit.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8);
+        SkyFog {
+            sky: bytes(c.sky),
+            fog: bytes(c.fog),
+        }
+    }
+}
+
+impl From<SkyFog> for SkyFogBlend {
+    fn from(c: SkyFog) -> Self {
+        let unit = |bytes: [u8; 3]| bytes.map(|v| f32::from(v) / 255.0);
+        SkyFogBlend {
+            sky: unit(c.sky),
+            fog: unit(c.fog),
+        }
+    }
 }
 
 /// Wide enough that a walk never sees a step, narrow enough that a region's middle is its own.

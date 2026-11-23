@@ -37,16 +37,27 @@ function icon(name, size = 20) {
     chevron: '<path d="m9 5 7 7-7 7"/>',
     down: '<path d="m6 9 6 6 6-6"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
+    shuffle: '<path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>',
+    filter: '<path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>',
+    sort: '<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>',
+    pencil: '<path d="M4 20h4L19 9l-4-4L4 16v4ZM14 6l4 4"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
     craft:
       '<path d="m14 4 6 6-3 3-6-6 3-3ZM11 7 3 15v6h6l8-8"/><path d="m7 17 2 2"/>',
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths[name] || paths.behavior}</svg>`;
 }
 
-function customSelect(label, bind, value, options, id = "") {
+function selectSwatch(color) {
+  return color
+    ? `<i class="select-swatch" style="--swatch:${esc(color)}"></i>`
+    : "";
+}
+function customSelect(label, bind, value, options, id = "", opts = {}) {
   const items = options.map((x) =>
     typeof x === "object"
-      ? { value: String(x.value), label: x.label }
+      ? { value: String(x.value), label: x.label, swatch: x.swatch }
       : {
           value: String(x),
           label:
@@ -55,9 +66,9 @@ function customSelect(label, bind, value, options, id = "") {
               : String(x),
         },
   );
-  const selected =
-    items.find((x) => x.value === String(value))?.label || String(value);
-  return `<button type="button" ${id ? `id="${esc(id)}"` : ""} class="select-trigger input" data-dropdown="${esc(bind)}" data-bind="${esc(bind)}" data-options="${esc(JSON.stringify(items))}" value="${esc(value)}" aria-label="${esc(label)}" aria-haspopup="listbox" aria-expanded="false"><span class="select-value">${esc(selected)}</span>${icon("down", 16)}</button>`;
+  const current = items.find((x) => x.value === String(value));
+  const selected = current?.label || String(value);
+  return `<button type="button" ${id ? `id="${esc(id)}"` : ""} class="select-trigger input" data-dropdown="${esc(bind)}" data-bind="${esc(bind)}" data-options="${esc(JSON.stringify(items))}" ${opts.search ? `data-search="${esc(opts.search)}"` : ""} value="${esc(value)}" aria-label="${esc(label)}" aria-haspopup="listbox" aria-expanded="false">${selectSwatch(current?.swatch)}<span class="select-value">${esc(selected)}</span>${icon("down", 16)}</button>`;
 }
 
 let openSelect = null;
@@ -72,6 +83,42 @@ function closeSelect(restoreFocus = false) {
     trigger.focus({ preventScroll: true });
 }
 
+/* Places a popup under its trigger, or above it when it would not fit below
+   `floor` (the screen by default). `shrinkTo` is the height a scrolling list
+   may shrink to before it flips; a popup that cannot scroll passes Infinity. */
+function placePopup(
+  popup,
+  trigger,
+  { width, maxHeight, shrinkTo = 150, floor },
+) {
+  const inGame = !!trigger.closest("#game");
+  const rect = trigger.getBoundingClientRect(),
+    game = inGame
+      ? $("#game").getBoundingClientRect()
+      : { left: 0, top: 0, width: innerWidth, bottom: innerHeight };
+  width = Math.min(width, game.width - 24);
+  popup.style.width = width + "px";
+  popup.style.left =
+    Math.max(12, Math.min(rect.left - game.left, game.width - width - 12)) +
+    "px";
+  const limit = Math.min(game.bottom, innerHeight, floor ?? Infinity);
+  const bottom = limit - rect.bottom - 12;
+  const top = rect.top - Math.max(0, game.top) - 12;
+  const height = Math.min(popup.scrollHeight + 2, maxHeight);
+  const above = bottom < Math.min(height, shrinkTo) && top > bottom;
+  const available = Math.max(48, above ? top : bottom);
+  popup.style.maxHeight = Math.min(maxHeight, available) + "px";
+  /* A popup opened above its field hangs from its bottom edge, so a search that
+     shrinks the list keeps it attached to the field. */
+  if (above) {
+    const container = inGame ? game.height : innerHeight;
+    popup.style.bottom = container - (rect.top - game.top) + 6 + "px";
+  } else {
+    popup.style.top = rect.bottom - game.top + 6 + "px";
+  }
+  return { x: rect.x, y: rect.y };
+}
+
 function openDropdown(trigger, at) {
   closeSelect();
   trigger.focus({ preventScroll: true });
@@ -82,58 +129,81 @@ function openDropdown(trigger, at) {
       0,
       items.findIndex((x) => x.value === trigger.value),
     );
-  openSelect = { trigger, items, index };
+  const search = trigger.dataset.search;
+  openSelect = { trigger, all: items, items, index, search: !!search };
   const popup = document.createElement("div");
   popup.id = "select-layer";
-  popup.className = "select-menu";
-  popup.setAttribute("role", "listbox");
-  popup.setAttribute("aria-label", trigger.getAttribute("aria-label"));
-  popup.innerHTML = items
-    .map(
-      (item, i) =>
-        `<button type="button" role="option" tabindex="-1" class="select-option" data-option="${i}" aria-selected="${item.value === trigger.value}"><span>${esc(item.label)}</span><span class="option-check">${item.value === trigger.value ? icon("check", 18) : ""}</span></button>`,
-    )
-    .join("");
+  popup.className = "select-menu" + (search ? " searchable" : "");
+  const label = esc(trigger.getAttribute("aria-label"));
+  popup.innerHTML = search
+    ? `<label class="select-search">${icon("search", 16)}<input type="text" role="combobox" aria-expanded="true" aria-controls="select-list" aria-autocomplete="list" aria-label="${esc(search)}" placeholder="${esc(search)}" autocomplete="off" spellcheck="false"></label><div id="select-list" class="select-list" role="listbox" aria-label="${label}"></div>`
+    : "";
+  if (!search) {
+    popup.setAttribute("role", "listbox");
+    popup.setAttribute("aria-label", trigger.getAttribute("aria-label"));
+  }
   /* The prototype bar sits outside #game, so its menus float over the page. */
   const inGame = !!trigger.closest("#game");
   if (!inGame) popup.classList.add("page-menu");
   (inGame ? $("#game") : document.body).append(popup);
+  renderSelectOptions();
   trigger.setAttribute("aria-expanded", "true");
   trigger.setAttribute("aria-controls", popup.id);
-  const rect = trigger.getBoundingClientRect(),
-    game = inGame
-      ? $("#game").getBoundingClientRect()
-      : { left: 0, top: 0, width: innerWidth, bottom: innerHeight };
-  openSelect.anchor = { x: rect.x, y: rect.y };
-  const width = Math.min(Math.max(rect.width, 190), game.width - 24);
-  popup.style.width = width + "px";
-  popup.style.left =
-    Math.max(12, Math.min(rect.left - game.left, game.width - width - 12)) +
-    "px";
-  const bottom = Math.min(game.bottom, innerHeight) - rect.bottom - 12;
-  const top = rect.top - Math.max(0, game.top) - 12;
-  const height = Math.min(popup.scrollHeight + 2, 280);
-  const above = bottom < Math.min(height, 150) && top > bottom;
-  const available = Math.max(48, above ? top : bottom);
-  popup.style.maxHeight = Math.min(280, available) + "px";
-  popup.style.top =
-    (above
-      ? rect.top - game.top - Math.min(height, available) - 6
-      : rect.bottom - game.top + 6) + "px";
+  openSelect.anchor = placePopup(popup, trigger, {
+    width: Math.max(trigger.getBoundingClientRect().width, 190),
+    maxHeight: 280,
+  });
+  if (search) popup.querySelector("input").focus({ preventScroll: true });
   focusSelectOption(index);
+}
+
+function selectList() {
+  return $("#select-list") || $("#select-layer");
+}
+
+function renderSelectOptions() {
+  const { trigger, items } = openSelect;
+  selectList().innerHTML = items.length
+    ? items
+        .map(
+          (item, i) =>
+            `<button type="button" role="option" id="select-option-${i}" tabindex="-1" class="select-option" data-option="${i}" aria-selected="${item.value === trigger.value}"><span class="option-label">${selectSwatch(item.swatch)}<span>${esc(item.label)}</span></span><span class="option-check">${item.value === trigger.value ? icon("check", 18) : ""}</span></button>`,
+        )
+        .join("")
+    : `<p class="select-empty">No matches</p>`;
+}
+
+function filterSelect(query) {
+  const q = query.trim().toLowerCase();
+  openSelect.items = openSelect.all.filter((x) =>
+    x.label.toLowerCase().includes(q),
+  );
+  renderSelectOptions();
+  const current = openSelect.items.findIndex(
+    (x) => x.value === openSelect.trigger.value,
+  );
+  focusSelectOption(q || current < 0 ? 0 : current);
 }
 
 function focusSelectOption(index) {
   if (!openSelect) return;
+  const input = openSelect.search && $("#select-layer input");
+  if (!openSelect.items.length) {
+    openSelect.index = -1;
+    input?.removeAttribute("aria-activedescendant");
+    return;
+  }
   openSelect.index =
     (index + openSelect.items.length) % openSelect.items.length;
   const options = [...$("#select-layer").querySelectorAll("[role=option]")];
   options.forEach((el, i) =>
     el.classList.toggle("option-focused", i === openSelect.index),
   );
-  options[openSelect.index].focus({ preventScroll: true });
   const option = options[openSelect.index],
-    popup = $("#select-layer");
+    popup = selectList();
+  /* A searchable menu keeps focus in its field so typing always filters. */
+  if (input) input.setAttribute("aria-activedescendant", option.id);
+  else option.focus({ preventScroll: true });
   if (option.offsetTop < popup.scrollTop) popup.scrollTop = option.offsetTop;
   else if (
     option.offsetTop + option.offsetHeight >
@@ -143,14 +213,21 @@ function focusSelectOption(index) {
       option.offsetTop + option.offsetHeight - popup.clientHeight;
 }
 
+function showSelectValue(trigger, item) {
+  trigger.value = item.value;
+  trigger.querySelector(".select-value").textContent = item.label;
+  trigger
+    .querySelector(".select-swatch")
+    ?.style.setProperty("--swatch", item.swatch);
+}
+
 function setSelectValue(trigger, value) {
   if (!trigger) return;
   const item = JSON.parse(trigger.dataset.options).find(
     (x) => x.value === String(value),
   );
   if (!item) return false;
-  trigger.value = item.value;
-  trigger.querySelector(".select-value").textContent = item.label;
+  showSelectValue(trigger, item);
   return true;
 }
 
@@ -158,8 +235,8 @@ function chooseSelect(index) {
   if (!openSelect) return;
   const { trigger, items } = openSelect,
     item = items[index];
-  trigger.value = item.value;
-  trigger.querySelector(".select-value").textContent = item.label;
+  if (!item) return;
+  showSelectValue(trigger, item);
   trigger.dispatchEvent(new Event("input", { bubbles: true }));
   trigger.dispatchEvent(new Event("change", { bubbles: true }));
   closeSelect(true);
@@ -185,6 +262,17 @@ document.addEventListener("keydown", (e) => {
       const trigger = openSelect.trigger;
       closeSelect();
       trigger.focus({ preventScroll: true });
+      return;
+    }
+    const typing =
+      openSelect.search && e.target.matches?.("#select-layer input");
+    if (
+      typing &&
+      !["Escape", "Enter", "ArrowDown", "ArrowUp"].includes(e.key) &&
+      !e.metaKey &&
+      !e.ctrlKey
+    ) {
+      e.stopImmediatePropagation();
       return;
     }
     e.preventDefault();
@@ -232,6 +320,10 @@ document.addEventListener("keydown", (e) => {
         : undefined,
     );
   }
+});
+document.addEventListener("input", (e) => {
+  if (openSelect?.search && e.target.matches?.("#select-layer input"))
+    filterSelect(e.target.value);
 });
 window.addEventListener("resize", () => closeSelect());
 document.addEventListener(

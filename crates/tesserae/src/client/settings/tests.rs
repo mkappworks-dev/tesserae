@@ -1,5 +1,5 @@
 use super::*;
-use crate::server::player::SpeedLevel;
+use crate::client::menu_ui::Tab;
 
 #[test]
 fn every_bindable_action_has_a_place_in_the_controls_list() {
@@ -19,6 +19,7 @@ fn app() -> App {
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()
         .init_resource::<super::super::pad::PadInput>()
+        .init_resource::<Time<bevy::time::Real>>()
         .insert_resource(Store {
             // The clock ticks in microseconds on macOS, so two tests started
             // together can read one time.
@@ -36,66 +37,259 @@ fn app() -> App {
                 }
             )),
             error: None,
-        })
-        .add_observer(activate)
-        .add_observer(scalar_changed)
-        .add_systems(
-            PreUpdate,
-            capture_focus.before(bevy::input_focus::InputFocusSystems::Dispatch),
-        )
-        .add_systems(Update, slider_visuals)
-        .add_systems(Update, capture);
+        });
+    observe_operations_for_test(&mut app);
+    // The first update of a clock measures nothing.
+    app.world_mut()
+        .resource_mut::<Time<bevy::time::Real>>()
+        .update_with_duration(std::time::Duration::ZERO);
+    app.add_systems(
+        PreUpdate,
+        capture_focus.before(bevy::input_focus::InputFocusSystems::Dispatch),
+    )
+    .add_systems(Update, slider_visuals)
+    .add_systems(Update, (count_down, capture).chain())
+    .add_systems(Last, persist);
     app
 }
 fn activate_operation(app: &mut App, operation: Operation) {
     let entity = app.world_mut().spawn(operation).id();
     app.world_mut().trigger(Activate { entity });
+    app.world_mut().flush();
 }
-#[test]
-fn sensitivity_slider_changes_only_the_draft_and_keeps_its_drag_entity() {
-    use bevy::ui_widgets::{SliderValue, ValueChange};
-    let mut app = app();
-    app.add_observer(scalar_changed);
-    activate_operation(
-        &mut app,
-        Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-    );
-    let source = app
-        .world_mut()
-        .spawn((Scalar::Mouse, SliderValue(1.0), bevy::ui::Pressed))
-        .id();
-    app.world_mut().trigger(ValueChange {
-        source,
-        value: 2.0_f32,
-        is_final: false,
-    });
+/// What the profile on disk holds once the frame has saved.
+fn saved(app: &mut App) -> Preferences {
     app.update();
-    assert_eq!(app.world().get::<SliderValue>(source).unwrap().0, 2.0);
-    assert_eq!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .sensitivity,
-        0.006
-    );
-    assert_eq!(app.world().resource::<Preferences>().sensitivity, 0.003);
-    assert!(app.world().get::<bevy::ui::Pressed>(source).is_some());
-    activate_operation(&mut app, Operation::Cancel);
-    assert_eq!(app.world().resource::<Preferences>().sensitivity, 0.003);
+    Store::load(app.world().resource::<Store>().path.clone()).2
 }
+fn press(app: &mut App, key: KeyCode) {
+    let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keys.release_all();
+    keys.clear();
+    keys.press(key);
+    app.update();
+    let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+    keys.release_all();
+    keys.clear();
+}
+fn wait(app: &mut App, seconds: f32) {
+    app.world_mut()
+        .resource_mut::<Time<bevy::time::Real>>()
+        .update_with_duration(std::time::Duration::from_secs_f32(seconds));
+    app.update();
+    app.world_mut()
+        .resource_mut::<Time<bevy::time::Real>>()
+        .update_with_duration(std::time::Duration::ZERO);
+}
+
 #[test]
-fn searching_bindings_renders_actual_mouse_actions_and_restore_requires_confirmation() {
-    use super::super::menu_ui::{Searches, Tab};
+fn a_change_applies_at_once_and_survives_leaving_settings() {
+    use super::super::minimap::MinimapSize;
+    type Read = fn(&Preferences) -> bool;
+    let cases: [(Tab, Operation, Read); 9] = [
+        (Tab::Behavior, Operation::Invert(true), |p| p.invert_y),
+        (Tab::Behavior, Operation::Repeat(true), |p| p.repeat_held),
+        (Tab::Behavior, Operation::Ghost(true), |p| p.placement_ghost),
+        (Tab::Display, Operation::Compass(true), |p| p.compass),
+        (Tab::Display, Operation::Minimap(true), |p| p.minimap),
+        (
+            Tab::Display,
+            Operation::MinimapSize(MinimapSize::Large),
+            |p| p.minimap_size == MinimapSize::Large,
+        ),
+        (Tab::Accessibility, Operation::TextScale(150), |p| {
+            p.text_scale == 150
+        }),
+        (Tab::Accessibility, Operation::StrongerContrast(true), |p| {
+            p.stronger_contrast
+        }),
+        (Tab::Controller, Operation::PadMenuRumble(false), |p| {
+            !p.pad.menu_rumble
+        }),
+    ];
+    for (tab, operation, read) in cases {
+        let mut app = app();
+        assert!(
+            !read(app.world().resource::<Preferences>()),
+            "{operation:?}"
+        );
+        activate_operation(&mut app, Operation::Navigate(tab));
+        activate_operation(&mut app, operation);
+        assert!(read(app.world().resource::<Preferences>()), "{operation:?}");
+        activate_operation(&mut app, Operation::Back);
+        let settings = app.world().resource::<Settings>();
+        assert!(!settings.open && !settings.modal(), "Back asks nothing");
+        assert!(read(app.world().resource::<Preferences>()), "{operation:?}");
+        assert!(read(&saved(&mut app)), "{operation:?} is saved");
+    }
+}
+
+#[test]
+fn a_display_change_reverts_after_ten_seconds_or_on_dismissal_unless_kept() {
     let mut app = app();
-    assert!(app.world().resource::<Settings>().binding_visible(
-        Action::Descend,
-        "Left Ctrl",
-        app.world().resource::<Bindings>(),
-        &super::super::actions::Labels::default()
-    ));
+    app.add_plugins(super::super::actions::test_plugin);
+    activate_operation(&mut app, Operation::Navigate(Tab::Display));
+    activate_operation(&mut app, Operation::Sync(false));
+    assert!(
+        !app.world().resource::<Preferences>().display_sync,
+        "applied at once"
+    );
+    assert!(app.world().resource::<Settings>().modal());
+    activate_operation(&mut app, Operation::Compass(true));
+    assert!(
+        !app.world().resource::<Preferences>().compass,
+        "the prompt answers first"
+    );
+    wait(&mut app, 9.0);
+    assert!(!app.world().resource::<Preferences>().display_sync);
+    wait(&mut app, 1.5);
+    assert!(
+        app.world().resource::<Preferences>().display_sync,
+        "reverted"
+    );
+    assert!(!app.world().resource::<Settings>().modal());
+    assert!(saved(&mut app).display_sync);
+
+    activate_operation(&mut app, Operation::Scale(67));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(
+        app.world().resource::<Preferences>().render_scale,
+        100,
+        "dismissed"
+    );
+    assert!(app.world().resource::<Settings>().open);
+
+    activate_operation(&mut app, Operation::Cap(Some(60)));
+    activate_operation(&mut app, Operation::RevertDisplay);
+    assert_eq!(app.world().resource::<Preferences>().fps_cap, None);
+
+    activate_operation(&mut app, Operation::Cap(Some(60)));
+    activate_operation(&mut app, Operation::KeepDisplay);
+    wait(&mut app, 11.0);
+    assert_eq!(
+        app.world().resource::<Preferences>().fps_cap,
+        Some(60),
+        "kept"
+    );
+    assert_eq!(saved(&mut app).fps_cap, Some(60));
+
+    activate_operation(&mut app, Operation::Compass(true));
+    assert!(
+        !app.world().resource::<Settings>().modal(),
+        "not a display change"
+    );
+}
+
+fn spawn_choice(app: &mut App, build: impl FnOnce(&mut ChildSpawnerCommands)) -> Entity {
+    let root = app.world_mut().spawn(Node::default()).id();
+    app.world_mut().commands().entity(root).with_children(build);
+    app.world_mut().flush();
+    app.world_mut()
+        .query_filtered::<Entity, With<Choice>>()
+        .single(app.world())
+        .unwrap()
+}
+fn step_by(app: &mut App, entity: Entity, by: i32) {
+    app.world_mut()
+        .trigger(crate::client::pad::Step { entity, by });
+    app.world_mut().flush();
+}
+
+#[test]
+fn left_and_right_change_a_selector_and_a_toggle() {
+    use crate::server::player::SpeedLevel;
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
+    let sprint = spawn_choice(&mut app, |row| {
+        pages::select(
+            row,
+            SpeedLevel::Walk,
+            [SpeedLevel::Walk, SpeedLevel::One, SpeedLevel::Two].map(|l| (l, l.label().to_owned())),
+            Operation::Sprint,
+        )
+    });
+    step_by(&mut app, sprint, -1);
+    assert_eq!(
+        app.world().resource::<Preferences>().speed_level,
+        SpeedLevel::Two,
+        "a selector wraps"
+    );
+    app.world_mut().entity_mut(sprint).despawn();
+    let ghost = spawn_choice(&mut app, |row| toggle(row, false, Operation::Ghost));
+    step_by(&mut app, ghost, -1);
+    assert!(
+        !app.world().resource::<Preferences>().placement_ghost,
+        "Left stays Off"
+    );
+    step_by(&mut app, ghost, 1);
+    assert!(
+        app.world().resource::<Preferences>().placement_ghost,
+        "Right is On"
+    );
+    app.world_mut().entity_mut(ghost).despawn();
+    let ghost = spawn_choice(&mut app, |row| toggle(row, true, Operation::Ghost));
+    step_by(&mut app, ghost, 1);
+    assert!(
+        app.world().resource::<Preferences>().placement_ghost,
+        "Right stays On"
+    );
+    app.world_mut().trigger(Activate { entity: ghost });
+    app.world_mut().flush();
+    assert!(
+        !app.world().resource::<Preferences>().placement_ghost,
+        "Enter flips it"
+    );
+}
+
+#[test]
+fn rebinding_a_cap_takes_the_next_key_and_esc_cancels_and_delete_clears() {
+    let mut app = app();
+    app.add_plugins(super::super::actions::test_plugin);
+    activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
+    let forward = |app: &App| app.world().resource::<Bindings>().keyboard[&Action::Forward][0];
+    let capture = Operation::Capture(Device::KeyboardMouse, Action::Forward, 0);
+
+    activate_operation(&mut app, capture);
+    app.update();
+    press(&mut app, KeyCode::KeyU);
+    assert_eq!(forward(&app).unwrap().trigger, Trigger::Key(KeyCode::KeyU));
+    assert!(!app.world().resource::<Settings>().capturing());
+
+    activate_operation(&mut app, capture);
+    app.update();
+    press(&mut app, KeyCode::Escape);
+    assert!(!app.world().resource::<Settings>().capturing());
+    assert!(
+        app.world().resource::<Settings>().open,
+        "Esc ends the wait, not Settings"
+    );
+    assert_eq!(forward(&app).unwrap().trigger, Trigger::Key(KeyCode::KeyU));
+
+    activate_operation(&mut app, capture);
+    app.update();
+    press(&mut app, KeyCode::Delete);
+    assert!(!app.world().resource::<Settings>().capturing());
+    assert!(forward(&app).is_none());
+    let path = app.world().resource::<Store>().path.clone();
+    app.update();
+    assert!(Store::load(path).1.keyboard[&Action::Forward][0].is_none());
+}
+
+#[test]
+fn q_and_e_step_through_the_binding_categories() {
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
+    let category = |app: &App| app.world().resource::<Settings>().category;
+    activate_operation(&mut app, Operation::CategoryStep(-1));
+    assert!(category(&app) == Category::Interface);
+    activate_operation(&mut app, Operation::CategoryStep(1));
+    activate_operation(&mut app, Operation::CategoryStep(1));
+    assert!(category(&app) == Category::Building);
+}
+
+fn page_app(tab: Tab) -> App {
+    use super::super::menu_ui::Searches;
+    let mut app = app();
     app.init_resource::<super::super::actions::Labels>()
         .init_resource::<Searches>()
         .init_resource::<super::super::edit::Hotbar>()
@@ -105,97 +299,247 @@ fn searching_bindings_renders_actual_mouse_actions_and_restore_requires_confirma
         .init_resource::<Assets<Font>>()
         .init_resource::<super::super::input::UiInput>()
         .add_plugins(super::super::menu_ui::plugin)
-        .add_systems(Update, render);
-    activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
-    app.world_mut().resource_mut::<Searches>().bindings = "mouse".into();
+        .add_systems(Update, (render, show_help).chain());
+    activate_operation(&mut app, Operation::Navigate(tab));
     app.update();
-    let captures: Vec<_> = app
+    app.update();
+    app
+}
+fn caps(app: &mut App) -> Vec<(Operation, String)> {
+    let mut caps: Vec<_> = app
         .world_mut()
-        .query::<&Operation>()
+        .query_filtered::<(&Operation, &Children), With<KeyCap>>()
         .iter(app.world())
-        .filter_map(|operation| {
-            if let Operation::Capture(_, action, _) = operation {
-                Some(*action)
-            } else {
-                None
-            }
-        })
+        .map(|(operation, children)| (*operation, children[0]))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|(operation, text)| (operation, app.world().get::<Text>(text).unwrap().0.clone()))
         .collect();
-    assert_eq!(captures.len(), 6);
+    caps.sort_by_key(|(operation, _)| format!("{operation:?}"));
+    caps
+}
+
+#[test]
+fn key_bindings_show_a_cap_per_input_with_mouse_buttons_short() {
+    let mut app = page_app(Tab::Bindings);
+    activate_operation(&mut app, Operation::Category(Category::Building));
+    app.update();
+    let caps = caps(&mut app);
+    let cap = |device, action| {
+        caps.iter()
+            .find(|(op, _)| *op == Operation::Capture(device, action, 0))
+            .map(|(_, text)| text.as_str())
+    };
+    assert_eq!(cap(Device::KeyboardMouse, Action::Remove), Some("LMB"));
+    assert_eq!(cap(Device::KeyboardMouse, Action::Place), Some("RMB"));
+    assert_eq!(cap(Device::Pad, Action::Remove), Some("RT"));
     assert!(
-        app.world_mut()
-            .query::<&Text>()
-            .iter(app.world())
-            .any(|text| text.0 == "Searching all categories")
+        caps.iter()
+            .all(|(op, _)| matches!(op, Operation::Capture(_, a, _) if category(*a) == "Building")),
+        "one category at a time"
     );
-    assert!(
-        captures.contains(&Action::Place)
-            && captures.contains(&Action::Remove)
-            && captures.contains(&Action::Sample)
+    activate_operation(
+        &mut app,
+        Operation::Capture(Device::KeyboardMouse, Action::Remove, 0),
     );
-    activate_operation(&mut app, Operation::Invert);
-    activate_operation(&mut app, Operation::Reset);
-    activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
-    assert_eq!(app.world().resource::<Settings>().tab, Tab::Bindings);
-    activate_operation(&mut app, Operation::CancelReset);
-    assert!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .invert_y
+    app.update();
+    let texts: Vec<String> = app
+        .world_mut()
+        .query::<&Text>()
+        .iter(app.world())
+        .map(|t| t.0.clone())
+        .collect();
+    assert!(texts.iter().any(|t| t == "Press a key…"), "the row waits");
+}
+
+/// The help strip's name, explanation and value note.
+fn strip(app: &mut App) -> [String; 3] {
+    fn read<M: Component>(app: &mut App) -> String {
+        let (text, children) = app
+            .world_mut()
+            .query_filtered::<(&Text, Option<&Children>), With<M>>()
+            .single(app.world())
+            .unwrap();
+        let spans: Vec<Entity> = children.map(|c| c.to_vec()).unwrap_or_default();
+        let mut out = text.0.clone();
+        for span in spans {
+            if let Some(span) = app.world().get::<TextSpan>(span) {
+                out.push_str(&span.0);
+            }
+        }
+        out
+    }
+    [
+        read::<HelpTitle>(app),
+        read::<HelpText>(app),
+        read::<HelpNote>(app),
+    ]
+}
+fn focus_on(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .resource_mut::<bevy::input_focus::InputFocus>()
+        .set(entity, bevy::input_focus::FocusCause::Navigated);
+    app.world_mut()
+        .insert_resource(bevy::input_focus::InputFocusVisible(true));
+    app.update();
+}
+fn choice_for(app: &mut App, wanted: fn(&Operation) -> bool) -> Entity {
+    app.world_mut()
+        .query::<(Entity, &Choice)>()
+        .iter(app.world())
+        .find(|(_, c)| c.next(1, true).is_some_and(|o| wanted(&o)))
+        .unwrap()
+        .0
+}
+
+#[test]
+fn the_help_strip_explains_the_focused_row_and_notes_its_value() {
+    let mut app = page_app(Tab::Display);
+    app.world_mut().resource_mut::<Preferences>().anti_aliasing =
+        crate::client::anti_alias::AntiAliasing::Off;
+    app.world_mut().resource_mut::<Settings>().dirty = true;
+    app.update();
+    let aa = choice_for(&mut app, |o| matches!(o, Operation::AntiAliasing(_)));
+    focus_on(&mut app, aa);
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Anti-aliasing".to_owned(),
+            "Smooth voxel edges. MSAA costs more.".to_owned(),
+            "Off: sharpest and cheapest; edges shimmer.".to_owned(),
+        ]
     );
-    activate_operation(&mut app, Operation::Reset);
-    activate_operation(&mut app, Operation::ConfirmReset);
-    assert!(
-        !app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .invert_y
+    let window = choice_for(&mut app, |o| matches!(o, Operation::WindowMode(_)));
+    focus_on(&mut app, window);
+    assert_eq!(strip(&mut app)[0], "Window mode");
+    assert_eq!(strip(&mut app)[2], "", "Windowed has no note");
+}
+
+#[test]
+fn the_help_strip_describes_the_category_while_no_row_is_focused() {
+    let mut app = page_app(Tab::Behavior);
+    app.world_mut()
+        .insert_resource(bevy::input_focus::InputFocusVisible(false));
+    app.update();
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Behavior".to_owned(),
+            "How moving, building and the mouse feel.".to_owned(),
+            String::new(),
+        ]
     );
 }
+
 #[test]
-fn accessibility_choices_wait_for_apply_and_are_saved() {
-    use super::super::menu_ui::Tab;
+fn the_help_strip_follows_the_row_under_the_pointer() {
+    let mut app = page_app(Tab::Behavior);
+    let row = app
+        .world_mut()
+        .query::<(Entity, &RowHelp)>()
+        .iter(app.world())
+        .find(|(_, help)| help.title == "Removal activation")
+        .unwrap()
+        .0;
+    app.world_mut()
+        .entity_mut(row)
+        .insert(bevy::picking::hover::Hovered(true));
+    app.update();
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Removal activation".to_owned(),
+            "How Remove starts breaking a Voxel.".to_owned(),
+            "Hold: keep the binding down until the Voxel breaks.".to_owned(),
+        ]
+    );
+    let ghost = choice_for(&mut app, |o| matches!(o, Operation::Ghost(_)));
+    focus_on(&mut app, ghost);
+    assert_eq!(strip(&mut app)[0], "Placement ghost", "a later focus wins");
+}
+
+#[test]
+fn a_change_keeps_focus_on_the_control_that_made_it() {
+    let mut app = page_app(Tab::Behavior);
+    let ghost = |app: &mut App| {
+        app.world_mut()
+            .query::<(Entity, &Choice)>()
+            .iter(app.world())
+            .find(|(_, c)| matches!(c.next(1, true), Some(Operation::Ghost(_))))
+            .unwrap()
+            .0
+    };
+    let before = ghost(&mut app);
+    app.world_mut()
+        .resource_mut::<bevy::input_focus::InputFocus>()
+        .set(before, bevy::input_focus::FocusCause::Navigated);
+    app.world_mut().trigger(Activate { entity: before });
+    app.update();
+    let after = ghost(&mut app);
+    assert_ne!(before, after, "the page was rebuilt");
+    assert_eq!(
+        app.world()
+            .resource::<bevy::input_focus::InputFocus>()
+            .get(),
+        Some(after)
+    );
+}
+
+#[test]
+fn the_map_and_compass_settings_say_unavailable_while_the_world_forbids_them() {
+    fn hints(allowed: bool) -> usize {
+        let mut app = App::new();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            commands.spawn(Node::default()).with_children(|list| {
+                display(list, &Preferences::default(), allowed);
+            });
+        });
+        app.update();
+        app.world_mut()
+            .query::<&RowHelp>()
+            .iter(app.world())
+            .filter(|help| help.text.contains("Not available in this World"))
+            .count()
+    }
+    assert_eq!(hints(true), 0);
+    assert_eq!(hints(false), 3);
+}
+
+#[test]
+fn resetting_a_page_restores_only_its_own_preferences() {
     let mut app = app();
-    activate_operation(&mut app, Operation::Navigate(Tab::Accessibility));
-    activate_operation(&mut app, Operation::TextScale(150));
-    activate_operation(&mut app, Operation::ReducedMotion(true));
-    activate_operation(&mut app, Operation::SolidBackground(true));
-    activate_operation(&mut app, Operation::StrongerContrast(true));
+    app.world_mut().resource_mut::<Preferences>().volumes.master = 17;
+    app.world_mut()
+        .resource_mut::<Preferences>()
+        .volumes
+        .interface = 17;
+    app.world_mut().resource_mut::<Preferences>().invert_y = true;
     activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
-    activate_operation(&mut app, Operation::Navigate(Tab::Accessibility));
-    assert_eq!(app.world().resource::<Preferences>().text_scale, 100);
-    let draft = app.world().resource::<Settings>().draft.clone().unwrap().1;
-    assert_eq!(
-        (
-            draft.text_scale,
-            draft.reduced_motion,
-            draft.solid_background
-        ),
-        (150, true, true),
-        "the draft survives a category change"
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::Invert(false));
+    assert!(
+        app.world().resource::<Preferences>().invert_y,
+        "the prompt answers first"
     );
-    activate_operation(&mut app, Operation::Apply);
-    let applied = app.world().resource::<Preferences>().clone();
-    assert_eq!(
-        (
-            applied.text_scale,
-            applied.reduced_motion,
-            applied.solid_background
-        ),
-        (150, true, true)
-    );
-    let path = app.world().resource::<Store>().path.clone();
-    assert!(applied.stronger_contrast);
-    let (_, _, saved) = Store::load(path);
-    assert_eq!(saved, applied);
-    assert!(saved.stronger_contrast, "the preference persists");
+    activate_operation(&mut app, Operation::ConfirmReset);
+    let p = app.world().resource::<Preferences>();
+    assert!(!p.invert_y);
+    assert_eq!(p.volumes.master, 17, "the audio mix is kept");
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    activate_operation(&mut app, Operation::Reset);
+    activate_operation(&mut app, Operation::ConfirmReset);
+    assert_eq!(app.world().resource::<Preferences>().volumes.master, 100);
+    assert_eq!(app.world().resource::<Preferences>().volumes.interface, 100);
+    assert_eq!(saved(&mut app).volumes.master, 100);
+    assert_eq!(app.world().resource::<Settings>().last, Tab::Audio);
+}
+
+#[test]
+fn every_action_has_a_place_on_both_binding_pages() {
+    let bindings = Bindings::default();
+    for action in bindings.keyboard.keys().chain(bindings.pad.keys()) {
+        binding_order(*action);
+    }
 }
 
 #[test]
@@ -228,36 +572,6 @@ fn f10_opens_settings_at_the_category_used_last() {
     assert_eq!(settings.tab, Tab::Accessibility);
 }
 
-#[test]
-fn tab_navigation_keeps_the_draft_and_requires_a_choice_before_leaving() {
-    use super::super::menu_ui::Tab;
-    let mut app = app();
-    activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
-    activate_operation(&mut app, Operation::Invert);
-    activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
-    activate_operation(&mut app, Operation::Navigate(Tab::Display));
-    assert!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .invert_y
-    );
-    assert!(!app.world().resource::<Preferences>().invert_y);
-    activate_operation(&mut app, Operation::Navigate(Tab::Catalogue));
-    assert!(app.world().resource::<Settings>().unsaved);
-    assert!(!app.world().resource::<super::super::menu::Menu>().open);
-    activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
-    assert_eq!(app.world().resource::<Settings>().tab, Tab::Display);
-    activate_operation(&mut app, Operation::Stay);
-    activate_operation(&mut app, Operation::Navigate(Tab::Catalogue));
-    activate_operation(&mut app, Operation::Discard);
-    assert!(!app.world().resource::<Settings>().open);
-    assert!(app.world().resource::<super::super::menu::Menu>().open);
-    assert!(!app.world().resource::<Preferences>().invert_y);
-}
 #[test]
 fn input_shortcut_opens_the_last_controls_page_and_cancels_gameplay_in_that_frame() {
     use super::super::menu_ui::Tab;
@@ -321,46 +635,9 @@ fn save_modals_cancel_capture_and_block_settings_activation() {
         .quitting = true;
     app.update();
     assert!(app.world().resource::<Settings>().capture.is_none());
-    activate_operation(&mut app, Operation::Invert);
-    assert!(
-        !app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .invert_y
-    );
-    assert!(app.world().resource::<Settings>().open);
-}
-
-#[test]
-fn failed_apply_keeps_active_preferences_and_the_draft() {
-    let mut app = app();
-    let parent = app.world().resource::<Store>().path.clone();
-    std::fs::write(&parent, b"not a directory").unwrap();
-    app.world_mut().resource_mut::<Store>().path = parent.join("profile.json");
-    activate_operation(
-        &mut app,
-        Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-    );
-    activate_operation(&mut app, Operation::Invert);
-    activate_operation(&mut app, Operation::Back);
-    activate_operation(&mut app, Operation::Apply);
-    assert!(app.world().resource::<Settings>().unsaved);
+    activate_operation(&mut app, Operation::Invert(true));
     assert!(!app.world().resource::<Preferences>().invert_y);
-    assert!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .invert_y
-    );
     assert!(app.world().resource::<Settings>().open);
-    assert!(app.world().resource::<Store>().error.is_some());
-    std::fs::remove_file(parent).unwrap();
 }
 
 #[test]
@@ -378,7 +655,7 @@ fn tab_focus_navigation_does_not_request_a_menu_exit() {
                 ..default()
             });
         activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
-        activate_operation(&mut app, Operation::Invert);
+        activate_operation(&mut app, Operation::Invert(true));
         let control = app.world_mut().spawn_empty().id();
         if focused {
             app.world_mut()
@@ -400,154 +677,8 @@ fn tab_focus_navigation_does_not_request_a_menu_exit() {
             .press(key);
         app.update();
         assert!(app.world().resource::<Settings>().open);
-        assert!(!app.world().resource::<Settings>().unsaved);
     }
 }
-#[test]
-fn dirty_settings_prompt_on_every_exit_and_save_before_closing() {
-    use super::super::menu_ui::Tab;
-    for tab in [Tab::Behavior, Tab::Bindings, Tab::Display] {
-        for exit in 0..5 {
-            let mut app = app();
-            app.add_plugins(super::super::actions::test_plugin);
-            activate_operation(&mut app, Operation::Navigate(tab));
-            activate_operation(&mut app, Operation::Invert);
-            match exit {
-                0 => activate_operation(&mut app, Operation::Back),
-                1 => activate_operation(&mut app, Operation::Cancel),
-                2 => activate_operation(&mut app, Operation::Navigate(Tab::Catalogue)),
-                _ => {
-                    app.world_mut()
-                        .resource_mut::<ButtonInput<KeyCode>>()
-                        .press(if exit == 3 {
-                            KeyCode::Escape
-                        } else {
-                            KeyCode::Tab
-                        });
-                    app.update();
-                }
-            }
-            assert!(
-                app.world().resource::<Settings>().unsaved,
-                "{tab:?}, exit {exit}"
-            );
-            assert!(app.world().resource::<Settings>().open);
-            assert!(!app.world().resource::<Preferences>().invert_y);
-            activate_operation(&mut app, Operation::Apply);
-            assert!(!app.world().resource::<Settings>().open);
-            assert!(app.world().resource::<Preferences>().invert_y);
-            assert_eq!(
-                app.world().resource::<super::super::menu::Menu>().open,
-                exit == 2
-            );
-            let path = app.world().resource::<Store>().path.clone();
-            assert!(Store::load(path.clone()).2.invert_y);
-            std::fs::remove_file(path).unwrap();
-        }
-    }
-}
-#[test]
-fn repeat_while_held_is_off_by_default_and_applies_to_every_device() {
-    let mut app = app();
-    assert!(!app.world().resource::<Preferences>().repeat_held);
-    activate_operation(
-        &mut app,
-        Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-    );
-    activate_operation(&mut app, Operation::Repeat);
-    assert!(!app.world().resource::<Preferences>().repeat_held);
-    activate_operation(&mut app, Operation::Apply);
-    assert!(app.world().resource::<Preferences>().repeat_held);
-    let path = app.world().resource::<Store>().path.clone();
-    assert!(Store::load(path.clone()).2.repeat_held);
-    std::fs::remove_file(path).unwrap();
-}
-#[test]
-fn the_placement_ghost_is_off_by_default_and_the_setting_round_trips() {
-    let mut app = app();
-    assert!(!app.world().resource::<Preferences>().placement_ghost);
-    activate_operation(
-        &mut app,
-        Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-    );
-    activate_operation(&mut app, Operation::Ghost);
-    assert!(!app.world().resource::<Preferences>().placement_ghost);
-    activate_operation(&mut app, Operation::Apply);
-    assert!(app.world().resource::<Preferences>().placement_ghost);
-    let path = app.world().resource::<Store>().path.clone();
-    assert!(Store::load(path.clone()).2.placement_ghost);
-    std::fs::remove_file(path).unwrap();
-}
-#[test]
-fn the_compass_is_off_by_default_and_the_display_setting_round_trips() {
-    let mut app = app();
-    assert!(!app.world().resource::<Preferences>().compass);
-    activate_operation(
-        &mut app,
-        Operation::Navigate(super::super::menu_ui::Tab::Display),
-    );
-    activate_operation(&mut app, Operation::Compass);
-    assert!(!app.world().resource::<Preferences>().compass);
-    activate_operation(&mut app, Operation::Apply);
-    assert!(app.world().resource::<Preferences>().compass);
-    let path = app.world().resource::<Store>().path.clone();
-    assert!(Store::load(path.clone()).2.compass);
-    std::fs::remove_file(path).unwrap();
-}
-#[test]
-fn the_minimap_is_off_and_medium_by_default_and_both_settings_round_trip() {
-    use super::super::minimap::MinimapSize;
-    let mut app = app();
-    let p = app.world().resource::<Preferences>().clone();
-    assert!(!p.minimap);
-    assert_eq!(p.minimap_size, MinimapSize::Medium);
-    activate_operation(
-        &mut app,
-        Operation::Navigate(super::super::menu_ui::Tab::Display),
-    );
-    activate_operation(&mut app, Operation::Minimap);
-    activate_operation(&mut app, Operation::MinimapSize(MinimapSize::Large));
-    assert!(!app.world().resource::<Preferences>().minimap);
-    activate_operation(&mut app, Operation::Apply);
-    let path = app.world().resource::<Store>().path.clone();
-    let saved = Store::load(path.clone()).2;
-    assert!(saved.minimap);
-    assert_eq!(saved.minimap_size, MinimapSize::Large);
-    std::fs::remove_file(path).unwrap();
-}
-#[test]
-fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
-    let mut app = app();
-    activate_operation(
-        &mut app,
-        Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-    );
-    activate_operation(&mut app, Operation::Invert);
-    assert!(!app.world().resource::<Preferences>().invert_y);
-    activate_operation(&mut app, Operation::Back);
-    assert!(app.world().resource::<Settings>().unsaved);
-    activate_operation(&mut app, Operation::Stay);
-    assert!(app.world().resource::<Settings>().open);
-    activate_operation(&mut app, Operation::Apply);
-    assert!(app.world().resource::<Preferences>().invert_y);
-    activate_operation(&mut app, Operation::Invert);
-    activate_operation(&mut app, Operation::Cancel);
-    assert!(app.world().resource::<Settings>().unsaved);
-    activate_operation(&mut app, Operation::Discard);
-    assert!(!app.world().resource::<Settings>().open);
-    assert!(app.world().resource::<Preferences>().invert_y);
-    let path = &app.world().resource::<Store>().path;
-    assert!(Store::load(path.clone()).2.invert_y);
-    std::fs::remove_file(path).unwrap();
-}
-#[test]
-fn every_action_has_a_place_on_both_binding_pages() {
-    let bindings = Bindings::default();
-    for action in bindings.keyboard.keys().chain(bindings.pad.keys()) {
-        binding_order(*action);
-    }
-}
-
 #[test]
 fn pad_capture_takes_only_pad_buttons_and_controller_reset_spares_the_keyboard() {
     use bevy::input::gamepad::GamepadButton;
@@ -590,18 +721,18 @@ fn pad_capture_takes_only_pad_buttons_and_controller_reset_spares_the_keyboard()
     app.update();
     let settings = app.world().resource::<Settings>();
     assert!(settings.capture.is_none() && settings.conflict.is_none());
-    let draft = &settings.draft.as_ref().unwrap().0;
+    let bindings = app.world().resource::<Bindings>();
     assert_eq!(
-        draft.pad[&Action::Sample][1].unwrap().trigger,
+        bindings.pad[&Action::Sample][1].unwrap().trigger,
         Trigger::Pad(GamepadButton::C)
     );
-    assert!(draft.keyboard[&Action::Sample][0].is_none());
+    assert!(bindings.keyboard[&Action::Sample][0].is_none());
 
     activate_operation(&mut app, Operation::Reset);
     activate_operation(&mut app, Operation::ConfirmReset);
-    let draft = &app.world().resource::<Settings>().draft.as_ref().unwrap().0;
-    assert_eq!(draft.pad, Bindings::default().pad);
-    assert!(draft.keyboard[&Action::Sample][0].is_none());
+    let bindings = app.world().resource::<Bindings>();
+    assert_eq!(bindings.pad, Bindings::default().pad);
+    assert!(bindings.keyboard[&Action::Sample][0].is_none());
 }
 
 #[test]
@@ -668,223 +799,25 @@ fn capture_waits_for_opening_release_and_conflicts_require_a_choice() {
         Bindings::default().keyboard[&Action::Sample]
     );
     activate_operation(&mut app, Operation::Replace);
-    assert!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .0
-            .keyboard[&Action::Sample][0]
-            .is_none()
-    );
+    let bindings = app.world().resource::<Bindings>();
+    assert!(bindings.keyboard[&Action::Sample][0].is_none());
     assert_eq!(
-        app.world().resource::<Bindings>().keyboard[&Action::Forward],
-        Bindings::default().keyboard[&Action::Forward]
+        bindings.keyboard[&Action::Forward][0].unwrap().trigger,
+        Trigger::Key(KeyCode::KeyP)
     );
-    activate_operation(
-        &mut app,
-        Operation::ResetAction(Device::KeyboardMouse, Action::Sample),
-    );
+    activate_operation(&mut app, Operation::ResetAction(Action::Sample));
     assert!(app.world().resource::<Settings>().conflict.is_some());
     activate_operation(&mut app, Operation::CancelConflict);
-    assert!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .0
-            .keyboard[&Action::Sample][0]
-            .is_none()
-    );
-    activate_operation(
-        &mut app,
-        Operation::ResetAction(Device::KeyboardMouse, Action::Sample),
-    );
+    assert!(app.world().resource::<Bindings>().keyboard[&Action::Sample][0].is_none());
+    activate_operation(&mut app, Operation::ResetAction(Action::Sample));
     activate_operation(&mut app, Operation::Replace);
-    let draft = &app.world().resource::<Settings>().draft.as_ref().unwrap().0;
-    assert!(draft.keyboard[&Action::Forward][0].is_none());
+    let bindings = app.world().resource::<Bindings>();
+    assert!(bindings.keyboard[&Action::Forward][0].is_none());
     assert_eq!(
-        draft.keyboard[&Action::Sample],
+        bindings.keyboard[&Action::Sample],
         Bindings::default().keyboard[&Action::Sample]
     );
 }
-#[test]
-fn a_dropdown_shows_its_choice_opens_on_it_and_closes_on_a_click_outside() {
-    let mut app = app();
-    app.add_observer(toggle_select)
-        .add_systems(Update, (close_selects, place_selects).chain());
-    let root = app.world_mut().spawn(Node::default()).id();
-    app.world_mut()
-        .commands()
-        .entity(root)
-        .with_children(|row| {
-            segment(row, |options| {
-                option(options, "Walk", Operation::Sprint(SpeedLevel::Walk), false);
-                option(options, "Speed 1", Operation::Sprint(SpeedLevel::One), true);
-            })
-        });
-    app.update();
-    let (trigger, value) = app
-        .world_mut()
-        .query::<(Entity, &Select)>()
-        .single(app.world())
-        .map(|(entity, select)| (entity, select.value))
-        .unwrap();
-    assert_eq!(app.world().get::<Text>(value).unwrap().0, "Speed 1");
-    app.world_mut().trigger(Activate { entity: trigger });
-    app.update();
-    let chosen = app
-        .world_mut()
-        .query_filtered::<Entity, With<Chosen>>()
-        .single(app.world())
-        .unwrap();
-    assert_eq!(
-        app.world()
-            .resource::<bevy::input_focus::InputFocus>()
-            .get(),
-        Some(chosen)
-    );
-    let display = |app: &mut App| {
-        app.world_mut()
-            .query_filtered::<&Node, With<SelectMenu>>()
-            .single(app.world())
-            .unwrap()
-            .display
-    };
-    assert_eq!(display(&mut app), Display::Flex);
-    app.world_mut()
-        .resource_mut::<ButtonInput<MouseButton>>()
-        .press(MouseButton::Left);
-    app.update();
-    assert_eq!(display(&mut app), Display::None);
-}
-
-#[test]
-fn audio_draft_applies_discards_resets_and_remembers_category() {
-    use crate::client::menu_ui::Tab;
-    use bevy::ui_widgets::{SliderValue, ValueChange};
-    let mut app = app();
-    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
-    let source = app
-        .world_mut()
-        .spawn((Scalar::AmbientVolume, SliderValue(70.0)))
-        .id();
-    app.world_mut().trigger(ValueChange {
-        source,
-        value: 23.0_f32,
-        is_final: true,
-    });
-    app.update();
-    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 70);
-    activate_operation(&mut app, Operation::Apply);
-    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
-    activate_operation(&mut app, Operation::Reset);
-    activate_operation(&mut app, Operation::ConfirmReset);
-    assert_eq!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .volumes
-            .ambient,
-        70
-    );
-    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
-    activate_operation(&mut app, Operation::Discard);
-    assert_eq!(app.world().resource::<Preferences>().volumes.ambient, 23);
-    assert_eq!(app.world().resource::<Settings>().last, Tab::Audio);
-    assert_eq!(
-        Tab::ORDER,
-        [
-            Tab::Behavior,
-            Tab::Bindings,
-            Tab::Controller,
-            Tab::Display,
-            Tab::Distance,
-            Tab::Audio,
-            Tab::Accessibility
-        ]
-    );
-}
-
-#[test]
-fn resetting_another_page_preserves_the_audio_mix() {
-    let mut app = app();
-    app.world_mut().resource_mut::<Preferences>().volumes.master = 17;
-    activate_operation(
-        &mut app,
-        Operation::Navigate(crate::client::menu_ui::Tab::Behavior),
-    );
-    activate_operation(&mut app, Operation::Reset);
-    activate_operation(&mut app, Operation::ConfirmReset);
-    assert_eq!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .volumes
-            .master,
-        17
-    );
-}
-
-#[test]
-fn detail_controls_apply_discard_and_reset_as_audio_drafts() {
-    use crate::client::menu_ui::Tab;
-    use bevy::ui_widgets::{SliderValue, ValueChange};
-    use tesserae_core::audio::EffectGroup;
-    let mut app = app();
-    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
-    activate_operation(&mut app, Operation::EffectControls);
-    assert!(app.world().resource::<Settings>().effects_open);
-    let source = app
-        .world_mut()
-        .spawn((
-            Scalar::DetailVolume(EffectGroup::Eating),
-            SliderValue(100.0),
-        ))
-        .id();
-    app.world_mut().trigger(ValueChange {
-        source,
-        value: 20.0_f32,
-        is_final: true,
-    });
-    assert_eq!(
-        app.world().resource::<Preferences>().volumes.detail.eating,
-        100
-    );
-    activate_operation(&mut app, Operation::Apply);
-    assert_eq!(
-        app.world().resource::<Preferences>().volumes.detail.eating,
-        20
-    );
-    activate_operation(&mut app, Operation::Reset);
-    activate_operation(&mut app, Operation::ConfirmReset);
-    assert_eq!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .volumes
-            .detail
-            .eating,
-        100
-    );
-    activate_operation(&mut app, Operation::Discard);
-    assert_eq!(
-        app.world().resource::<Preferences>().volumes.detail.eating,
-        20
-    );
-}
-
 #[test]
 fn audio_slider_pointer_drag_keeps_the_live_entity_until_release() {
     use super::super::menu_ui::{Searches, Tab};
@@ -978,18 +911,11 @@ fn audio_slider_pointer_drag_keeps_the_live_entity_until_release() {
         app.update();
         assert!((app.world().get::<SliderValue>(source).unwrap().0 - expected).abs() < 0.01);
         assert_eq!(
-            app.world()
-                .resource::<Settings>()
-                .draft
-                .as_ref()
-                .unwrap()
-                .1
-                .volumes
-                .music,
+            app.world().resource::<Preferences>().volumes.music,
             expected as u8
         );
     }
-    assert_eq!(app.world().resource::<Preferences>().volumes.music, 50);
+    assert_eq!(saved(&mut app).volumes.music, 50, "not saved mid-drag");
     app.world_mut().trigger(PointerDragEnd {
         entity: source,
         pointer,
@@ -997,40 +923,8 @@ fn audio_slider_pointer_drag_keeps_the_live_entity_until_release() {
         distance: Vec2::new(54.0, 0.0),
     });
     app.update();
-    assert_eq!(
-        app.world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .volumes
-            .music,
-        70
-    );
-    activate_operation(&mut app, Operation::Apply);
     assert_eq!(app.world().resource::<Preferences>().volumes.music, 70);
-}
-
-#[test]
-fn the_map_and_compass_settings_say_unavailable_while_the_world_forbids_them() {
-    fn hints(allowed: bool) -> Vec<String> {
-        let mut app = App::new();
-        app.add_systems(Startup, move |mut commands: Commands| {
-            commands.spawn(Node::default()).with_children(|list| {
-                display(list, &Preferences::default(), allowed);
-            });
-        });
-        app.update();
-        app.world_mut()
-            .query::<&Text>()
-            .iter(app.world())
-            .map(|t| t.0.clone())
-            .filter(|t| t.contains("Not available in this World"))
-            .collect()
-    }
-    assert!(hints(true).is_empty());
-    assert_eq!(hints(false).len(), 3);
+    assert_eq!(saved(&mut app).volumes.music, 70);
 }
 
 fn terra() -> crate::server::quality::DeclaredStreaming {
@@ -1044,14 +938,8 @@ fn terra() -> crate::server::quality::DeclaredStreaming {
     }
 }
 
-fn draft_distance(app: &App) -> crate::client::quality::Distance {
-    app.world()
-        .resource::<Settings>()
-        .draft
-        .as_ref()
-        .unwrap()
-        .1
-        .distance
+fn distance_of(app: &App) -> crate::client::quality::Distance {
+    app.world().resource::<Preferences>().distance
 }
 
 fn move_slider(app: &mut App, kind: Scalar, value: f32) {
@@ -1074,66 +962,28 @@ fn the_distance_sliders_move_only_under_custom_which_remembers_its_own() {
         &mut app,
         Operation::Navigate(crate::client::menu_ui::Tab::Distance),
     );
-    assert_eq!(draft_distance(&app).preset, DistancePreset::Medium);
+    assert_eq!(distance_of(&app).preset, DistancePreset::Medium);
     move_slider(&mut app, Scalar::Detail(5), 11.0);
-    assert_eq!(draft_distance(&app), default(), "locked under a preset");
+    assert_eq!(distance_of(&app), default(), "locked under a preset");
 
     activate_operation(&mut app, Operation::Distance(DistancePreset::Custom));
     let sliders = |detail_chunks, reach_km| Sliders {
         detail_chunks,
         reach_km,
     };
-    assert_eq!(draft_distance(&app).sliders(far), sliders(10, 7));
+    assert_eq!(distance_of(&app).sliders(far), sliders(10, 7));
     move_slider(&mut app, Scalar::Detail(5), 11.0);
     move_slider(&mut app, Scalar::Reach(8), 5.0);
-    assert_eq!(draft_distance(&app).sliders(far), sliders(11, 5));
+    assert_eq!(distance_of(&app).sliders(far), sliders(11, 5));
 
     activate_operation(&mut app, Operation::Distance(DistancePreset::High));
-    assert_eq!(draft_distance(&app).sliders(far), sliders(12, 8));
+    assert_eq!(distance_of(&app).sliders(far), sliders(12, 8));
     activate_operation(&mut app, Operation::Distance(DistancePreset::Custom));
     assert_eq!(
-        draft_distance(&app).sliders(far),
+        distance_of(&app).sliders(far),
         sliders(11, 5),
         "Custom kept its values while High was tried"
     );
-}
-
-#[test]
-fn a_distance_preset_waits_for_apply_and_discard_and_restore_defaults_undo_it() {
-    use crate::client::quality::{Distance, DistancePreset};
-    let mut app = app();
-    activate_operation(
-        &mut app,
-        Operation::Navigate(crate::client::menu_ui::Tab::Distance),
-    );
-    activate_operation(&mut app, Operation::Distance(DistancePreset::Medium));
-    assert_eq!(
-        app.world().resource::<Preferences>().distance,
-        Distance::default()
-    );
-    activate_operation(&mut app, Operation::Apply);
-    assert_eq!(
-        app.world().resource::<Preferences>().distance.preset,
-        DistancePreset::Medium
-    );
-    let saved = std::fs::read_to_string(&app.world().resource::<Store>().path).unwrap();
-    assert!(saved.contains("\"medium\""), "{saved}");
-
-    activate_operation(&mut app, Operation::Distance(DistancePreset::High));
-    activate_operation(&mut app, Operation::Back);
-    activate_operation(&mut app, Operation::Discard);
-    assert_eq!(
-        app.world().resource::<Preferences>().distance.preset,
-        DistancePreset::Medium
-    );
-
-    activate_operation(
-        &mut app,
-        Operation::Navigate(crate::client::menu_ui::Tab::Distance),
-    );
-    activate_operation(&mut app, Operation::Reset);
-    activate_operation(&mut app, Operation::ConfirmReset);
-    assert_eq!(draft_distance(&app), Distance::default());
 }
 
 #[test]
@@ -1186,8 +1036,15 @@ fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
         );
     }
 
+    let helps = |app: &mut App| -> Vec<String> {
+        app.world_mut()
+            .query::<&RowHelp>()
+            .iter(app.world())
+            .map(|help| help.text.clone())
+            .collect()
+    };
     assert!(
-        texts_medium
+        helps(&mut medium)
             .iter()
             .any(|t| t.starts_with("Holds each Voxel size further") && t.contains("The default.")),
     );
@@ -1195,14 +1052,14 @@ fn the_distance_page_locks_its_sliders_and_lists_this_world_s_levels() {
     assert_eq!(locked(&mut custom), [false, false]);
     let mut low = page(DistancePreset::Low);
     assert!(
-        texts(&mut low)
+        helps(&mut low)
             .iter()
             .any(|t| t.starts_with("The World's own rings, to 3 km") && !t.contains("default")),
     );
 }
 
 #[test]
-fn applying_a_preset_changes_the_rings_the_server_streams() {
+fn choosing_a_preset_changes_the_rings_the_server_streams() {
     use crate::client::quality::DistancePreset;
     use crate::server::quality::QualityCurve;
     use crate::server::streaming::StreamingSettings;
@@ -1228,14 +1085,103 @@ fn applying_a_preset_changes_the_rings_the_server_streams() {
     );
     activate_operation(&mut app, Operation::Distance(DistancePreset::High));
     app.update();
-    assert_eq!(streamed(&app).lod_unit_m, 192.0, "not before Apply");
-
-    activate_operation(&mut app, Operation::Apply);
-    app.update();
     let high = streamed(&app);
     assert_eq!(high, QualityCurve::HIGH.applied_to(terra().ceiling));
     // 160 m, then 768, 1536, 3072 and 6144 m, then 8 km.
     assert_eq!(crate::server::level_count(&high), 6);
     let rings = crate::server::LevelRings::new(high, 32.0, 1);
     assert_eq!(rings.mesh.outer.horizontal, 12);
+}
+
+#[test]
+fn the_window_mode_applies_at_once_steps_and_reverts_unless_kept() {
+    use crate::client::presentation::WindowMode;
+    let mut app = app();
+    app.add_plugins(super::super::actions::test_plugin)
+        .add_systems(PostUpdate, crate::client::presentation::policy);
+    let window = app
+        .world_mut()
+        .spawn((Window::default(), bevy::window::PrimaryWindow))
+        .id();
+    let mode = |app: &App| app.world().get::<Window>(window).unwrap().mode;
+    activate_operation(&mut app, Operation::Navigate(Tab::Display));
+    let selector = spawn_choice(&mut app, |row| {
+        pages::select(
+            row,
+            WindowMode::Windowed,
+            WindowMode::ALL.map(|m| (m, m.label().to_owned())),
+            Operation::WindowMode,
+        )
+    });
+    step_by(&mut app, selector, 1);
+    assert_eq!(
+        app.world().resource::<Preferences>().window_mode,
+        WindowMode::Borderless
+    );
+    assert!(app.world().resource::<Settings>().modal(), "asks to keep");
+    app.update();
+    assert_eq!(
+        mode(&app),
+        bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current),
+        "applied at once"
+    );
+    wait(&mut app, 10.5);
+    assert_eq!(
+        app.world().resource::<Preferences>().window_mode,
+        WindowMode::Windowed,
+        "reverted"
+    );
+    assert_eq!(mode(&app), bevy::window::WindowMode::Windowed);
+
+    activate_operation(&mut app, Operation::WindowMode(WindowMode::Fullscreen));
+    activate_operation(&mut app, Operation::KeepDisplay);
+    wait(&mut app, 11.0);
+    assert_eq!(
+        saved(&mut app).window_mode,
+        WindowMode::Fullscreen,
+        "kept and saved"
+    );
+}
+
+#[test]
+fn the_interface_slider_sets_and_saves_the_menu_volume() {
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    move_slider(&mut app, Scalar::InterfaceVolume, 0.0);
+    assert_eq!(app.world().resource::<Preferences>().volumes.interface, 0);
+    assert_eq!(app.world().resource::<Preferences>().volumes.effects, 100);
+    assert_eq!(saved(&mut app).volumes.interface, 0);
+}
+
+#[test]
+fn the_audio_page_always_shows_every_sound_effect_slider_under_its_own_heading() {
+    let mut app = page_app(Tab::Audio);
+    let texts: Vec<String> = app
+        .world_mut()
+        .query::<&Text>()
+        .iter(app.world())
+        .map(|t| t.0.clone())
+        .collect();
+    for wanted in [
+        "SOUND MIX",
+        "Interface",
+        "SOUND EFFECTS",
+        "Each is relative to Effects; 0 mutes it.",
+        "Footsteps",
+        "Hurt & death",
+    ] {
+        assert!(texts.iter().any(|t| t == wanted), "{wanted} in {texts:?}");
+    }
+    let scalars: Vec<Scalar> = app
+        .world_mut()
+        .query::<&Scalar>()
+        .iter(app.world())
+        .copied()
+        .collect();
+    let details = scalars
+        .iter()
+        .filter(|s| matches!(s, Scalar::DetailVolume(_)))
+        .count();
+    assert_eq!(details, 10, "no expand or collapse hides them");
+    assert!(scalars.iter().any(|s| matches!(s, Scalar::InterfaceVolume)));
 }

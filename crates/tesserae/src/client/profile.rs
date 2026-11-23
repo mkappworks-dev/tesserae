@@ -29,6 +29,8 @@ pub(crate) struct Preferences {
     pub invert_y: bool,
     pub reverse_scroll: bool,
     pub scroll_sensitivity: f32,
+    /// Absent from a profile saved before it, which reads as Windowed.
+    pub window_mode: super::presentation::WindowMode,
     pub display_sync: bool,
     pub fps_cap: Option<u32>,
     pub anti_aliasing: super::anti_alias::AntiAliasing,
@@ -67,6 +69,7 @@ pub(crate) struct PadPreferences {
     pub move_deadzone: f32,
     pub look_deadzone: f32,
     pub toggle_crouch: bool,
+    pub menu_rumble: bool,
 }
 impl Default for PadPreferences {
     fn default() -> Self {
@@ -76,6 +79,7 @@ impl Default for PadPreferences {
             move_deadzone: 0.15,
             look_deadzone: 0.15,
             toggle_crouch: true,
+            menu_rumble: true,
         }
     }
 }
@@ -125,6 +129,7 @@ impl Default for Preferences {
             invert_y: false,
             reverse_scroll: false,
             scroll_sensitivity: 1.0,
+            window_mode: default(),
             display_sync: true,
             fps_cap: None,
             anti_aliasing: default(),
@@ -681,7 +686,15 @@ mod tests {
         prefs.layout.gap = 2;
         prefs.layout.negative = [true, false, true];
         let bytes = encode(&Bindings::default(), &prefs).unwrap();
-        assert_eq!(decode(&bytes).unwrap().1.layout, prefs.layout);
+        let decoded = decode(&bytes).unwrap().1.layout;
+        assert_eq!(decoded.kind, Kind::Directions, "the method is not kept");
+        assert_eq!(
+            decoded,
+            super::super::layout::LayoutPreferences {
+                kind: Kind::Directions,
+                ..prefs.layout.clone()
+            }
+        );
 
         let mut document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         document["preferences"]
@@ -779,8 +792,8 @@ mod tests {
         let (_, older) = decode(br#"{"version":3,"preferences":{"invert_y":true}}"#).unwrap();
         let v = older.volumes;
         assert_eq!(
-            (v.master, v.effects, v.ambient, v.music),
-            (100, 100, 70, 50)
+            (v.master, v.effects, v.ambient, v.music, v.interface),
+            (100, 100, 70, 50, 100)
         );
         let (_, partial) =
             decode(br#"{"version":3,"preferences":{"volumes":{"music":0}}}"#).unwrap();
@@ -794,6 +807,7 @@ mod tests {
 
         for bad in [
             r#"{"master":101}"#,
+            r#"{"interface":101}"#,
             r#"{"ambient":-1}"#,
             r#"{"music":0.5}"#,
             r#"{"detail":{"eating":101}}"#,

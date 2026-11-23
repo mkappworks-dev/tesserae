@@ -64,9 +64,14 @@ fn crosshair(
     time: Res<Time>,
     mut crosshair: Query<&mut TextColor, With<super::edit::Crosshair>>,
     dead: Option<Res<super::death::Dead>>,
+    (covers, layout): (
+        super::menu::Covers,
+        Option<Res<super::layout_menu::LayoutMenu>>,
+    ),
 ) {
     let current = target.current(&sent, time.elapsed_secs_f64());
-    let alpha = if !super::death::alive(dead) {
+    let covered = super::menu::covered(&covers) || layout.is_some_and(|layout| layout.open);
+    let alpha = if !super::death::alive(dead) || covered {
         0.0
     } else if target.0.blocked && current {
         super::edit::BLOCKED_CROSSHAIR_ALPHA
@@ -214,6 +219,66 @@ mod tests {
             colour.with_alpha(1.0),
             super::super::theme::RETICLE.to_srgba(),
             "the reticle's own tint again"
+        );
+    }
+
+    #[test]
+    fn the_crosshair_hides_behind_a_menu_or_a_full_tool_panel() {
+        use super::super::{
+            inventory_window::InventoryWindow, layout_menu::LayoutMenu, map_window::MapWindow,
+            structure_menu::StructureList,
+        };
+        fn alpha_with(open: impl FnOnce(&mut App)) -> f32 {
+            let mut app = App::new();
+            app.init_resource::<Time>()
+                .init_resource::<Target>()
+                .init_resource::<Sent>()
+                .add_systems(Update, crosshair);
+            open(&mut app);
+            let id = app
+                .world_mut()
+                .spawn((super::super::edit::Crosshair, TextColor(Color::WHITE)))
+                .id();
+            app.update();
+            app.world().get::<TextColor>(id).unwrap().0.to_srgba().alpha
+        }
+        assert!(alpha_with(|_| {}) > 0.0, "in play");
+        assert_eq!(
+            alpha_with(|app| {
+                app.insert_resource(Menu::opened(false));
+            }),
+            0.0,
+            "pause menu"
+        );
+        assert_eq!(
+            alpha_with(|app| {
+                app.insert_resource(InventoryWindow::opened());
+            }),
+            0.0,
+            "Inventory"
+        );
+        assert_eq!(
+            alpha_with(|app| {
+                app.insert_resource(MapWindow::opened());
+            }),
+            0.0,
+            "Map"
+        );
+        assert_eq!(
+            alpha_with(|app| {
+                app.insert_resource(LayoutMenu::opened());
+            }),
+            0.0,
+            "Quick layout full"
+        );
+        assert_eq!(
+            alpha_with(|app| {
+                let mut list = StructureList::default();
+                list.show();
+                app.insert_resource(list);
+            }),
+            0.0,
+            "place Tool full"
         );
     }
 

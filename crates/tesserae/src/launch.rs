@@ -57,8 +57,10 @@ pub struct BiomePreview {
     pub climate: tesserae_core::climate::ClimateParams,
     /// The World's own ground, which a Biome without its own takes.
     pub ground: Option<tesserae_core::biome_edits::GroundNames>,
-    /// The solid Materials a Biome's ground may be made of, by name.
+    /// The Materials a Biome's ground may be made of, by name, in declared order.
     pub materials: Vec<String>,
+    /// What the terrain preview draws from; `None` in tests that draw none.
+    pub source: Option<std::sync::Arc<tesserae_core::terrain_preview::Source>>,
 }
 
 /// Where the session ends: set before a quit that is not to desktop.
@@ -97,14 +99,16 @@ pub struct Clash {
 }
 
 /// A Mod that would run without a recorded Trust grant for its exact bytes.
+#[derive(Clone)]
 pub struct Untrusted {
-    pub prompt: String,
+    /// The effective limits it would run under.
+    pub limits: tesserae_mods::ModLimits,
     pub found: tesserae_mods::Found,
     pub sha256: String,
 }
 
 /// What the World list can offer, found without running any Mod code.
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct Installed {
     /// [`tesserae_mods::DEFAULT_GAME`]: what a World with no record, and the empty form, default to.
     pub game: Option<GameRef>,
@@ -118,6 +122,8 @@ pub struct Installed {
     /// Folders the scan refused, as one line each.
     pub rejected: Vec<String>,
     found: Vec<tesserae_mods::Found>,
+    /// Counted once at the scan: every page that lists Mods reads them.
+    summaries: std::collections::BTreeMap<String, tesserae_mods::Summary>,
     check_trust: bool,
     /// `None` when nothing can be granted, as in tests.
     trust_file: Option<PathBuf>,
@@ -142,6 +148,12 @@ impl Installed {
                 .rejected
                 .iter()
                 .map(|r| format!("{}: {}", r.dir.display(), r.reason))
+                .collect(),
+            summaries: scan
+                .games
+                .iter()
+                .chain(&scan.mods)
+                .filter_map(|f| Some((f.manifest.id.clone(), f.summary()?)))
                 .collect(),
             found: scan.games.into_iter().chain(scan.mods).collect(),
             check_trust,
@@ -170,6 +182,7 @@ impl Installed {
             mods: Vec::new(),
             rejected: Vec::new(),
             found: Vec::new(),
+            summaries: Default::default(),
             check_trust: false,
             trust_file: None,
         }
@@ -187,7 +200,7 @@ impl Installed {
             untrusted: untrusted
                 .iter()
                 .map(|id| Untrusted {
-                    prompt: format!("Mod: {id}"),
+                    limits: tesserae_mods::ModLimits::HOST,
                     found: tesserae_mods::Found {
                         manifest: test_manifest(id),
                         dir: PathBuf::new(),
@@ -200,6 +213,7 @@ impl Installed {
             mods: Vec::new(),
             rejected: Vec::new(),
             found: Vec::new(),
+            summaries: Default::default(),
             check_trust: false,
             trust_file: None,
         }
@@ -249,12 +263,9 @@ impl Installed {
                 tesserae_mods::Verdict::Trusted(_) => {}
                 _ => {
                     let sha256 = tesserae_mods::Trust::hash_of(f).map_err(|e| e.to_string())?;
+                    let limits = tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits);
                     self.untrusted.push(Untrusted {
-                        prompt: tesserae_mods::trust_prompt(
-                            &f.manifest,
-                            tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits),
-                            &sha256,
-                        ),
+                        limits,
                         found: f.clone(),
                         sha256,
                     });
@@ -389,6 +400,21 @@ impl Installed {
                     f.manifest.description.as_deref(),
                 )
             })
+    }
+
+    /// What a data Mod's Declaration adds; `None` for a component, which must run to say.
+    pub fn summary(&self, id: &str) -> Option<&tesserae_mods::Summary> {
+        self.summaries.get(id)
+    }
+
+    /// The decoded thumbnail of an installed Mod or Game, read from disk on each call. The scan
+    /// already refused a folder whose thumbnail was bad, so a failure here is a file changed since.
+    pub fn thumbnail(&self, id: &str) -> Option<tesserae_mods::Thumbnail> {
+        let found = self.found.iter().find(|f| f.manifest.id == id)?;
+        found.thumbnail().unwrap_or_else(|e| {
+            warn!("{e}");
+            None
+        })
     }
 
     #[cfg(test)]
@@ -548,6 +574,7 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
         suggests: Vec::new(),
         category: None,
         description: None,
+        thumbnail: None,
     }
 }
 
@@ -629,6 +656,19 @@ mod tests {
         copy_tree(&source, &root.join("mods"));
         let scan = tesserae_mods::scan(&root.join("mods")).unwrap();
         (root, Installed::new(scan, false, PathBuf::new()))
+    }
+
+    #[test]
+    fn a_mods_summary_counts_what_it_declares() {
+        let (root, installed) = shared_mods("summary");
+        let counts = ["timber", "frost", "hearth"].map(|id| {
+            installed
+                .summary(id)
+                .map(|s| (s.materials, s.shapes, s.fluids))
+        });
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(counts, [Some((2, 2, 0)), Some((4, 1, 1)), Some((2, 0, 1))]);
+        assert_eq!(Installed::fake(None, &[]).summary("timber"), None);
     }
 
     #[test]

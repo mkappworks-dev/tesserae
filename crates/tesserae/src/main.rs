@@ -7,6 +7,8 @@ mod content;
 mod cost;
 mod dev;
 mod launch;
+#[cfg(target_os = "macos")]
+mod native;
 mod open;
 #[cfg(feature = "profiling")]
 mod profiling;
@@ -63,6 +65,8 @@ fn main() -> std::process::ExitCode {
             open::plugin,
         ))
         .add_plugins(dev_plugins);
+    #[cfg(target_os = "macos")]
+    app.add_plugins(native::plugin);
     if let Some(request) = watching {
         app.add_plugins(dev::plugin(request));
     }
@@ -77,10 +81,15 @@ fn main() -> std::process::ExitCode {
 fn window_plugin() -> WindowPlugin {
     let window = Window {
         title: "Tesserae".into(),
+        // macOS reads these when it creates the NSWindow, never afterwards.
+        #[cfg(target_os = "macos")]
+        fullsize_content_view: true,
+        #[cfg(target_os = "macos")]
+        titlebar_transparent: true,
+        #[cfg(target_os = "macos")]
+        titlebar_show_title: false,
         ..default()
     };
-    #[cfg(feature = "profiling")]
-    let window = profiling::monitor_window(window);
     WindowPlugin {
         close_when_requested: false,
         primary_window: Some(window),
@@ -188,5 +197,14 @@ mod tests {
                 cfg!(debug_assertions)
             );
         }
+    }
+
+    #[test]
+    fn a_mac_window_draws_under_a_transparent_title_bar_with_no_title() {
+        let window = super::window_plugin().primary_window.unwrap();
+        assert!(window.fullsize_content_view);
+        assert!(window.titlebar_transparent);
+        assert!(!window.titlebar_show_title);
+        assert!(window.titlebar_shown && window.titlebar_show_buttons);
     }
 }

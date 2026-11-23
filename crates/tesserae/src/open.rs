@@ -43,6 +43,23 @@ pub struct Opened {
     direct: bool,
 }
 
+impl Opened {
+    /// The World's folder; `None` for a World the environment named.
+    pub fn folder(&self) -> Option<&std::path::Path> {
+        self.folder.as_deref()
+    }
+
+    /// A World opened from the list, from `folder`.
+    #[cfg(test)]
+    pub fn at(folder: PathBuf) -> Self {
+        Opened {
+            name: None,
+            folder: Some(folder),
+            direct: false,
+        }
+    }
+}
+
 /// The stages the loading bar follows, in order. The last two are the Client's,
 /// which only it can tell: its first drawn terrain, then the ground around the
 /// Eye drawn at level 0.

@@ -19,17 +19,23 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
         }
         Act::Delete => {
             if let Screen::Edit(path) = l.screen.clone() {
-                l.from_menu = false;
+                l.from_list = false;
                 l.show(Screen::Delete(path));
             }
         }
-        Act::Menu(path) => {
-            l.menu = (l.menu.as_ref() != Some(&path)).then_some(path);
-            l.version += 1;
+        Act::EditHighlighted | Act::DeleteHighlighted if l.screen == Screen::Worlds => {
+            if let Some(path) = l.selected.clone() {
+                let act = if act == Act::EditHighlighted {
+                    Act::Edit(path)
+                } else {
+                    Act::DeleteWorld(path)
+                };
+                on_edit_world(l, cx, act);
+            }
         }
         Act::DeleteWorld(path) => {
             l.selected = Some(path.clone());
-            l.from_menu = true;
+            l.from_list = true;
             l.show(Screen::Delete(path));
         }
         Act::ShowFolder => {
@@ -42,32 +48,19 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 copy(cx.commands, cx.clipboard.as_deref_mut(), seed);
             }
         }
-        Act::DefaultMode(mode) => {
-            l.modes.default = mode;
-            l.version += 1;
-        }
-        Act::OwnMode(mode) => {
-            l.modes.own = mode;
+        Act::EditMode(mode) => {
+            l.modes = Modes {
+                default: mode,
+                own: mode,
+            };
+            l.refocus = Some(Act::EditMode(mode));
             l.version += 1;
         }
         Act::SaveName => {
             let Screen::Edit(path) = l.screen.clone() else {
                 return;
             };
-            let current = l.entry(&path).and_then(Entry::details).map(saved_modes);
-            let result = library::valid_name(&l.rename)
-                .map_err(|_| too_long())
-                .and_then(|name| library::rename(&path, &name).map_err(describe))
-                .and_then(|()| {
-                    // Applied by the Server when the World next opens; nothing changes in play.
-                    let (now, was) = (l.modes, current.unwrap_or(l.modes));
-                    let changes = library::ModeChanges {
-                        default: (now.default != was.default).then_some(now.default),
-                        own: (now.own != was.own).then_some(now.own),
-                    };
-                    library::request_modes(&path, changes).map_err(describe)
-                });
-            match result {
+            match save(l, &path) {
                 Ok(()) => {
                     l.show(Screen::Worlds);
                     l.refresh(cx.worlds);
@@ -76,6 +69,25 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                     l.problem = Some(e);
                     l.version += 1;
                 }
+            }
+        }
+        Act::DontSave | Act::SaveAndContinue => {
+            let Screen::SaveFirst(path) = l.screen.clone() else {
+                return;
+            };
+            l.show(Screen::Edit(path.clone()));
+            if act == Act::SaveAndContinue {
+                if let Err(e) = save(l, &path) {
+                    l.problem = Some(e);
+                    return;
+                }
+                l.refresh(cx.worlds);
+            }
+            recreate(l, cx);
+        }
+        Act::DiscardEdits => {
+            if matches!(l.screen, Screen::DiscardEdits(_)) {
+                l.show(Screen::Worlds);
             }
         }
         Act::ConfirmDelete => {
@@ -99,6 +111,32 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
         }
         _ => {}
     }
+}
+
+/// Writes Edit World's name and mode to the World's save.
+fn save(l: &Launcher, path: &Path) -> Result<(), String> {
+    let current = l.entry(path).and_then(Entry::details).map(saved_modes);
+    let name = library::valid_name(&l.rename).map_err(|_| too_long())?;
+    library::rename(path, &name).map_err(describe)?;
+    // Applied by the Server when the World next opens; nothing changes in play.
+    let (now, was) = (l.modes, current.unwrap_or(l.modes));
+    let changes = library::ModeChanges {
+        default: (now.default != was.default).then_some(now.default),
+        own: (now.own != was.own).then_some(now.own),
+    };
+    library::request_modes(path, changes).map_err(describe)
+}
+
+/// Whether Edit World holds a name or mode not yet saved.
+pub(super) fn unsaved(l: &Launcher) -> bool {
+    let Screen::Edit(path) = &l.screen else {
+        return false;
+    };
+    let Some(entry) = l.entry(path) else {
+        return false;
+    };
+    let named = entry.name().unwrap_or_default() != l.rename.trim();
+    named || entry.details().is_some_and(|d| modes(d) != l.modes)
 }
 
 /// A World's default game mode, for Players new to it, and the player's own.

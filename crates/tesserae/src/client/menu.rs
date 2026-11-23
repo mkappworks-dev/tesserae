@@ -5,16 +5,15 @@
 //! While it is open the cursor is free, so mouse look is off and a click edits
 //! nothing: both already wait on a grabbed cursor.
 
-use crate::client::buttons::{self, Align, ButtonStyle, Eyebrow};
+use crate::client::buttons::{self, ButtonStyle};
 use bevy::input_focus::tab_navigation::TabGroup;
-use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::actions::{Action, Actions};
 use super::cinematic::{self as cine, Kind};
-use super::menu_ui as ui;
+use super::menu_ui::{self as ui, IconKind};
 use super::theme;
 use crate::content::{HereBiome, HereCave, MaterialPalette, WorldFacts};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
@@ -97,6 +96,11 @@ pub(super) enum Choice {
     Settings,
     Details,
     CloseDetails,
+    /// The prompt bar's Esc: closes World details, else resumes.
+    Back,
+    CopySeed,
+    /// The prompt bar's Q; `save` handles it as it does the Save & Quit item.
+    SaveQuit,
 }
 
 #[derive(Component)]
@@ -177,7 +181,7 @@ pub(super) fn toggle(
         }
         return;
     }
-    if actions.started(Action::Menu) || escape {
+    if actions.started(Action::Menu) || (escape && !docked.in_hand()) {
         if escape {
             actions.consume_cancel();
         }
@@ -198,6 +202,11 @@ fn resume(menu: &mut Menu, cursor: &mut CursorOptions) {
 fn choose(
     event: On<Activate>,
     choices: Query<&Choice>,
+    (mut commands, facts, mut clipboard): (
+        Commands,
+        Res<Facts>,
+        Option<ResMut<bevy::clipboard::Clipboard>>,
+    ),
     mut menu: ResMut<Menu>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     mut inventory: Option<ResMut<super::inventory_window::InventoryWindow>>,
@@ -224,9 +233,20 @@ fn choose(
                 window.open = true;
             }
         }
-        Choice::Settings => {}
+        Choice::Settings | Choice::SaveQuit => {}
         Choice::Details => menu.details = true,
         Choice::CloseDetails => menu.details = false,
+        Choice::Back if menu.details => menu.details = false,
+        Choice::Back => {
+            if let Ok(mut cursor) = cursor.single_mut() {
+                resume(&mut menu, &mut cursor);
+            }
+        }
+        Choice::CopySeed => {
+            if let Some(facts) = &facts.0 {
+                copy_seed(&mut commands, clipboard.as_deref_mut(), facts.seed);
+            }
+        }
     }
 }
 
@@ -303,6 +323,26 @@ type Open<'w> = (
     Option<Res<'w, super::settings::Settings>>,
 );
 
+/// What World details draws the World's picture from.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Picture<'w> {
+    opened: Option<Res<'w, crate::open::Opened>>,
+    thumbnails: Option<ResMut<'w, super::worlds::Thumbnails>>,
+    images: Option<ResMut<'w, Assets<Image>>>,
+}
+
+impl Picture<'_> {
+    /// The open World's folder, with its thumbnail read afresh: one written after the list last
+    /// looked, as a new World's is, shows too.
+    fn read(&mut self) -> Option<std::path::PathBuf> {
+        let folder = self.opened.as_ref()?.folder()?.to_owned();
+        if let (Some(thumbnails), Some(images)) = (&mut self.thumbnails, &mut self.images) {
+            thumbnails.read_world(&folder, images);
+        }
+        Some(folder)
+    }
+}
+
 fn render(
     mut commands: Commands,
     (menu, facts, (here, cave), settings): Open,
@@ -310,6 +350,7 @@ fn render(
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
     mut shown: Local<Option<Shown>>,
+    mut picture: Picture,
 ) {
     let solid = preferences.as_ref().is_some_and(|p| p.solid_background);
     let stronger = preferences.is_some_and(|p| p.stronger_contrast);
@@ -333,10 +374,15 @@ fn render(
     };
     let facts = facts.0.as_ref();
     let own = own.and_then(|o| o.0);
-    let mut focus = None;
     commands
         .spawn((
             MenuRoot,
+            super::frame::Frame,
+            // On the root, not the list, so the prompt bar's Q is inside it and fires.
+            TabGroup {
+                modal: !details,
+                ..default()
+            },
             GlobalZIndex(8),
             BackgroundColor(if solid {
                 theme::SOLID_BACKGROUND
@@ -346,7 +392,7 @@ fn render(
             if solid {
                 BackgroundGradient::default()
             } else {
-                theme::shade()
+                pause_shade()
             },
             Node {
                 position_type: PositionType::Absolute,
@@ -366,162 +412,137 @@ fn render(
                     Val::Px(theme::SCREEN_PAD_TOP),
                     Val::Px(theme::SCREEN_PAD_BOTTOM),
                 ),
+                justify_content: JustifyContent::SpaceBetween,
                 ..default()
             })
-            .with_children(|screen| {
-                screen
-                    .spawn(Node {
-                        flex_grow: 1.0,
-                        padding: UiRect::horizontal(Val::Vw(5.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::SpaceBetween,
-                        ..default()
-                    })
-                    .with_children(|pause| {
-                        let resume = panel(
-                            pause,
-                            facts,
-                            own,
-                            (details, allowed.is_none_or(|a| a.0)),
-                            (&bindings, &labels),
-                        );
-                        if !details {
-                            focus = Some(resume);
-                        }
-                        let biome = cave
-                            .name(facts)
-                            .or_else(|| here.0.and_then(|i| facts.and_then(|f| f.biomes.get(i))))
-                            .map(|name| ui::declared_title(name));
-                        if let Some(biome) = biome {
-                            world_status(pause, facts, &biome);
-                        }
-                    });
+            .with_children(|pause| {
+                list(
+                    pause,
+                    facts,
+                    own,
+                    (details, allowed.is_none_or(|a| a.0)),
+                    (&bindings, &labels),
+                );
+                let biome = cave
+                    .name(facts)
+                    .or_else(|| here.0.and_then(|i| facts.and_then(|f| f.biomes.get(i))))
+                    .map(|name| ui::declared_title(name));
+                if let Some(biome) = biome {
+                    world_status(pause, facts, &biome);
+                }
             });
-            super::worlds::pages::footer(root, &place(facts));
+            use super::frame::{Cap, Prompt};
+            super::frame::prompt_bar(
+                root,
+                &place(facts),
+                vec![
+                    Prompt::new(Cap::Tab, "Navigate"),
+                    Prompt::new(Cap::Enter, "Select"),
+                    Prompt::new(Cap::Esc, "Back").act(Choice::Back),
+                    Prompt::new(Cap::Letter('Q'), "Save & Quit").act(Choice::SaveQuit),
+                ],
+            );
             if details {
-                focus = world_details(root, facts, own);
+                let folder = picture.read();
+                let neutral = super::worlds::Thumbnails::default();
+                let thumbnails = picture.thumbnails.as_deref().unwrap_or(&neutral);
+                world_details(
+                    root,
+                    facts,
+                    own,
+                    (
+                        thumbnails,
+                        folder.as_deref().unwrap_or(std::path::Path::new("")),
+                    ),
+                );
             }
         });
-    if let Some(entity) = focus {
-        commands.queue(move |world: &mut World| {
-            if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
-                focus.set(entity, FocusCause::Auto);
-            }
-        });
-    }
 }
 
-/// The Menu's panel; returns Resume, which takes focus.
-fn panel(
+/// The prototype's shade: dark behind the list, clear by the middle of the screen.
+fn pause_shade() -> BackgroundGradient {
+    BackgroundGradient::from(LinearGradient::to_right(vec![
+        ColorStop::new(theme::css_dim([6, 8, 7], 0.75), Val::Percent(0.0)),
+        ColorStop::new(Color::NONE, Val::Percent(55.0)),
+    ]))
+}
+
+/// The plain list under 'Paused'; Resume takes focus.
+fn list(
     pause: &mut ChildSpawnerCommands,
     facts: Option<&WorldFacts>,
     own: Option<GameMode>,
     (details, map_allowed): (bool, bool),
     (bindings, labels): (&super::actions::Bindings, &super::actions::Labels),
-) -> Entity {
-    let mut resume = Entity::PLACEHOLDER;
+) {
+    let shadow = TextShadow {
+        offset: Vec2::new(0.0, 2.0),
+        color: Color::BLACK.with_alpha(0.5),
+    };
     pause
-        .spawn((
-            TabGroup {
-                modal: !details,
-                ..default()
-            },
-            cine::surface(theme::panel()),
-            cine::framed(Node {
-                width: Val::Px(theme::MENU_WIDTH),
-                padding: UiRect::all(Val::Px(25.0)),
-                flex_direction: FlexDirection::Column,
-                flex_shrink: 0.0,
-                ..default()
-            }),
-        ))
-        .with_children(|panel| {
-            panel
-                .spawn(Node {
-                    margin: UiRect::bottom(Val::Px(12.0)),
-                    ..default()
-                })
-                .with_children(|e| buttons::eyebrow(e, "TAKE A MOMENT", Eyebrow::Cinematic));
-            panel.spawn((
-                Text::new("Menu"),
-                theme::weighted(theme::TEXT_PANEL_TITLE, theme::BOOK),
-                bevy::text::LineHeight::RelativeToFont(1.2),
+        .spawn((Node {
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            padding: UiRect::left(Val::Vw(4.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },))
+        .with_children(|column| {
+            column.spawn((
+                Text::new("Paused"),
+                theme::weighted(44.0, theme::STRONG),
+                bevy::text::LetterSpacing::Px(-0.02 * 44.0),
                 TextColor(theme::INK),
-                Node {
-                    margin: UiRect::bottom(Val::Px(6.0)),
-                    ..default()
-                },
+                shadow,
                 Pickable::IGNORE,
             ));
             let place = facts
                 .and_then(|f| f.name.clone())
                 .unwrap_or_else(|| "Your World".into());
             let subtitle = match own {
-                Some(mode) => format!("{place} · {}", mode_name(mode)),
+                Some(mode) => format!("{place} \u{00b7} {}", mode_name(mode)),
                 None => place,
             };
-            ui::paragraph(panel, subtitle, theme::TEXT_SMALL, theme::muted());
-            panel
+            column
                 .spawn(Node {
+                    margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(6.0), Val::Px(24.0)),
+                    ..default()
+                })
+                .with_children(|line| {
+                    ui::paragraph(line, subtitle, theme::TEXT_SMALL, theme::muted());
+                });
+            column
+                .spawn(Node {
+                    width: Val::Px(340.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    margin: UiRect::top(Val::Px(24.0)),
+                    row_gap: Val::Px(4.0),
                     ..default()
                 })
                 .with_children(|list| {
                     let key = |action| short_key(bindings.label(action, labels));
-                    resume = buttons::button(
-                        list,
-                        "Resume",
-                        Choice::Resume,
-                        glyph(Kind::Primary, &key(Action::ReleaseCursor)),
-                    );
-                    buttons::button(
-                        list,
-                        "Inventory",
-                        Choice::Inventory,
-                        glyph(Kind::Plain, &key(Action::Inventory)),
-                    );
-                    if map_allowed {
-                        buttons::button(
-                            list,
-                            "Map",
-                            Choice::Map,
-                            glyph(Kind::Plain, &key(Action::Map)),
-                        );
+                    let keyed = |list: &mut ChildSpawnerCommands, label, choice, action| {
+                        let item = super::frame::list_item(list, label, None, choice);
+                        let key = key(action);
+                        list.commands().entity(item).with_children(|item| {
+                            super::frame::key_cap(item, &key, theme::chrome_ink());
+                        });
+                        item
+                    };
+                    let resume = keyed(list, "Resume", Choice::Resume, Action::ReleaseCursor);
+                    if !details {
+                        list.commands()
+                            .entity(resume)
+                            .insert(super::frame::Autofocus);
                     }
-                    let settings = buttons::button(
-                        list,
-                        "Settings",
-                        Choice::Settings,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Plain,
-                            align: Align::Icon(ui::IconKind::Settings),
-                        },
-                    );
-                    // The gear sits at the right edge, as the other rows' glyphs do.
-                    list.commands().queue(move |world: &mut World| {
-                        if let Some(mut node) = world.get_mut::<Node>(settings) {
-                            node.justify_content = JustifyContent::SpaceBetween;
-                        }
-                    });
-                    buttons::button(
-                        list,
-                        "World details",
-                        Choice::Details,
-                        glyph(Kind::Plain, "↗"),
-                    );
-                    super::save::return_buttons(list);
+                    keyed(list, "Inventory", Choice::Inventory, Action::Inventory);
+                    if map_allowed {
+                        keyed(list, "Map", Choice::Map, Action::Map);
+                    }
+                    super::frame::list_item(list, "Settings", None, Choice::Settings);
+                    super::frame::list_item(list, "World details", None, Choice::Details);
+                    super::save::return_items(list);
                 });
         });
-    resume
-}
-
-fn glyph(kind: Kind, glyph: &str) -> ButtonStyle<'_> {
-    ButtonStyle::Cinematic {
-        kind,
-        align: Align::Glyph(glyph),
-    }
 }
 
 /// The prototype's key names are short: Esc, not Escape.
@@ -580,15 +601,20 @@ fn world_status(pause: &mut ChildSpawnerCommands, facts: Option<&WorldFacts>, bi
         });
 }
 
-/// The World's facts in a dialog over the Menu.
+/// The World's picture in World details.
+#[derive(Component)]
+struct DetailsPicture;
+
+/// The World's picture, its fixed settings in two columns and its biomes, in a dialog over the
+/// Menu.
 fn world_details(
     root: &mut ChildSpawnerCommands,
     facts: Option<&WorldFacts>,
     own: Option<GameMode>,
-) -> Option<Entity> {
-    let mut close = None;
+    (thumbnails, folder): (&super::worlds::Thumbnails, &std::path::Path),
+) {
     root.spawn((
-        BackgroundColor(theme::overlay()),
+        BackgroundColor(theme::details_overlay()),
         Node {
             position_type: PositionType::Absolute,
             width: Val::Percent(100.0),
@@ -599,45 +625,169 @@ fn world_details(
         },
     ))
     .with_children(|center| {
-        center
-            .spawn((
-                TabGroup {
-                    modal: true,
+        let mut dialog = center.spawn((
+            TabGroup {
+                modal: true,
+                ..default()
+            },
+            super::frame::left_to_right(theme::details_shade(), theme::details_shade_far()),
+            Node {
+                width: Val::Px(660.0),
+                max_width: Val::Percent(92.0),
+                padding: UiRect::all(Val::Px(25.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(12.0),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
+                ..default()
+            },
+        ));
+        dialog.with_children(|dialog| {
+            cine::dialog_title(
+                dialog,
+                facts
+                    .and_then(|f| f.name.as_deref())
+                    .unwrap_or("This World"),
+            );
+            let picture = super::worlds::pages::world_picture(
+                dialog,
+                thumbnails,
+                folder,
+                Node {
+                    width: Val::Percent(100.0),
+                    aspect_ratio: Some(3.0),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
-                cine::dialog_box(),
-            ))
-            .with_children(|dialog| {
-                match facts {
-                    Some(facts) => {
-                        cine::dialog_title(dialog, facts.name.as_deref().unwrap_or("This World"));
-                        cine::dialog_text(dialog, lines(facts, own).join("\n"), theme::muted());
-                    }
-                    None => {
-                        cine::dialog_title(dialog, "This World");
-                        cine::dialog_text(
-                            dialog,
-                            "The Server has not described this World yet.",
-                            theme::muted(),
-                        );
-                    }
+            );
+            dialog.commands().entity(picture).insert(DetailsPicture);
+            match facts {
+                Some(facts) => {
+                    settings(dialog, facts, own);
+                    biomes(dialog, facts);
                 }
-                dialog
-                    .spawn(cine::dialog_actions())
-                    .with_children(|actions| {
-                        close = Some(buttons::button(
-                            actions,
-                            "Close",
-                            Choice::CloseDetails,
-                            ButtonStyle::Cinematic {
-                                kind: Kind::Primary,
-                                align: Align::Centre,
-                            },
-                        ));
-                    });
-            });
+                None => cine::dialog_text(
+                    dialog,
+                    "The Server has not described this World yet.",
+                    theme::muted(),
+                ),
+            }
+            dialog
+                .spawn(cine::dialog_actions())
+                .with_children(|actions| {
+                    let close = buttons::button(
+                        actions,
+                        "Close",
+                        Choice::CloseDetails,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                        },
+                    );
+                    actions
+                        .commands()
+                        .entity(close)
+                        .insert(super::frame::Autofocus);
+                });
+        });
     });
-    close
+}
+
+/// The settings fixed at creation, as label and value pairs two to a row; the seed has a copy
+/// control.
+fn settings(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts, own: Option<GameMode>) {
+    let game = facts
+        .game
+        .as_ref()
+        .map_or_else(|| "No Game".to_owned(), |(id, _)| ui::title(id));
+    let rows = [
+        ("Game", game),
+        ("Seed", facts.seed.to_string()),
+        ("Voxel size", format!("{} m", facts.voxel_size_m)),
+        (
+            "Climate scale",
+            format!(
+                "{} m \u{00b7} {} m",
+                facts.temperature_size_m, facts.humidity_size_m
+            ),
+        ),
+        (
+            "Game mode",
+            format!(
+                "{} \u{00b7} yours {}",
+                mode_name(facts.default_mode),
+                own.map_or("not yet known", mode_name)
+            ),
+        ),
+        ("Generator", format!("Version {}", facts.generator)),
+    ];
+    dialog
+        .spawn(Node {
+            display: Display::Grid,
+            grid_template_columns: vec![
+                GridTrack::auto(),
+                GridTrack::flex(1.0),
+                GridTrack::auto(),
+                // As wide as the longest seed and its copy icon, which a shared share would clip.
+                GridTrack::auto(),
+            ],
+            column_gap: Val::Px(14.0),
+            row_gap: Val::Px(8.0),
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|grid| {
+            for (label, value) in rows {
+                ui::text(grid, label, theme::TEXT_SMALL, theme::muted());
+                if label == "Seed" {
+                    grid.spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    })
+                    .with_children(|seed| {
+                        ui::text(seed, value, theme::TEXT_SMALL, theme::INK);
+                        let copy = buttons::button(
+                            seed,
+                            "",
+                            Choice::CopySeed,
+                            ButtonStyle::Quiet { text_px: 12.0 },
+                        );
+                        seed.commands().entity(copy).with_children(|b| {
+                            ui::icon(b, IconKind::Copy, theme::muted(), 16.0);
+                        });
+                    });
+                } else {
+                    ui::text(grid, value, theme::TEXT_SMALL, theme::INK);
+                }
+            }
+        });
+}
+
+/// The World's biomes, one chip each.
+fn biomes(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts) {
+    ui::text(dialog, "Biomes", theme::TEXT_SMALL, theme::muted());
+    dialog
+        .spawn(Node {
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(6.0),
+            row_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|chips| {
+            for name in &facts.biomes {
+                chips
+                    .spawn((
+                        BackgroundColor(theme::css_tint(0.05)),
+                        Node {
+                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                    ))
+                    .with_children(|chip| {
+                        ui::text(chip, ui::declared_title(name), 12.0, theme::INK);
+                    });
+            }
+        });
 }
 
 fn mode_name(mode: GameMode) -> &'static str {
@@ -647,33 +797,16 @@ fn mode_name(mode: GameMode) -> &'static str {
     }
 }
 
-/// The World details, one fact per line, as the prototype words them.
-fn lines(facts: &WorldFacts, own: Option<GameMode>) -> Vec<String> {
-    let game = facts
-        .game
-        .as_ref()
-        .map_or_else(|| "No Game".to_owned(), |(id, _)| ui::title(id));
-    vec![
-        format!("{game} · {} m voxels", facts.voxel_size_m),
-        format!("Seed: {}", facts.seed),
-        format!(
-            "{} · Generator version {}",
-            match facts.biomes.len() {
-                1 => "1 biome".to_owned(),
-                n => format!("{n} biomes"),
-            },
-            facts.generator
-        ),
-        format!(
-            "Default mode {} · your mode {}",
-            mode_name(facts.default_mode),
-            own.map_or("not yet known", mode_name)
-        ),
-        format!(
-            "Temperature / humidity size: {} m / {} m",
-            facts.temperature_size_m, facts.humidity_size_m
-        ),
-    ]
+fn copy_seed(
+    commands: &mut Commands,
+    clipboard: Option<&mut bevy::clipboard::Clipboard>,
+    seed: u64,
+) {
+    if clipboard.is_some_and(|c| c.set_text(seed.to_string()).is_ok()) {
+        ui::notify(commands, "Seed copied", ui::Tone::Change);
+    } else {
+        ui::notify(commands, "Could not copy the seed", ui::Tone::Alert);
+    }
 }
 
 /// The screens that free the cursor and hide the HUD while open.
@@ -698,6 +831,7 @@ mod tests {
     use super::*;
     use crate::server::persistence::SaveAction;
     use bevy::ecs::message::Messages;
+    use bevy::input_focus::InputFocus;
 
     /// A Player in play with the cursor grabbed, the Inventory window and
     /// Settings beside the Menu.
@@ -713,6 +847,7 @@ mod tests {
             .init_resource::<super::super::drops::Looks>()
             .init_resource::<super::super::menu_ui::Searches>()
             .init_resource::<Time<Real>>()
+            .init_resource::<Time>()
             .init_resource::<super::super::edit::Catalogue>()
             .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<super::super::settings::Settings>()
@@ -734,6 +869,7 @@ mod tests {
                 super::super::inventory_window::plugin,
                 crate::server::inventory::plugin,
             ));
+        super::super::frame::testing::support(&mut app);
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -801,6 +937,121 @@ mod tests {
             .iter(app.world())
             .map(|t| t.0.clone())
             .collect()
+    }
+
+    fn find(app: &mut App, choice: Choice) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &Choice)>()
+            .iter(app.world())
+            .find_map(|(e, c)| (*c == choice).then_some(e))
+            .unwrap_or_else(|| panic!("no {choice:?} on screen"))
+    }
+
+    /// What a control says, its label first.
+    fn says(app: &mut App, control: Entity) -> Vec<String> {
+        let world = app.world();
+        world
+            .get::<Children>(control)
+            .into_iter()
+            .flat_map(|children| children.iter())
+            .flat_map(|child| {
+                std::iter::once(child)
+                    .chain(world.get::<Children>(child).into_iter().flatten().copied())
+            })
+            .filter_map(|e| world.get::<Text>(e).map(|t| t.0.clone()))
+            .collect()
+    }
+
+    fn focused(app: &App) -> Option<Entity> {
+        app.world().resource::<InputFocus>().get()
+    }
+
+    fn river_bend(app: &mut App) {
+        app.world_mut().write_message(WorldFacts {
+            name: Some("River bend".into()),
+            game: Some(("terra".into(), "0.1.0".into())),
+            voxel_size_m: 0.5,
+            seed: 42,
+            biomes: vec!["terra:ash_flats".into(), "terra:meadow".into()],
+            cave_biomes: Vec::new(),
+            default_mode: GameMode::Survival,
+            generator: 3,
+            temperature_size_m: 300.0,
+            humidity_size_m: 700.0,
+        });
+        app.world_mut()
+            .write_message(crate::server::game_mode::GameModeChanged(
+                GameMode::Creative,
+            ));
+        app.add_systems(Update, super::super::game_mode::receive);
+    }
+
+    #[test]
+    fn the_pause_menu_is_a_plain_list_under_paused_with_resume_focused() {
+        let mut app = app();
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        let shown = texts(&mut app);
+        for line in ["Paused", "River bend \u{00b7} Creative"] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        let resume = find(&mut app, Choice::Resume);
+        assert_eq!(focused(&app), Some(resume));
+        assert_eq!(says(&mut app, resume), ["Resume", "Esc"]);
+        let inventory = find(&mut app, Choice::Inventory);
+        assert_eq!(says(&mut app, inventory), ["Inventory", "I"]);
+        let map = find(&mut app, Choice::Map);
+        assert_eq!(says(&mut app, map), ["Map", "M"]);
+        let details = find(&mut app, Choice::Details);
+        assert_eq!(says(&mut app, details), ["World details"]);
+        for line in ["Settings", "Return to Worlds", "Save & Quit"] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        assert_eq!(
+            super::super::frame::testing::prompts(&mut app),
+            [
+                ("Tab".into(), "Navigate".into()),
+                ("Enter".into(), "Select".into()),
+                ("Esc".into(), "Back".into()),
+                ("Q".into(), "Save & Quit".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn q_saves_and_quits_as_the_save_and_quit_item_does() {
+        let mut app = app();
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        app.world_mut().resource_mut::<crate::launch::Switch>().0 =
+            Some(crate::launch::Target::List);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyQ);
+        app.update();
+        let saves: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SaveAction>>()
+            .drain()
+            .collect();
+        assert_eq!(saves, [SaveAction::SaveQuit]);
+        assert_eq!(app.world().resource::<crate::launch::Switch>().0, None);
+    }
+
+    #[test]
+    fn clicking_the_q_prompt_saves_and_quits() {
+        let mut app = app();
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        let q = find(&mut app, Choice::SaveQuit);
+        app.world_mut().trigger(Activate { entity: q });
+        app.update();
+        let saves: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SaveAction>>()
+            .drain()
+            .collect();
+        assert_eq!(saves, [SaveAction::SaveQuit]);
     }
 
     #[test]
@@ -924,34 +1175,132 @@ mod tests {
         assert_eq!(backdrop(&mut app).alpha(), 1.0);
     }
 
+    /// A World folder holding a grey thumbnail; returns its pixels.
+    fn saved_picture(folder: &std::path::Path) -> Vec<u8> {
+        use tesserae_core::terrain_preview::Frame;
+        std::fs::create_dir_all(folder).unwrap();
+        let (width, height) = (Frame::CREATE.width, Frame::CREATE.height);
+        let rgba = [90, 90, 90, 255].repeat((width * height) as usize);
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&rgba).unwrap();
+        writer.finish().unwrap();
+        std::fs::write(folder.join(tesserae_core::save::library::THUMBNAIL), bytes).unwrap();
+        rgba
+    }
+
     #[test]
-    fn world_details_show_what_the_server_reported() {
+    fn world_details_is_see_through_with_a_light_dim_and_no_frame() {
         let mut app = app();
-        app.world_mut().write_message(WorldFacts {
-            name: Some("River bend".into()),
-            game: Some(("terra".into(), "0.1.0".into())),
-            voxel_size_m: 0.5,
-            seed: 42,
-            biomes: vec!["terra:ash_flats".into(), "terra:meadow".into()],
-            cave_biomes: Vec::new(),
-            default_mode: GameMode::Survival,
-            generator: 3,
-            temperature_size_m: 300.0,
-            humidity_size_m: 700.0,
-        });
-        app.world_mut()
-            .write_message(crate::server::game_mode::GameModeChanged(
-                GameMode::Creative,
-            ));
-        app.add_systems(Update, super::super::game_mode::receive);
+        let folder = std::env::temp_dir().join(format!(
+            "tesserae-details-{}",
+            tesserae_core::save::WorldId::new().as_str()
+        ));
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<super::super::worlds::Thumbnails>()
+            .insert_resource(crate::open::Opened::at(folder));
+        river_bend(&mut app);
         press(&mut app, KeyCode::Tab);
         choose(&mut app, Choice::Details);
+        let picture = app
+            .world_mut()
+            .query_filtered::<&ChildOf, With<DetailsPicture>>()
+            .single(app.world())
+            .unwrap()
+            .parent();
+        let dialog = app.world().entity(picture);
+        assert_eq!(
+            dialog.get::<BackgroundGradient>(),
+            Some(&super::super::frame::left_to_right(
+                theme::details_shade(),
+                theme::details_shade_far()
+            ))
+        );
+        let dim = dialog.get::<ChildOf>().unwrap().parent();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(dim),
+            Some(&BackgroundColor(theme::details_overlay()))
+        );
+        assert_eq!(dialog.get::<Node>().unwrap().border, UiRect::ZERO);
+        assert!(dialog.get::<BoxShadow>().is_none());
+        assert!(
+            dialog.get::<Children>().unwrap().iter().all(|child| app
+                .world()
+                .get::<Node>(child)
+                .unwrap()
+                .position_type
+                != PositionType::Absolute),
+            "no light ring inside"
+        );
+    }
+
+    #[test]
+    fn world_details_open_with_close_focused_and_show_the_picture_settings_and_biomes() {
+        let mut app = app();
+        let folder = std::env::temp_dir().join(format!(
+            "tesserae-details-{}",
+            tesserae_core::save::WorldId::new().as_str()
+        ));
+        let grey = saved_picture(&folder);
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<super::super::worlds::Thumbnails>()
+            .insert_resource(crate::open::Opened::at(folder.clone()));
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        choose(&mut app, Choice::Details);
+        assert_eq!(focused(&app), Some(find(&mut app, Choice::CloseDetails)));
         let shown = texts(&mut app);
-        assert!(shown.iter().any(|t| t == "River bend"), "{shown:?}");
-        let body = "Terra · 0.5 m voxels\nSeed: 42\n2 biomes · Generator version 3\nDefault mode Survival · your mode Creative\nTemperature / humidity size: 300 m / 700 m";
-        assert!(shown.iter().any(|t| t == body), "{body} in {shown:?}");
+        for line in [
+            "River bend",
+            "Game",
+            "Terra",
+            "Seed",
+            "42",
+            "Voxel size",
+            "0.5 m",
+            "Climate scale",
+            "300 m \u{00b7} 700 m",
+            "Game mode",
+            "Survival \u{00b7} yours Creative",
+            "Generator",
+            "Version 3",
+            "Biomes",
+            "Ash flats",
+            "Meadow",
+        ] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        let picture = app
+            .world_mut()
+            .query_filtered::<&ImageNode, With<DetailsPicture>>()
+            .single(app.world())
+            .unwrap()
+            .image
+            .clone();
+        assert_eq!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&picture)
+                .unwrap()
+                .data,
+            Some(grey),
+            "the thumbnail saved with the World"
+        );
+
+        choose(&mut app, Choice::CopySeed);
+        assert!(
+            texts(&mut app)
+                .iter()
+                .any(|t| t == "Could not copy the seed"),
+            "a headless test has no clipboard"
+        );
+
         press(&mut app, KeyCode::Escape);
         assert!(open(&app), "Escape closes the details only");
         assert!(!app.world().resource::<Menu>().details);
+        assert_eq!(focused(&app), Some(find(&mut app, Choice::Resume)));
+        std::fs::remove_dir_all(folder).unwrap();
     }
 }

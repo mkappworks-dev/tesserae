@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::Button;
 
 use crate::client::cinematic::{self as cine, Kind, Look};
-use crate::client::menu_ui::{self as ui, IconKind};
+use crate::client::menu_ui::{self as ui};
 use crate::client::theme;
 
 pub(in crate::client) fn plugin(app: &mut App) {
@@ -87,17 +87,6 @@ pub(in crate::client) const ROOMY: Size = Size {
     height: theme::CONTROL_HEIGHT,
     ..COMPACT
 };
-/// `.btn.small`: Sort and the Shape choices.
-pub(in crate::client) const SMALL: Size = Size {
-    height: theme::CONTROL_HEIGHT,
-    text: theme::TEXT_SMALL,
-    pad_x: theme::ITEM_SMALL_PAD_X,
-    pad_y: theme::ITEM_SMALL_PAD_Y,
-};
-pub(in crate::client) const WIDE: Size = Size {
-    text: theme::TEXT_SMALL,
-    ..ROOMY
-};
 
 /// A button in the approved look, painted by [`cine`] like every other.
 pub(in crate::client) fn button(
@@ -149,19 +138,14 @@ pub(in crate::client) fn button(
 /// The small controls that are not `.btn`s: each its own colours.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(in crate::client) enum Flavour {
-    /// A Catalogue category.
-    Chip,
     /// A count preset.
     Preset,
     /// A stepper's − or +.
     Step,
-    Close,
     /// One of the Layout methods.
     Method,
     /// A quick shape.
     Shape,
-    /// A Shape in the item details, drawn as the Item placed in it.
-    ShapeChip,
     /// The way an axis grows, as text.
     Way,
     /// A Template in the place Tool's list.
@@ -182,33 +166,16 @@ pub(in crate::client) struct FlatInk;
 fn flat_colours(flat: Flat) -> (Color, Color, Color) {
     let none = Color::NONE;
     match (flat.flavour, flat.selected) {
-        (Flavour::Chip, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
-        (Flavour::Chip, true) => (theme::CHIP_ON, theme::CHIP_ON, theme::CHIP_ON_INK),
         (Flavour::Preset, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
         (Flavour::Preset, true) => (theme::CHIP, theme::CHIP_ON, theme::PRESET_ON_INK),
-        (Flavour::Step, _) => (none, none, theme::STEPPER_INK),
-        (Flavour::Close, _) => (none, theme::CLOSE_EDGE, theme::CLOSE_INK),
+        (Flavour::Step, _) => (theme::step_fill(), theme::STEPPER_EDGE, theme::INK),
         (Flavour::Method, false) => (none, none, theme::METHOD_INK),
-        (Flavour::Method, true) => (
-            theme::SEGMENT_ON,
-            theme::SEGMENT_ON_EDGE,
-            theme::SEGMENT_ON_INK,
-        ),
-        (Flavour::Shape, false) => (theme::PRESET, theme::PRESET_EDGE, theme::PRESET_INK),
-        (Flavour::Shape, true) => (
-            theme::PRESET_ON,
-            theme::PRESET_ON_EDGE,
-            theme::PRESET_ON_GLYPH,
-        ),
-        (Flavour::ShapeChip, false) => (theme::CHIP, theme::CHIP_EDGE, theme::CHIP_INK),
-        (Flavour::ShapeChip, true) => (
-            theme::SHAPE_CHIP_ON,
-            theme::SHAPE_CHIP_ON_EDGE,
-            theme::CHIP_ON,
-        ),
+        (Flavour::Method, true) => (theme::SAGE, none, theme::SAGE_INK),
+        (Flavour::Shape, false) => (theme::slot_fill(), none, theme::INK),
+        (Flavour::Shape, true) => (theme::PRESET_ON, theme::SAGE, theme::PRESET_ON_GLYPH),
         (Flavour::Way, _) => (none, none, theme::AXIS_WAY_INK),
-        (Flavour::Pick, false) => (theme::PRESET, theme::PRESET_EDGE, theme::PRESET_INK),
-        (Flavour::Pick, true) => (theme::PICK_ON, theme::PICK_ON_EDGE, theme::INK),
+        (Flavour::Pick, false) => (none, none, theme::INK),
+        (Flavour::Pick, true) => (theme::PRESET_ON, theme::SAGE, theme::INK),
     }
 }
 
@@ -216,7 +183,7 @@ fn flat_colours(flat: Flat) -> (Color, Color, Color) {
 /// the faint light fill instead.
 fn lit(color: Color) -> Color {
     if color.alpha() == 0.0 {
-        return theme::QUIET_HOVER;
+        return theme::quiet_hover();
     }
     let c = color.to_srgba();
     Color::srgba(
@@ -351,103 +318,44 @@ pub(in crate::client) fn key_cap(
         ));
 }
 
-/// The 40 px close cross in a window's header.
-pub(in crate::client) fn close(parent: &mut ChildSpawnerCommands, act: impl Bundle) -> Entity {
-    flat(
-        parent,
-        act,
-        Flat {
-            flavour: Flavour::Close,
-            selected: false,
-        },
-        Node {
-            width: Val::Px(theme::CLOSE_SIZE),
-            height: Val::Px(theme::CLOSE_SIZE),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-            ..default()
-        },
-        |b, ink| ui::icon(b, IconKind::Close, ink, theme::ICON_SIZE),
-    )
-}
-
-/// A stepper's measurements: the Catalogue's count is smaller than the Layout
-/// panel's.
-#[derive(Clone, Copy)]
-pub(in crate::client) struct Stepper {
-    pub step_width: f32,
-    pub step_text: f32,
-    pub value_width: f32,
-    pub value_weight: u16,
-}
-
-pub(in crate::client) const CATALOGUE_STEPPER: Stepper = Stepper {
-    step_width: 30.0,
-    step_text: 17.0,
-    value_width: 48.0,
-    value_weight: theme::SEMIBOLD,
-};
-pub(in crate::client) const LAYOUT_STEPPER: Stepper = Stepper {
-    step_width: 35.0,
-    step_text: 20.0,
-    value_width: 48.0,
-    value_weight: theme::REGULAR,
-};
-pub(in crate::client) const GAP_STEPPER: Stepper = Stepper {
-    value_width: 42.0,
-    ..LAYOUT_STEPPER
-};
-
-/// One framed track: a borderless −, the value, a borderless +.
+/// A bordered −, the value, a bordered +.
 pub(in crate::client) fn stepper(
     parent: &mut ChildSpawnerCommands,
     (less, more): (impl Bundle, impl Bundle),
     value: String,
-    (size, filled): (Stepper, bool),
 ) {
     let look = Flat {
         flavour: Flavour::Step,
         selected: false,
     };
     let node = || Node {
-        width: Val::Px(size.step_width),
-        min_height: Val::Px(theme::STEP_HEIGHT),
-        border: UiRect::ZERO,
+        width: Val::Px(theme::STEP_PX),
+        height: Val::Px(theme::STEP_PX),
+        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
         ..default()
     };
-    let text = (size.step_text, theme::REGULAR);
+    let text = (theme::STEP_TEXT, theme::REGULAR);
     parent
-        .spawn((
-            Node {
-                align_items: AlignItems::Stretch,
-                border: UiRect::all(Val::Px(theme::RULE)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                overflow: Overflow::clip(),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(theme::STEPPER),
-            BorderColor::all(theme::STEPPER_EDGE),
-        ))
+        .spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
         .with_children(|row| {
             flat_text(row, "−", less, look, node(), text);
             row.spawn((
                 Node {
-                    width: Val::Px(size.value_width),
-                    align_items: AlignItems::Center,
+                    width: Val::Px(theme::STEP_VALUE_PX),
                     justify_content: JustifyContent::Center,
                     ..default()
                 },
-                BackgroundColor(if filled {
-                    theme::STEPPER_VALUE
-                } else {
-                    Color::NONE
-                }),
                 Pickable::IGNORE,
             ))
             .with_child(figures(
                 value,
-                theme::STEPPER_VALUE_TEXT,
-                size.value_weight,
+                theme::TEXT_BODY,
+                theme::SEMIBOLD,
                 theme::INK,
             ));
             flat_text(row, "+", more, look, node(), text);
@@ -459,7 +367,6 @@ pub(in crate::client) fn stepper(
 pub(in crate::client) enum Frame {
     Plain,
     Hover,
-    Inspected,
     /// The selected hotbar slot, or the chosen tile.
     Active,
     Picked,
@@ -486,12 +393,6 @@ pub(in crate::client) fn frame(state: Frame) -> (BackgroundGradient, Color, Colo
             gradient(theme::SLOT_HOVER_TOP, theme::SLOT_TOP),
             theme::SLOT_EDGE,
             theme::SLOT_RIM_HOVER,
-            none,
-        ),
-        Frame::Inspected => (
-            gradient(theme::SLOT_TOP, theme::SLOT_BOTTOM),
-            theme::SLOT_INSPECTED_EDGE,
-            theme::SLOT_INSPECTED_RIM,
             none,
         ),
         Frame::Active => (
@@ -597,69 +498,6 @@ pub(in crate::client) fn slot_focus() -> Outline {
         Val::Px(theme::FRAME),
         Color::NONE,
     )
-}
-
-/// The bag beside the Inventory's title: a handle over a rounded body with a
-/// pocket, drawn from nodes as the prototype's `storage` icon is from strokes.
-pub(in crate::client) fn storage_icon(parent: &mut ChildSpawnerCommands, size: f32, ink: Color) {
-    let unit = size / 24.0;
-    let stroke = Val::Px((1.8 * unit).max(1.0));
-    let px = |v: f32| Val::Px(v * unit);
-    parent
-        .spawn((
-            Node {
-                width: px(24.0),
-                height: px(24.0),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .with_children(|icon| {
-            let at = |left: f32, top: f32, width: f32, height: f32| Node {
-                position_type: PositionType::Absolute,
-                left: px(left),
-                top: px(top),
-                width: px(width),
-                height: px(height),
-                ..default()
-            };
-            icon.spawn((
-                Node {
-                    border: UiRect {
-                        left: stroke,
-                        right: stroke,
-                        top: stroke,
-                        bottom: Val::ZERO,
-                    },
-                    border_radius: BorderRadius::top(px(4.0)),
-                    ..at(8.0, 1.0, 8.0, 6.0)
-                },
-                BorderColor::all(ink),
-            ));
-            icon.spawn((
-                Node {
-                    border: UiRect::all(stroke),
-                    border_radius: BorderRadius::all(px(2.0)),
-                    ..at(4.0, 6.0, 16.0, 16.0)
-                },
-                BorderColor::all(ink),
-            ));
-            icon.spawn((
-                Node {
-                    border: UiRect::all(stroke),
-                    ..at(8.0, 13.0, 8.0, 6.0)
-                },
-                BorderColor::all(ink),
-            ));
-            icon.spawn((
-                Node {
-                    border: UiRect::top(stroke),
-                    ..at(9.0, 9.0, 6.0, 1.0)
-                },
-                BorderColor::all(ink),
-            ));
-        });
 }
 
 /// A quick shape's glyph.

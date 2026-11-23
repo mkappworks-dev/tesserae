@@ -6,3 +6,4 @@ root = true
 depends = ["strata", "waters", "flora", "crops", "hearth"]
 suggests = ["golem"]
 wasm = "ember.wasm"
+thumbnail = "thumbnail.png"

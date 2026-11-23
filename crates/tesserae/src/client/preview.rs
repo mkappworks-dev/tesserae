@@ -435,7 +435,7 @@ pub(super) fn toggle(
     } else {
         "Placement ghost off"
     };
-    super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
+    super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Info);
 }
 
 pub(super) fn position(

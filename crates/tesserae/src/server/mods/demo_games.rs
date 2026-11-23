@@ -95,6 +95,13 @@ fn install(game: &str) -> Install {
     fs::create_dir_all(&installed).unwrap();
     fs::copy(project.join("mod.toml"), installed.join("mod.toml")).unwrap();
     fs::copy(&wasm, installed.join(format!("{game}.wasm"))).unwrap();
+    if project.join("thumbnail.png").exists() {
+        fs::copy(
+            project.join("thumbnail.png"),
+            installed.join("thumbnail.png"),
+        )
+        .unwrap();
+    }
     for dependency in depends(game) {
         copy_tree(
             &checkout().join("mods").join(&dependency),

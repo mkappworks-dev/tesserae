@@ -6,10 +6,7 @@ use bevy::prelude::*;
 
 const PANEL: Color = Color::srgb_u8(0x0b, 0x0b, 0x0c);
 pub(super) const RAISED: Color = Color::srgb_u8(0x18, 0x18, 0x1b);
-const SHEET_HEADER: Color = Color::srgb_u8(0x11, 0x11, 0x13);
-pub(super) const SHEET_FOOTER: Color = PANEL;
 /// World, Game, Mod and Biome cards.
-pub(super) const TRUST_PANEL: Color = Color::srgb_u8(0x0f, 0x0f, 0x11);
 pub(super) const CARD: Color = Color::srgb_u8(0x19, 0x19, 0x1c);
 pub(super) const CHOSEN: Color = Color::srgb_u8(0x27, 0x27, 0x2b);
 pub(super) const CHOSEN_EDGE: Color = Color::srgb_u8(0xa8, 0xb0, 0xa2);
@@ -19,23 +16,19 @@ pub(super) const GROUT: Color = Color::BLACK;
 const RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1f);
 pub(super) const INK: Color = Color::srgb_u8(0xf7, 0xf4, 0xec);
 const MUTED: Color = Color::srgb_u8(0xc7, 0xc9, 0xce);
-/// Rail entries, the edition line and the footer.
+/// Rail entries, the edition line and the prompt bar.
 const CHROME_INK: Color = Color::srgb_u8(0xe1, 0xe4, 0xe3);
-pub(super) const EYEBROW: Color = Color::srgb_u8(0xe3, 0xe7, 0xdf);
 /// The Inventory's and the Catalogue's quieter eyebrows.
-const ITEM_EYEBROW: Color = Color::srgb_u8(0xc0, 0xc2, 0xc8);
 pub(super) const SAGE: Color = Color::srgb_u8(0xc1, 0xcd, 0xb5);
 pub(super) const SAGE_HOVER: Color = Color::srgb_u8(0xd4, 0xde, 0xc9);
 pub(super) const SAGE_INK: Color = Color::srgb_u8(0x16, 0x1b, 0x16);
 pub(super) const HOVER: Color = Color::srgb_u8(0x53, 0x61, 0x6b);
 pub(super) const GHOST: Color = Color::srgba_u8(40, 48, 55, 82);
 /// Hover on a borderless glyph or icon button.
-pub(super) const QUIET_HOVER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x14);
+pub(super) fn quiet_hover() -> Color {
+    css_tint(0.08)
+}
 pub(super) const QUIET_HOVER_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x70);
-pub(super) const MENU_POPOVER: Color = Color::srgb_u8(0x1c, 0x1d, 0x20);
-pub(super) const MENU_HOVER: Color = Color::srgba_u8(255, 255, 255, 20);
-pub(super) const MENU_DANGER_INK: Color = Color::srgb_u8(0xf0, 0x8a, 0x7c);
-pub(super) const MENU_DANGER_HOVER: Color = Color::srgba_u8(0xc8, 0x48, 0x3a, 0x33);
 pub(super) const DANGER: Color = Color::srgb_u8(0xb8, 0x3a, 0x2e);
 pub(super) const DANGER_HOVER: Color = Color::srgb_u8(0xcf, 0x45, 0x38);
 pub(super) const DANGER_EDGE: Color = Color::srgb_u8(0xb8, 0x3a, 0x2e);
@@ -49,9 +42,7 @@ pub(super) const PRIMARY_DISABLED_INK: Color = Color::srgb_u8(0xb6, 0xb6, 0xbe);
 pub(super) const FIELD: Color = Color::srgb_u8(0x13, 0x13, 0x15);
 const FIELD_EDGE: Color = Color::srgb_u8(0x79, 0x79, 0x81);
 pub(super) const FIELD_HOVER: Color = Color::srgb_u8(0x23, 0x23, 0x27);
-pub(super) const FIELD_LOCKED: Color = Color::srgb_u8(0x12, 0x13, 0x15);
 pub(super) const FIELD_LOCKED_EDGE: Color = Color::srgb_u8(0x4d, 0x4f, 0x55);
-pub(super) const FIELD_LOCKED_INK: Color = Color::srgb_u8(0xb2, 0xb6, 0xbd);
 const PLACEHOLDER: Color = Color::srgb_u8(0xae, 0xb2, 0xb8);
 pub(super) const NOTICE: Color = RAISED;
 const NOTICE_EDGE: Color = Color::srgb_u8(0xa8, 0xb5, 0xbd);
@@ -62,11 +53,6 @@ pub(super) const PILL_INK: Color = Color::srgb_u8(0xf0, 0xf2, 0xed);
 pub(super) const FOCUS: Color = Color::srgb_u8(0xe2, 0xd5, 0xab);
 /// The focus ring on checkboxes and slots, which sit tighter.
 pub(super) const FOCUS_TIGHT: Color = Color::srgb_u8(0xf3, 0xf6, 0xec);
-pub(super) const MENU: Color = Color::srgb_u8(0x15, 0x15, 0x17);
-const MENU_EDGE: Color = Color::srgb_u8(0x82, 0x82, 0x8a);
-pub(super) const OPTION_HOVER: Color = Color::srgb_u8(0x30, 0x30, 0x35);
-pub(super) const OPTION_HOVER_EDGE: Color = Color::srgb_u8(0x77, 0x77, 0x80);
-pub(super) const OPTION_CHOSEN_INK: Color = Color::srgb_u8(0xdc, 0xe6, 0xd1);
 pub(super) const SEGMENT_ON: Color = Color::srgb_u8(0x35, 0x39, 0x2f);
 pub(super) const SEGMENT_ON_EDGE: Color = Color::srgb_u8(0xaa, 0xb3, 0x9e);
 pub(super) const SEGMENT_ON_INK: Color = Color::srgb_u8(0xf1, 0xf3, 0xed);
@@ -74,23 +60,26 @@ pub(super) const CHECK_EDGE: Color = Color::srgb_u8(0x05, 0x05, 0x06);
 pub(super) const CHECK_TOP: Color = Color::srgb_u8(0x1b, 0x1c, 0x1f);
 pub(super) const CHECK_BOTTOM: Color = Color::srgb_u8(0x13, 0x14, 0x16);
 pub(super) const CHECK_RING: Color = Color::srgb_u8(0x5a, 0x5d, 0x63);
-pub(super) const CHECK_RING_HOVER: Color = Color::srgb_u8(0x9a, 0x9f, 0x93);
 pub(super) const CHECK_RING_ON: Color = Color::srgb_u8(0xe6, 0xee, 0xdb);
 /// A native range input's unfilled track, which the prototype leaves to Chrome.
-pub(super) const TRACK: Color = Color::srgb_u8(0xef, 0xef, 0xef);
+pub(super) const TRACK: Color = Color::srgb_u8(0x3b, 0x3b, 0x3b);
 /// Under the launcher until it has scenery of its own.
 pub(super) const SCENE: Color = Color::srgb_u8(0x24, 0x2c, 0x32);
 /// Behind every menu when Simple menu background is on.
 pub(super) const SOLID_BACKGROUND: Color = Color::srgb_u8(0x10, 0x11, 0x13);
-/// The launcher's header and footer bands.
+/// The prompt bar's band.
 const BAND: Color = Color::srgba_u8(42, 52, 59, 133);
 const BAND_RULE: Color = Color::srgba_u8(220, 220, 225, 36);
 const KEY_EDGE: Color = Color::srgb_u8(0x62, 0x65, 0x6a);
 /// Over the World while the Inventory is open: it dims without the menus'
 /// shade so the World stays readable while sorting.
 pub(super) const INVENTORY_SCRIM: Color = Color::srgba_u8(3, 4, 5, 0xdb);
-/// Under a dialog.
-const OVERLAY: Color = Color::srgba_u8(0x09, 0x0a, 0x0c, 0xb3);
+const OVERLAY_RGB: [u8; 3] = [0x09, 0x0a, 0x0c];
+/// Under a dialog: the prototype's 0.70 alpha as [`css_dim`] gives it, baked because `by_contrast!`
+/// needs a const; `a_dialogs_overlay_dims_as_much_as_the_prototypes` holds it to `css_dim`.
+const OVERLAY: Color = Color::srgba_u8(OVERLAY_RGB[0], OVERLAY_RGB[1], OVERLAY_RGB[2], 0xe2);
+/// The prototype has no stronger dim; this CSS alpha makes it plainly darker than its 0.70.
+const STRONGER_OVERLAY_ALPHA: f32 = 0.85;
 /// The shade over the scenery or the World, darkest at the left and the bottom.
 const SHADE: [u8; 3] = [0x19, 0x22, 0x28];
 /// An amber that marks a refusal or a change still to apply.
@@ -100,24 +89,15 @@ pub(super) const WARNING: Color = Color::srgb_u8(0xf0, 0xc0, 0x80);
 pub(super) const ACCENT: Color = Color::srgb_u8(0xa8, 0xb5, 0xa2);
 const NOTICE_CARD: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xe6);
 
-/// The title screen's words, straight on the scenery.
-pub(super) const HERO_INK: Color = Color::srgb_u8(0xd1, 0xd1, 0xd0);
-pub(super) const HERO_EYEBROW: Color = Color::srgb_u8(0xdd, 0xde, 0xda);
-/// The launcher header's Settings button, which sits on the band unfilled.
-pub(super) const ICON_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x38);
-pub(super) const ICON_INK: Color = Color::srgb_u8(0xe8, 0xeb, 0xe4);
-/// A picked Game or Biome card, marked by a bar along one edge.
+/// A picked Game or Biome card.
 pub(super) const CARD_CHOSEN: Color = Color::srgb_u8(0x29, 0x29, 0x2e);
 pub(super) const CARD_CHOSEN_EDGE: Color = Color::srgb_u8(0xc0, 0xc7, 0xbb);
-pub(super) const CARD_BAR: f32 = 3.0;
 /// Card fills under the pointer: the prototype's `brightness(1.15)`.
 pub(super) const CARD_HOVER: Color = Color::srgb_u8(0x1d, 0x1d, 0x20);
 pub(super) const CARD_CHOSEN_HOVER: Color = Color::srgb_u8(0x2f, 0x2f, 0x35);
-/// The game mode cards.
-pub(super) const MODE: Color = Color::srgb_u8(0x15, 0x16, 0x1a);
-pub(super) const MODE_HOVER_EDGE: Color = Color::srgb_u8(0x6c, 0x70, 0x76);
-pub(super) const MODE_CHOSEN: Color = Color::srgb_u8(0x1d, 0x20, 0x1c);
-pub(super) const MODE_CHOSEN_EDGE: Color = Color::srgb_u8(0xe9, 0xee, 0xe0);
+/// The Game mode control's track, and an unchosen half under the pointer.
+pub(super) const MODE: Color = Color::srgb_u8(0x1d, 0x1f, 0x22);
+pub(super) const MODE_HOVER: Color = Color::srgb_u8(0x29, 0x2b, 0x2f);
 /// A slider's reading.
 pub(super) const VALUE_INK: Color = Color::srgb_u8(0xe6, 0xeb, 0xdf);
 /// The climate map: cold to warm left to right, wet to dry top to bottom.
@@ -129,8 +109,6 @@ pub(super) const DOT_EDGE: Color = Color::srgb_u8(0x0b, 0x0c, 0x0d);
 pub(super) const DOT_RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x55);
 pub(super) const DOT_GLOW: Color = Color::srgba_u8(0, 0, 0, 0xaa);
 pub(super) const TAG_INK: Color = Color::srgb_u8(0xf3, 0xf5, 0xee);
-/// The band of ground under a Biome's swatch.
-pub(super) const GROUND: Color = Color::srgb_u8(0x55, 0x4d, 0x3c);
 /// A Mod's category beside its card.
 const CATEGORY_INK: Color = Color::srgb_u8(0xae, 0xb2, 0xb9);
 /// A World's or a Game's thumbnail: sky, far hills, a near field, the ground,
@@ -143,34 +121,51 @@ pub(super) const THUMBNAIL: [Color; 4] = [
 ];
 pub(super) const THUMBNAIL_TREE: Color = Color::srgb_u8(0x26, 0x3e, 0x2f);
 
+const SHEET_RGB: [u8; 3] = [10, 11, 12];
+/// A focused menu list item's fill.
+pub(super) const LIT_ITEM: Color = Color::srgba_u8(SHEET_RGB[0], SHEET_RGB[1], SHEET_RGB[2], 230);
+
+/// A menu sheet's shade, and its rail's.
+pub(super) fn sheet_shade() -> Color {
+    css_dim(SHEET_RGB, 0.9)
+}
+
+/// The sheet's shade at its far edge.
+pub(super) fn sheet_shade_far() -> Color {
+    css_dim(SHEET_RGB, 0.78)
+}
+
+/// World details' fill, thin enough that the paused scenery shows through.
+pub(super) fn details_shade() -> Color {
+    css_dim(SHEET_RGB, 0.62)
+}
+
+/// World details' fill at its far edge.
+pub(super) fn details_shade_far() -> Color {
+    css_dim(SHEET_RGB, 0.5)
+}
+
+/// Under World details: lighter than [`overlay()`], since the pause screen is already dimmed.
+pub(super) fn details_overlay() -> Color {
+    css_dim(OVERLAY_RGB, 0.3)
+}
+
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
 const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
 pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
 pub(super) const SLOT_ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
 pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x40);
 
-/// The title screen's headline: 5.5 % of the window's width within these
-/// bounds, and larger again on a wide window.
-pub(super) const TEXT_HERO: std::ops::RangeInclusive<f32> = 42.0..=74.0;
-pub(super) const TEXT_HERO_VW: f32 = 5.5;
-pub(super) const TEXT_HERO_WIDE: f32 = 80.0;
-pub(super) const WIDE_WINDOW: f32 = 1500.0;
-/// -0.045 em.
-pub(super) const HERO_TRACKING: f32 = -0.045;
-pub(super) const TEXT_PANEL_TITLE: f32 = 31.0;
 pub(super) const TEXT_TITLE: f32 = 28.0;
 pub(super) const TEXT_DIALOG_TITLE: f32 = 22.0;
 pub(super) const TEXT_HEADING: f32 = 19.0;
 pub(super) const TEXT_BODY: f32 = 16.0;
 pub(super) const TEXT_SMALL: f32 = 14.0;
 pub(super) const TEXT_CAPTION: f32 = 13.0;
-pub(super) const TEXT_MODE_NAME: f32 = 15.0;
-pub(super) const TEXT_MODE_ABOUT: f32 = 12.5;
 pub(super) const TEXT_EYEBROW: f32 = 12.0;
 pub(super) const TEXT_TAG: f32 = 11.0;
 pub(super) const TEXT_KEY: f32 = 10.0;
 pub(super) const TEXT_FOOTER: f32 = 9.0;
-pub(super) const TITLE_TRACKING: f32 = -0.7;
 /// 0.2 em of the eyebrow size.
 pub(super) const EYEBROW_TRACKING: f32 = 2.4;
 pub(super) const SECTION_TRACKING: f32 = 1.44;
@@ -209,28 +204,20 @@ macro_rules! by_contrast {
 by_contrast! {
     MUTED, muted, INK;
     CHROME_INK, chrome_ink, INK;
-    ITEM_EYEBROW, item_eyebrow, INK;
     CATEGORY_INK, category_ink, INK;
     PLACEHOLDER, placeholder, INK;
     ITEM_SOFT, item_soft, ITEM_INK;
-    ITEM_CAPACITY, item_capacity, ITEM_INK;
-    ITEM_SOURCE, item_source, ITEM_INK;
-    ITEM_TERM, item_term, ITEM_INK;
     HUD_QUIET_INK, hud_quiet_ink, INK;
     PANEL, panel, Color::srgb_u8(0x11, 0x11, 0x12);
-    SHEET_HEADER, sheet_header, Color::srgb_u8(0x17, 0x19, 0x1c);
     NOTICE_CARD, notice_card, Color::srgb_u8(0x0b, 0x0b, 0x0d);
     FULL_NOTICE, full_notice, Color::srgb_u8(11, 11, 13);
     BAND, band, Color::srgb_u8(42, 52, 59);
-    OVERLAY, overlay, Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe6);
+    OVERLAY, overlay, css_dim(OVERLAY_RGB, STRONGER_OVERLAY_ALPHA);
     EDGE, edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     FIELD_EDGE, field_edge, Color::srgb_u8(0xb0, 0xb4, 0xbb);
-    MENU_EDGE, menu_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     NOTICE_EDGE, notice_edge, Color::srgb_u8(0xd0, 0xd8, 0xdd);
     KEY_EDGE, key_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     SLOT_RIM, slot_rim, Color::srgb_u8(130, 134, 142);
-    ITEM_RULE, item_rule, Color::srgb_u8(0x8a, 0x8a, 0x94);
-    ITEM_FOOTER_RULE, item_footer_rule, Color::srgb_u8(0x8a, 0x8a, 0x94);
     ITEM_ROW_RULE, item_row_rule, Color::srgb_u8(0x6e, 0x6e, 0x78);
     BAND_RULE, band_rule, Color::srgba_u8(220, 220, 225, 120);
     RING, ring_color, Color::srgba_u8(0xff, 0xff, 0xff, 0x59);
@@ -259,7 +246,6 @@ pub(super) const BUTTON_PAD_X: f32 = 15.0;
 pub(super) const BUTTON_PAD_Y: f32 = 9.0;
 pub(super) const SMALL_PAD_X: f32 = 12.0;
 pub(super) const SMALL_PAD_Y: f32 = 8.0;
-pub(super) const SHEET_PAD_X: f32 = 26.0;
 pub(super) const SCREEN_PAD_X: f32 = 34.0;
 
 pub(super) const RADIUS_PANEL: f32 = 8.0;
@@ -360,10 +346,60 @@ pub(super) fn focus_ring() -> Outline {
     )
 }
 
+fn linear(srgb: f32) -> f32 {
+    Color::srgb(srgb, srgb, srgb).to_linear().red
+}
+
+/// `rgb` at the alpha that darkens a mid-grey backdrop as much as CSS's `css_alpha` does: Bevy UI
+/// blends in linear light, a browser in sRGB, so the prototype's alpha alone dims too little.
+pub(super) fn css_dim(rgb: [u8; 3], css_alpha: f32) -> Color {
+    let grey = linear(0.5);
+    let alpha = rgb
+        .iter()
+        .map(|&c| {
+            let c = f32::from(c) / 255.0;
+            let dimmed = linear(css_alpha * c + (1.0 - css_alpha) * 0.5);
+            (grey - dimmed) / (grey - linear(c))
+        })
+        .sum::<f32>()
+        / 3.0;
+    let [r, g, b] = rgb;
+    Color::srgba_u8(r, g, b, 0).with_alpha(alpha)
+}
+
+/// How dark a menu sheet reads on screen, in sRGB: what the prototype's light tints sit on.
+const SHEET_SEEN: f32 = 0.1;
+
+/// White at the alpha that lifts a dark sheet as much as CSS's `css_alpha` does. Blended in
+/// linear light, the prototype's alpha alone lifts a near-black three times too far; matched
+/// over the sheet rather than mid-grey because these tints only ever sit on one.
+pub(super) fn css_tint(css_alpha: f32) -> Color {
+    let under = linear(SHEET_SEEN);
+    let lifted = linear(css_alpha + (1.0 - css_alpha) * SHEET_SEEN);
+    Color::WHITE.with_alpha((lifted - under) / (1.0 - under))
+}
+
+/// A World tile, and the one under the pointer or focus.
+pub(super) fn slot_fill() -> Color {
+    css_tint(0.04)
+}
+
+pub(super) fn slot_lit() -> Color {
+    css_tint(0.08)
+}
+
+/// A Settings ◀ value ▶ selector or On/Off toggle, and the one under the pointer or focus.
+pub(super) fn choice_fill() -> Color {
+    css_tint(0.05)
+}
+
+pub(super) fn choice_lit() -> Color {
+    css_tint(0.11)
+}
+
 /// The shade over the World or the launcher's backdrop.
 pub(super) fn shade() -> BackgroundGradient {
-    let [r, g, b] = SHADE;
-    let at = |alpha: f32| Color::srgba_u8(r, g, b, (alpha * 255.0).round() as u8);
+    let at = |alpha: f32| css_dim(SHADE, alpha);
     BackgroundGradient(vec![
         LinearGradient::to_right(vec![
             ColorStop::new(at(0.48), Val::Percent(0.0)),
@@ -378,53 +414,38 @@ pub(super) fn shade() -> BackgroundGradient {
     ])
 }
 
-// Pass C: the in-game Menu and Settings.
-/// The space around a launcher or Settings screen, between header and footer.
+/// The space around a launcher or Settings screen, above the prompt bar.
+#[cfg(not(target_os = "macos"))]
 pub(super) const SCREEN_PAD_TOP: f32 = 28.0;
+/// AppKit's transparent title bar is 32 pt tall, its buttons 9-23 pt from the top.
+#[cfg(target_os = "macos")]
+pub(super) const SCREEN_PAD_TOP: f32 = 32.0;
+/// The strip AppKit's window buttons take at the top of the window; other platforms keep a native
+/// frame above it.
+#[cfg(target_os = "macos")]
+pub(super) const TITLE_BAR_PX: f32 = 32.0;
+#[cfg(not(target_os = "macos"))]
+pub(super) const TITLE_BAR_PX: f32 = 0.0;
 pub(super) const SCREEN_PAD_BOTTOM: f32 = 22.0;
 pub(super) const WORKSPACE_MAX: f32 = 1180.0;
-pub(super) const WORKSPACE_GAP: f32 = 24.0;
 pub(super) const RAIL_WIDTH: f32 = 224.0;
 pub(super) const RAIL_ENTRY_HEIGHT: f32 = 48.0;
-pub(super) const MENU_WIDTH: f32 = 300.0;
 /// "You are here" on the World, under the Menu.
 pub(super) const STATUS_INK: Color = Color::srgb_u8(0xee, 0xf1, 0xea);
 pub(super) const TEXT_STATUS: f32 = 24.0;
 
 // Pass D: the Inventory, the Catalogue and the quick Layout panel.
 pub(super) const ITEM_SURFACE: Color = Color::srgb_u8(0x0b, 0x0b, 0x0d);
-pub(super) const ITEM_FOOTER: Color = Color::srgb_u8(0x0d, 0x0d, 0x10);
-pub(super) const ITEM_INSPECTOR: Color = Color::srgb_u8(0x13, 0x13, 0x15);
-pub(super) const CATALOGUE_FOOTER: Color = Color::srgb_u8(0x0e, 0x0e, 0x11);
-const ITEM_RULE: Color = Color::srgb_u8(0x45, 0x45, 0x4c);
-const ITEM_FOOTER_RULE: Color = Color::srgb_u8(0x55, 0x55, 0x5e);
 const ITEM_ROW_RULE: Color = Color::srgb_u8(0x34, 0x34, 0x3c);
 pub(super) const ITEM_INK: Color = Color::srgb_u8(0xf4, 0xf4, 0xed);
 /// Hints and the hotbar caption under the grids.
 const ITEM_SOFT: Color = Color::srgb_u8(0xad, 0xaf, 0xb9);
-const ITEM_CAPACITY: Color = Color::srgb_u8(0xb9, 0xbc, 0xc4);
 pub(super) const ITEM_FULL: Color = Color::srgb_u8(0xe8, 0xd2, 0x9f);
-const ITEM_SOURCE: Color = Color::srgb_u8(0x99, 0x9c, 0xa7);
-const ITEM_TERM: Color = Color::srgb_u8(0xae, 0xb0, 0xb8);
-pub(super) const ITEM_VALUE: Color = Color::srgb_u8(0xec, 0xec, 0xec);
 pub(super) const ITEM_CAPTION: Color = Color::srgb_u8(0xa1, 0xa5, 0xaf);
-pub(super) const ITEM_EMPTY_ICON: Color = Color::srgb_u8(0x8b, 0x92, 0x9d);
 pub(super) const CATALOGUE_SUBTITLE: Color = Color::srgb_u8(0xa9, 0xad, 0xb6);
-pub(super) const CATALOGUE_ID: Color = Color::srgb_u8(0x9f, 0xa4, 0xad);
-pub(super) const CATALOGUE_LABEL: Color = Color::srgb_u8(0xc3, 0xc6, 0xcc);
-pub(super) const RECIPE: Color = Color::srgb_u8(0x14, 0x15, 0x18);
-pub(super) const RECIPE_EDGE: Color = Color::srgb_u8(0x2a, 0x2b, 0x31);
-pub(super) const RECIPE_HOVER_EDGE: Color = Color::srgb_u8(0x55, 0x57, 0x5f);
-pub(super) const RECIPE_CHOSEN: Color = Color::srgb_u8(0x1a, 0x1f, 0x1a);
 /// An input the Inventory holds too few of.
 pub(super) const RECIPE_SHORT: Color = Color::srgb_u8(0xd9, 0x9a, 0x83);
-pub(super) const TEXT_RECIPE: f32 = 13.0;
 pub(super) const RADIUS_ROW: f32 = 6.0;
-pub(super) const BADGE: Color = Color::srgb_u8(0x23, 0x26, 0x20);
-pub(super) const BADGE_EDGE: Color = Color::srgb_u8(0x57, 0x5a, 0x53);
-pub(super) const BADGE_INK: Color = Color::srgb_u8(0xc2, 0xc9, 0xba);
-pub(super) const CLOSE_EDGE: Color = Color::srgb_u8(0x51, 0x51, 0x59);
-pub(super) const CLOSE_INK: Color = Color::srgb_u8(0xd9, 0xda, 0xe0);
 pub(super) const KEY_CHIP: Color = Color::srgba_u8(0, 0, 0, 0xbb);
 pub(super) const KEY_CHIP_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x4d);
 pub(super) const KEY_CHIP_INK: Color = Color::srgb_u8(0xf2, 0xf3, 0xee);
@@ -433,14 +454,12 @@ pub(super) const CHIP: Color = Color::srgb_u8(0x17, 0x18, 0x1b);
 pub(super) const CHIP_EDGE: Color = Color::srgb_u8(0x45, 0x46, 0x4d);
 pub(super) const CHIP_INK: Color = Color::srgb_u8(0xc4, 0xc7, 0xcd);
 pub(super) const CHIP_ON: Color = Color::srgb_u8(0xe9, 0xee, 0xe0);
-pub(super) const CHIP_ON_INK: Color = Color::srgb_u8(0x11, 0x11, 0x11);
 pub(super) const PRESET_ON_INK: Color = Color::srgb_u8(0xf3, 0xf5, 0xee);
-pub(super) const SHAPE_CHIP_ON: Color = Color::srgb_u8(0x1f, 0x26, 0x1f);
-pub(super) const SHAPE_CHIP_ON_EDGE: Color = Color::srgb_u8(0xc1, 0xcd, 0xb5);
-pub(super) const STEPPER: Color = Color::srgb_u8(0x18, 0x18, 0x1d);
-pub(super) const STEPPER_EDGE: Color = Color::srgb_u8(0x65, 0x65, 0x6f);
-pub(super) const STEPPER_INK: Color = Color::srgb_u8(0xe4, 0xe6, 0xe4);
-pub(super) const STEPPER_VALUE: Color = Color::srgb_u8(0x20, 0x20, 0x27);
+pub(super) const STEPPER_EDGE: Color = Color::srgb_u8(0x64, 0x64, 0x6b);
+/// A Layout stepper's − or +.
+pub(super) fn step_fill() -> Color {
+    css_tint(0.06)
+}
 pub(super) const SLOT_TOP: Color = Color::srgb_u8(0x1b, 0x1c, 0x1f);
 pub(super) const SLOT_BOTTOM: Color = Color::srgb_u8(0x13, 0x14, 0x16);
 pub(super) const SLOT_HOVER_TOP: Color = Color::srgb_u8(0x25, 0x27, 0x2b);
@@ -448,34 +467,21 @@ pub(super) const SLOT_ACTIVE_TOP: Color = Color::srgb_u8(0x2c, 0x30, 0x2a);
 pub(super) const SLOT_ACTIVE_BOTTOM: Color = Color::srgb_u8(0x20, 0x23, 0x20);
 pub(super) const SLOT_RECESS: Color = Color::srgba_u8(0, 0, 0, 0x70);
 pub(super) const SLOT_LIFT: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x0d);
-pub(super) const SLOT_INSPECTED_EDGE: Color = Color::srgb_u8(0xb8, 0xc2, 0xb0);
-pub(super) const SLOT_INSPECTED_RIM: Color = Color::srgb_u8(0xc9, 0xd1, 0xbd);
 pub(super) const SLOT_PICKED: Color = Color::srgb_u8(0xe7, 0xd9, 0xa8);
 pub(super) const SLOT_DROP: Color = Color::srgb_u8(0xd6, 0xc8, 0x8f);
 pub(super) const SLOT_NUMBER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x73);
 pub(super) const ITEM_SHADOW_ALPHA: f32 = 0.667;
 pub(super) const LAYOUT_SURFACE: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xef);
-pub(super) const LAYOUT_RULE: Color = Color::srgb_u8(0x49, 0x49, 0x51);
-pub(super) const METHOD: Color = Color::srgb_u8(0x19, 0x19, 0x1e);
-pub(super) const METHOD_EDGE: Color = Color::srgb_u8(0x54, 0x54, 0x5b);
+pub(super) const METHOD: Color = Color::srgb_u8(0x18, 0x18, 0x1b);
+pub(super) const METHOD_EDGE: Color = Color::srgb_u8(0x64, 0x64, 0x6b);
 pub(super) const METHOD_INK: Color = Color::srgb_u8(0xb9, 0xbd, 0xc6);
-pub(super) const PRESET: Color = Color::srgb_u8(0x1d, 0x1d, 0x22);
-pub(super) const PRESET_EDGE: Color = Color::srgb_u8(0x5c, 0x5c, 0x65);
-pub(super) const PRESET_INK: Color = Color::srgb_u8(0xc3, 0xc7, 0xcf);
 pub(super) const PRESET_ON: Color = Color::srgb_u8(0x2b, 0x30, 0x29);
-pub(super) const PRESET_ON_EDGE: Color = Color::srgb_u8(0xbc, 0xc8, 0xaf);
-pub(super) const PICK_ON: Color = Color::srgb_u8(0x35, 0x39, 0x2f);
-pub(super) const PICK_ON_EDGE: Color = Color::srgb_u8(0xaa, 0xb3, 0x9e);
 pub(super) const PRESET_ON_GLYPH: Color = Color::srgb_u8(0xed, 0xf1, 0xe7);
-pub(super) const AXIS_TAG: Color = Color::srgb_u8(0x29, 0x29, 0x2e);
 pub(super) const AXIS_TAG_INK: Color = Color::srgb_u8(0xd2, 0xd7, 0xdd);
 pub(super) const AXIS_WAY_INK: Color = Color::srgb_u8(0xc0, 0xc4, 0xcc);
 pub(super) const GAP_RULE: Color = Color::srgb_u8(0x44, 0x44, 0x4d);
 pub(super) const GAP_NOTE: Color = Color::srgb_u8(0xaf, 0xb4, 0xc0);
-pub(super) const TOTALS: Color = Color::srgb_u8(0x20, 0x20, 0x25);
-pub(super) const TOTALS_EDGE: Color = Color::srgb_u8(0x52, 0x52, 0x5b);
 pub(super) const TOTALS_TERM: Color = Color::srgb_u8(0xa9, 0xb0, 0xbd);
-pub(super) const TOTALS_VALUE: Color = Color::srgb_u8(0xe1, 0xe8, 0xd9);
 pub(super) const LAYOUT_ERROR: Color = Color::srgb_u8(0x33, 0x25, 0x26);
 pub(super) const LAYOUT_ERROR_EDGE: Color = Color::srgb_u8(0xc8, 0x8d, 0x7d);
 pub(super) const LAYOUT_ERROR_INK: Color = Color::srgb_u8(0xf1, 0xbc, 0xad);
@@ -487,30 +493,22 @@ pub(super) const POINT_DONE: Color = Color::srgb_u8(0xc0, 0xcf, 0xb2);
 pub(super) const POINT_DONE_INK: Color = Color::srgb_u8(0x1d, 0x23, 0x1a);
 pub(super) const LAYOUT_NOTE: Color = Color::srgb_u8(0xc2, 0xc8, 0xd1);
 pub(super) const LAYOUT_STATUS_INK: Color = Color::srgb_u8(0xc3, 0xcc, 0xb9);
-pub(super) const ITEM_TEXT_TITLE: f32 = 23.0;
-pub(super) const ITEM_TEXT_HEADING: f32 = 19.0;
-pub(super) const ITEM_TEXT_NAME: f32 = 22.0;
-pub(super) const ITEM_TEXT_EYEBROW: f32 = 11.0;
+pub(super) fn layout_row_on() -> Color {
+    css_tint(0.06)
+}
 pub(super) const ITEM_BUTTON_TEXT: f32 = 13.0;
 pub(super) const ITEM_BUTTON_HEIGHT: f32 = 38.0;
-pub(super) const ITEM_SMALL_PAD_X: f32 = 12.0;
-pub(super) const ITEM_SMALL_PAD_Y: f32 = 8.0;
 pub(super) const ITEM_RADIUS: f32 = 9.0;
-pub(super) const ITEM_WINDOW_HEIGHT: f32 = 640.0;
-pub(super) const ITEM_HEADER_HEIGHT: f32 = 70.0;
-pub(super) const ITEM_GAP: f32 = 14.0;
-pub(super) const CLOSE_SIZE: f32 = 40.0;
-pub(super) const ICON_SIZE: f32 = 20.0;
 /// About one slot gap, so a selected slot's glow never reaches its neighbour.
 pub(super) const SLOT_GLOW_BLUR: f32 = 5.0;
 /// A plain `button`'s hover brightness.
 pub(super) const HOVER_LIFT: f32 = 1.15;
-pub(super) const STEP_HEIGHT: f32 = 39.0;
-pub(super) const STEPPER_VALUE_TEXT: f32 = 15.0;
+pub(super) const STEP_PX: f32 = 30.0;
+pub(super) const STEP_TEXT: f32 = 16.0;
+pub(super) const STEP_VALUE_PX: f32 = 36.0;
 pub(super) const SLOT_RECESS_PX: f32 = 3.0;
 pub(super) const SLOT_LIFT_PX: f32 = 2.0;
 pub(super) const GLYPH_SIZE: f32 = 22.0;
-pub(super) const TOOL_TRACKING: f32 = 1.2;
 
 // Pass E: the in-play HUD and the death screen.
 pub(super) const HUD_BAR: Color = Color::srgba_u8(6, 7, 8, 0xc7);
@@ -562,13 +560,25 @@ const FULL_NOTICE: Color = Color::srgba_u8(11, 11, 13, 0xcc);
 pub(super) const FULL_NOTICE_EDGE: Color = Color::srgba_u8(0xd6, 0xc8, 0x8f, 0x80);
 pub(super) const FULL_NOTICE_INK: Color = Color::srgb_u8(0xea, 0xdf, 0xb4);
 pub(super) const NOTICE_CARD_INK: Color = Color::srgb_u8(0xf1, 0xf0, 0xed);
+/// A toast's icon by tone; the card itself is the same for every tone.
+pub(super) const TOAST_INFO: Color = Color::srgb_u8(0xa8, 0xb5, 0xbd);
+pub(super) const TOAST_DONE: Color = Color::srgb_u8(0x8f, 0xc2, 0x7a);
+pub(super) const TOAST_COUNT: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1a);
+
+/// A toast's fill: the menu sheet's shade, opaque under stronger contrast.
+pub(super) fn toast_fill() -> Color {
+    if stronger_contrast() {
+        notice_card()
+    } else {
+        sheet_shade()
+    }
+}
 pub(super) const DEATH_SCRIM: [Color; 2] = [
     Color::srgba_u8(0x1c, 0x08, 0x08, 0x4d),
     Color::srgba_u8(0x0a, 0x03, 0x03, 0xa6),
 ];
 pub(super) const DEATH_TITLE: Color = Color::srgb_u8(0xf4, 0xec, 0xe8);
 pub(super) const DEATH_CAUSE: Color = Color::srgb_u8(0xd4, 0xcf, 0xcc);
-pub(super) const DEATH_EYEBROW: Color = Color::srgb_u8(0xd8, 0xa5, 0x9c);
 pub(super) const TEXT_DEATH_TITLE: f32 = 46.0;
 /// −0.01 em of the death title.
 pub(super) const DEATH_TITLE_TRACKING: f32 = -0.46;
@@ -668,10 +678,110 @@ mod tests {
         for fill in ["NOTICE_CARD", "FULL_NOTICE", "BAND"] {
             assert_eq!(pairs[fill].1.alpha(), 1.0, "{fill} is not opaque");
         }
-        for edge in ["EDGE", "FIELD_EDGE", "MENU_EDGE", "SLOT_RIM"] {
+        for edge in ["EDGE", "FIELD_EDGE", "SLOT_RIM"] {
             let (normal, stronger) = pairs[edge];
             let light = |c: Color| c.to_linear().red;
             assert!(light(stronger) > light(normal), "{edge} is not brighter");
+        }
+    }
+
+    /// `dim` over a mid-grey backdrop, blended in linear light as Bevy UI does, against the
+    /// prototype's `css` colour at `css_alpha` blended in sRGB as a browser does.
+    fn assert_dims_like_the_prototype(dim: Color, css: [u8; 3], css_alpha: f32) {
+        let ours = over_grey(dim);
+        let theirs = css.map(|c| css_alpha * f32::from(c) / 255.0 + (1.0 - css_alpha) * 0.5);
+        for (got, want) in [ours.red, ours.green, ours.blue].into_iter().zip(theirs) {
+            assert!((got - want).abs() < 0.01, "{ours:?} vs {theirs:?}");
+        }
+    }
+
+    /// `dim` over a mid-grey backdrop, blended in linear light as Bevy UI does.
+    fn over_grey(dim: Color) -> Srgba {
+        let (over, grey) = (dim.to_linear(), Color::srgb(0.5, 0.5, 0.5).to_linear());
+        let a = over.alpha;
+        Color::LinearRgba(LinearRgba::rgb(
+            a * over.red + (1.0 - a) * grey.red,
+            a * over.green + (1.0 - a) * grey.green,
+            a * over.blue + (1.0 - a) * grey.blue,
+        ))
+        .to_srgba()
+    }
+
+    #[test]
+    fn a_dialogs_overlay_dims_as_much_as_the_prototypes() {
+        assert_dims_like_the_prototype(OVERLAY, OVERLAY_RGB, 0.70);
+    }
+
+    #[test]
+    fn the_stronger_overlay_dims_clearly_more() {
+        let pairs: std::collections::HashMap<_, _> = contrast_pairs()
+            .into_iter()
+            .map(|(name, normal, stronger)| (name, (normal, stronger)))
+            .collect();
+        let (normal, stronger) = pairs["OVERLAY"];
+        assert_dims_like_the_prototype(stronger, OVERLAY_RGB, STRONGER_OVERLAY_ALPHA);
+        let (normal, stronger) = (over_grey(normal).green, over_grey(stronger).green);
+        assert!(
+            normal - stronger > 0.05,
+            "mid-grey dims to {stronger} under stronger contrast, {normal} normally"
+        );
+    }
+
+    #[test]
+    fn a_sheet_and_its_rail_dim_as_much_as_the_prototypes() {
+        assert_dims_like_the_prototype(sheet_shade(), SHEET_RGB, 0.9);
+        assert_dims_like_the_prototype(sheet_shade_far(), SHEET_RGB, 0.78);
+    }
+
+    #[test]
+    fn world_details_and_its_dim_are_as_see_through_as_the_prototypes() {
+        assert_dims_like_the_prototype(details_shade(), SHEET_RGB, 0.62);
+        assert_dims_like_the_prototype(details_shade_far(), SHEET_RGB, 0.5);
+        assert_dims_like_the_prototype(details_overlay(), OVERLAY_RGB, 0.3);
+    }
+
+    #[test]
+    fn the_shade_dims_as_much_as_the_prototypes() {
+        let BackgroundGradient(layers) = shade();
+        let darkest = |layer: &Gradient| match layer {
+            Gradient::Linear(linear) => linear.stops[0].color,
+            other => panic!("{other:?} is not linear"),
+        };
+        assert_dims_like_the_prototype(darkest(&layers[0]), SHADE, 0.48);
+        assert_dims_like_the_prototype(darkest(&layers[1]), SHADE, 0.24);
+    }
+
+    /// The prototype's white `css_alpha` over its dark sheet, blended in sRGB, against `tint`
+    /// over the same sheet blended in linear light.
+    fn assert_tints_like_the_prototype(tint: Color, css_alpha: f32) {
+        let (over, under) = (
+            tint.to_linear(),
+            Color::srgb(SHEET_SEEN, SHEET_SEEN, SHEET_SEEN),
+        );
+        let a = over.alpha;
+        let ours = Color::LinearRgba(LinearRgba::rgb(
+            a * over.red + (1.0 - a) * under.to_linear().red,
+            a * over.green + (1.0 - a) * under.to_linear().green,
+            a * over.blue + (1.0 - a) * under.to_linear().blue,
+        ))
+        .to_srgba();
+        let theirs = css_alpha + (1.0 - css_alpha) * SHEET_SEEN;
+        for got in [ours.red, ours.green, ours.blue] {
+            assert!((got - theirs).abs() < 0.004, "{ours:?} vs {theirs}");
+        }
+    }
+
+    #[test]
+    fn light_tints_lift_a_sheet_as_little_as_the_prototypes() {
+        for (tint, css_alpha) in [
+            (slot_fill(), 0.04),
+            (slot_lit(), 0.08),
+            (choice_fill(), 0.05),
+            (choice_lit(), 0.11),
+            (quiet_hover(), 0.08),
+            (layout_row_on(), 0.06),
+        ] {
+            assert_tints_like_the_prototype(tint, css_alpha);
         }
     }
 

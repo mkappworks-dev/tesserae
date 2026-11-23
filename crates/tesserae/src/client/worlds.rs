@@ -2,17 +2,27 @@
 //! library, before any Game runs. It only manages closed World folders;
 //! opening one hands it to the loader.
 
+mod biomes;
+mod colour;
 mod create;
+mod diorama;
 mod edit_world;
+mod mods;
 mod open;
 pub(super) mod pages;
+mod reads;
+mod saved;
+mod terrain;
 
+use biomes::{BiomeSort, BiomeView, on_biomes};
 use create::*;
 use edit_world::*;
+use mods::{Bulk, ModSort, ModView, Pop, on_mods};
 use open::*;
 
 use std::path::{Path, PathBuf};
 
+use bevy::input::gamepad::GamepadButton;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 
@@ -71,10 +81,15 @@ impl Default for Previewer {
 struct Returning(bool);
 
 /// The tested Voxel sizes (ADR-0003), with what each costs.
-const VOXEL_SIZES: [(f32, &str); 3] = [
-    (1.0, "1 m · default"),
-    (0.5, "0.5 m · 2× finer, half the view distance"),
-    (0.25, "0.25 m · 4× finer, a quarter of the view distance"),
+/// Each Voxel size: its segment's label, and what choosing it costs.
+const VOXEL_SIZES: [(f32, &str, &str); 3] = [
+    (1.0, "1 m", "1 m · default"),
+    (0.5, "0.5 m", "0.5 m · 2× finer, half the view distance"),
+    (
+        0.25,
+        "0.25 m",
+        "0.25 m · 4× finer, a quarter of the view distance",
+    ),
 ];
 
 /// Frames the Opening screen is drawn before the World loads.
@@ -90,14 +105,24 @@ enum Screen {
     /// Leaving a changed setup, which asks first; it returns to the step.
     Discard(Step),
     Edit(PathBuf),
+    /// Leaving Edit World for a new World with unsaved changes, which asks first.
+    SaveFirst(PathBuf),
+    /// Cancelling Edit World with unsaved changes, which asks first.
+    DiscardEdits(PathBuf),
     Delete(PathBuf),
     Trust(Next),
+    /// Trust asked in a dialog over step `on`, which moves on to `to` once granted.
+    StepTrust {
+        on: Step,
+        to: Step,
+    },
     Opening(String),
 }
 
 /// The steps of Create World, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Step {
+    Game,
     World,
     Mods,
     Biomes,
@@ -105,10 +130,17 @@ pub(super) enum Step {
 }
 
 impl Step {
-    const ORDER: [Step; 4] = [Step::World, Step::Mods, Step::Biomes, Step::Review];
+    const ORDER: [Step; 5] = [
+        Step::Game,
+        Step::World,
+        Step::Mods,
+        Step::Biomes,
+        Step::Review,
+    ];
 
     fn label(self) -> &'static str {
         match self {
+            Step::Game => "Game",
             Step::World => "World",
             Step::Mods => "Mods",
             Step::Biomes => "Biomes",
@@ -129,8 +161,8 @@ impl Step {
     }
 }
 
-/// What runs once every Mod it needs is trusted. Create World's Mods step asks for Trust inline
-/// instead, see [`Launcher::trust_asked`].
+/// What runs once every Mod it needs is trusted. Create World's steps ask in a
+/// [`Screen::StepTrust`] dialog instead.
 #[derive(Clone, Debug, PartialEq)]
 enum Next {
     Open(PathBuf),
@@ -145,7 +177,8 @@ struct Form {
     /// Used when the seed is left blank, so it can be shown and copied first.
     random_seed: u64,
     voxel_size_m: f32,
-    more: bool,
+    /// `None` until the chosen Game's declarations are read.
+    climate: Option<ClimateDraft>,
     game_mode: GameMode,
     problem: Option<String>,
     /// The chosen Game's id; `None` until the form opens on an installed one.
@@ -166,12 +199,59 @@ struct BiomesDraft {
     ids: Vec<String>,
     declared: BiomePreview,
     choices: Vec<BiomeChoice>,
-    climate: ClimateParams,
     selected: usize,
+    /// Whether the edit panel shows the selected Biome, in place of the terrain preview.
+    editing: bool,
     resetting: bool,
-    /// Typed text, kept while it does not parse: Climate sizes, then sky and fog.
+}
+
+/// The World step's Climate sizes: the Game's, and the player's typed text.
+#[derive(Clone, Debug, PartialEq)]
+struct ClimateDraft {
+    declared: ClimateParams,
+    /// Temperature, then humidity, kept while it does not parse.
     sizes: [String; 2],
-    colours: [String; 2],
+}
+
+impl ClimateDraft {
+    fn new(declared: ClimateParams) -> Self {
+        let mut draft = Self {
+            declared,
+            sizes: Default::default(),
+        };
+        draft.set(declared);
+        draft
+    }
+
+    fn set(&mut self, climate: ClimateParams) {
+        self.sizes = [climate.temperature_size_m, climate.humidity_size_m].map(|m| m.to_string());
+    }
+
+    /// The typed sizes, or `None` while either is not one a player may choose.
+    fn params(&self) -> Option<ClimateParams> {
+        let [temperature_size_m, humidity_size_m] = [0, 1].map(|at| {
+            self.sizes[at]
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|m| CLIMATE_SIZES_M.contains(m))
+        });
+        Some(ClimateParams {
+            temperature_size_m: temperature_size_m?,
+            humidity_size_m: humidity_size_m?,
+        })
+    }
+
+    /// What differs from the Game's, for the World's Biome edits.
+    fn edit(&self) -> Option<ClimateParams> {
+        self.params().filter(|p| *p != self.declared)
+    }
+
+    fn problem(&self) -> Option<String> {
+        self.params()
+            .is_none()
+            .then(|| "Climate sizes must be from 1 to 100000 m.".into())
+    }
 }
 
 impl BiomesDraft {
@@ -179,12 +259,10 @@ impl BiomesDraft {
         let mut draft = Self {
             ids,
             choices: declared.biomes.clone(),
-            climate: declared.climate,
             declared,
             selected: 0,
+            editing: false,
             resetting: false,
-            sizes: Default::default(),
-            colours: Default::default(),
         };
         draft.reset();
         draft
@@ -192,12 +270,7 @@ impl BiomesDraft {
 
     fn reset(&mut self) {
         self.choices = self.declared.biomes.clone();
-        self.climate = self.declared.climate;
         self.resetting = false;
-        self.sizes = [
-            self.climate.temperature_size_m.to_string(),
-            self.climate.humidity_size_m.to_string(),
-        ];
         self.select(self.selected);
     }
 
@@ -208,73 +281,80 @@ impl BiomesDraft {
                 *choice = seeded.clone();
             }
         }
-        if let Some(climate) = edits.climate {
-            self.climate = climate;
-            self.sizes = [
-                climate.temperature_size_m.to_string(),
-                climate.humidity_size_m.to_string(),
-            ];
-        }
         self.select(self.selected);
     }
 
     fn select(&mut self, at: usize) {
         self.selected = at.min(self.choices.len().saturating_sub(1));
-        let sky_fog = self.choices.get(self.selected).and_then(|c| c.sky_fog);
-        self.colours = [
-            sky_fog.map_or_else(String::new, |s| hex(s.sky)),
-            sky_fog.map_or_else(String::new, |s| hex(s.fog)),
-        ];
     }
 
-    /// What differs from the declarations, or `None` for a World made as declared.
-    fn edits(&self) -> Option<BiomeEdits> {
-        let biomes: Vec<_> = self
+    /// The sky and fog the World gives Biome `at` where it declares none: the blend of the other
+    /// coloured Biomes turned on, at its climate point, as `sky_fog_at` blends them.
+    pub(super) fn land_around(&self, at: usize) -> Option<SkyFog> {
+        let here = self.choices.get(at)?;
+        let coloured = self
             .choices
+            .iter()
+            .enumerate()
+            .filter(|&(i, c)| i != at && c.enabled)
+            .filter_map(|(_, c)| {
+                let distance = (c.temperature - here.temperature).hypot(c.humidity - here.humidity);
+                Some((distance, c.sky_fog?))
+            });
+        tesserae_core::climate::blend_sky_fog(coloured).map(SkyFog::from)
+    }
+
+    /// What Biome `at`'s sky and fog look like: its own, else the land's around it, else the default.
+    pub(super) fn shown_sky_fog(&self, at: usize) -> SkyFog {
+        self.choices
+            .get(at)
+            .and_then(|c| c.sky_fog)
+            .or_else(|| self.land_around(at))
+            .unwrap_or(SkyFog::DEFAULT)
+    }
+
+    /// Whether the player changed Biome `at` beyond turning it on or off.
+    pub(super) fn customised(&self, at: usize) -> bool {
+        let (Some(choice), Some(declared)) = (self.choices.get(at), self.declared.biomes.get(at))
+        else {
+            return false;
+        };
+        BiomeChoice {
+            enabled: declared.enabled,
+            ..choice.clone()
+        } != *declared
+    }
+
+    /// Restores Biome `at` to the Game's, leaving it on or off.
+    fn reset_one(&mut self, at: usize) {
+        let (Some(choice), Some(declared)) =
+            (self.choices.get_mut(at), self.declared.biomes.get(at))
+        else {
+            return;
+        };
+        *choice = BiomeChoice {
+            enabled: choice.enabled,
+            ..declared.clone()
+        };
+        self.select(self.selected);
+    }
+
+    /// The Biomes that differ from the declarations.
+    fn changed(&self) -> Vec<BiomeChoice> {
+        self.choices
             .iter()
             .zip(&self.declared.biomes)
             .filter(|(choice, declared)| choice != declared)
             .map(|(choice, _)| choice.clone())
-            .collect();
-        let climate = (self.climate != self.declared.climate).then_some(self.climate);
-        (!biomes.is_empty() || climate.is_some()).then_some(BiomeEdits { biomes, climate })
+            .collect()
     }
 
     fn problem(&self) -> Option<String> {
         if !self.choices.is_empty() && self.choices.iter().all(|c| !c.enabled) {
             return Some("Turn on at least one Biome to continue.".into());
         }
-        let size = |text: &str| {
-            text.trim()
-                .parse::<f32>()
-                .ok()
-                .filter(|m| CLIMATE_SIZES_M.contains(m))
-        };
-        if self.sizes.iter().any(|text| size(text).is_none()) {
-            return Some("Climate sizes must be from 1 to 100000 m.".into());
-        }
-        if self
-            .colours
-            .iter()
-            .any(|t| !t.trim().is_empty() && colour(t).is_none())
-        {
-            return Some("Write colours as #rrggbb.".into());
-        }
         None
     }
-}
-
-fn hex(rgb: [u8; 3]) -> String {
-    format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
-}
-
-fn colour(text: &str) -> Option<[u8; 3]> {
-    let digits = text.trim().trim_start_matches('#');
-    if digits.len() != 6 {
-        return None;
-    }
-    let byte = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
-    Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
 /// A Biome's value the player sets on a slider.
@@ -300,7 +380,7 @@ impl Default for Form {
             seed: String::new(),
             random_seed: tesserae_core::seed::random(),
             voxel_size_m: 1.0,
-            more: false,
+            climate: None,
             game_mode: GameMode::Creative,
             problem: None,
             game: None,
@@ -332,12 +412,10 @@ pub(super) fn listed(world: &World) -> Vec<PathBuf> {
 struct Launcher {
     screen: Screen,
     entries: Vec<Entry>,
-    /// The World being edited, deleted or opened.
+    /// The World being edited, deleted or opened, or the highlighted slot on the Worlds.
     selected: Option<PathBuf>,
-    /// The World whose card menu is open.
-    menu: Option<PathBuf>,
-    /// The Delete prompt came from a card's menu, so it answers back to the list.
-    from_menu: bool,
+    /// The Delete prompt came from the Worlds, so it answers back to the list.
+    from_list: bool,
     card: Option<Card>,
     form: Form,
     /// The form as Create World opened it, to tell whether leaving loses anything.
@@ -346,43 +424,36 @@ struct Launcher {
     /// Edit World's choice of modes.
     modes: Modes,
     search: String,
-    /// The Mods step's search and category tab; `None` shows every category.
     mod_search: String,
-    mod_tab: Option<String>,
-    /// Disclosure rows the player has flipped from how they start.
-    flipped: std::collections::BTreeSet<Disclosure>,
+    mod_view: ModView,
+    biome_search: String,
+    biome_view: BiomeView,
+    ground_search: String,
+    /// The control the last act came from, focused again when its page is rebuilt.
+    refocus: Option<Act>,
+    /// The field focused again when its page is rebuilt, as `refocus` is for a control.
+    refield: Option<Field>,
     problem: Option<String>,
+    /// The Trust page or dialog shows its permissions and limits.
+    trust_details: bool,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
-    /// The Mods step shows its Trust panel: leaving it runs the chosen Game and Mods to read their
-    /// Biomes. Cleared by every screen change and by every change to the picks it lists.
-    trust_asked: bool,
+    /// The set `clashes` was checked for; the check runs again off the main thread once it differs.
+    clashes_for: Option<reads::ClashKey>,
+    /// The terrain preview's source and the Game and Mods it was read for.
+    terrain: Option<(
+        Vec<String>,
+        std::sync::Arc<tesserae_core::terrain_preview::Source>,
+    )>,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
+    /// The Game of the World being opened, as the Opening and loading screens name it.
+    opening_game: Option<String>,
 }
 
 /// A row that shows or hides the settings under it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum Disclosure {
-    Ground,
-    ClimateScale,
-    BiomeParameters,
-    WorldInformation,
-    ManageWorld,
-}
-
-impl Disclosure {
-    fn starts_open(self) -> bool {
-        self == Disclosure::ClimateScale
-    }
-}
-
 impl Launcher {
-    fn open(&self, row: Disclosure) -> bool {
-        row.starts_open() != self.flipped.contains(&row)
-    }
-
     fn entry(&self, path: &Path) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == path)
     }
@@ -408,7 +479,13 @@ impl Launcher {
     fn show(&mut self, screen: Screen) {
         self.screen = screen;
         self.problem = None;
-        self.trust_asked = false;
+        self.mod_view.pop = None;
+        self.biome_view.pop = None;
+        self.biome_view.ground = None;
+        self.biome_view.colour = None;
+        self.refocus = None;
+        self.refield = None;
+        self.trust_details = false;
         self.version += 1;
     }
 
@@ -433,7 +510,6 @@ impl Launcher {
 #[derive(Component, Clone, Debug, PartialEq)]
 pub(super) enum Act {
     Continue,
-    Home,
     Worlds,
     Library,
     Settings,
@@ -442,10 +518,11 @@ pub(super) enum Act {
     New,
     ReCreate,
     Delete,
-    /// Opens or closes the menu on a World's card.
-    Menu(PathBuf),
-    /// Delete from a card's menu, without going through Edit.
+    /// Delete from the Worlds, without going through Edit.
     DeleteWorld(PathBuf),
+    /// The E and Delete prompts, on the highlighted World.
+    EditHighlighted,
+    DeleteHighlighted,
     ShowFolder,
     CopySeed,
     Quit,
@@ -453,31 +530,85 @@ pub(super) enum Act {
     Create,
     Randomize,
     CopyResolved,
-    More,
     Next,
     Step(Step),
     KeepEditing,
     DiscardSetup,
-    DefaultMode(GameMode),
-    OwnMode(GameMode),
+    DiscardEdits,
+    /// Edit World's one Game mode: the World's default and the Player's own, while the Player is
+    /// its only Player.
+    EditMode(GameMode),
     ToggleBiome(usize),
     SelectBiome(usize),
-    CycleGround(Layer),
+    /// Opens or closes a ground layer's Material dropdown in the edit panel.
+    GroundPop(Layer),
+    PickGround(Layer, String),
+    /// Opens or closes the Sky or Fog colour picker.
+    ColourPop(colour::Air),
+    /// Picks one of the colour picker's presets, and closes it.
+    Preset(usize),
+    /// Closes the colour picker, keeping its colour.
+    ColourDone,
+    /// The edit panel's Done: back to the terrain preview.
+    CloseBiome,
+    /// Restores the Biome in the edit panel.
+    ResetBiome,
     ResetBiomes,
     ConfirmReset,
     KeepBiomes,
-    Voxel(f32),
+    /// Picks this Voxel size, one of [`VOXEL_SIZES`].
+    VoxelSize(f32),
     Mode(GameMode),
     PickGame(usize),
     ToggleMod(usize),
     SaveName,
+    DontSave,
+    SaveAndContinue,
     ConfirmDelete,
     Trust,
-    /// The Mods step's primary button: trusts what the panel lists, then shows the Biomes.
-    TrustMods,
+    /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
+    TrustStep,
+    /// Shows or hides the permissions and limits on a Trust page or dialog.
+    TrustDetails,
     Dismiss,
-    Disclose(Disclosure),
-    ModTab(Option<String>),
+    /// Opens or closes a popup beside the Mods search.
+    ModPop(Pop),
+    ModCategory(String),
+    ModSelectedOnly,
+    ModFilterReset,
+    ModSort(ModSort),
+    /// The Mods step's tri-state box: ticks every Mod shown, or clears them.
+    SelectShownMods,
+    /// Opens or closes a popup beside the Biomes search.
+    BiomePop(Pop),
+    /// Shows enabled (`true`) or disabled Biomes.
+    BiomeStatus(bool),
+    BiomeCustomised,
+    BiomeFilterReset,
+    BiomeSort(BiomeSort),
+    /// The Biomes step's tri-state box: turns on every Biome shown, or turns them off.
+    SelectShownBiomes,
+}
+
+impl Act {
+    /// What Left (`by` -1) or Right (+1) does on a [`super::pad::Stepper`] that carries this act.
+    fn stepped(&self, by: i32) -> Option<Act> {
+        let mode = if by < 0 {
+            GameMode::Creative
+        } else {
+            GameMode::Survival
+        };
+        match self {
+            Act::Mode(_) => Some(Act::Mode(mode)),
+            Act::EditMode(_) => Some(Act::EditMode(mode)),
+            Act::VoxelSize(size) => {
+                let at = VOXEL_SIZES.iter().position(|(s, ..)| s == size)? as i32;
+                let next = (at + by).clamp(0, VOXEL_SIZES.len() as i32 - 1) as usize;
+                Some(Act::VoxelSize(VOXEL_SIZES[next].0))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Resource, Default)]
@@ -490,29 +621,36 @@ enum Field {
     Rename,
     Search,
     ModSearch,
-    Sky,
-    Fog,
+    BiomeSearch,
+    /// The open Ground dropdown's search.
+    GroundSearch,
+    /// The open colour picker's hex.
+    ColourHex,
     TemperatureSize,
     HumiditySize,
 }
 
 #[derive(Component)]
-struct Resolved;
-
-#[derive(Component)]
 struct Root;
+
+/// The page's scrolling column and the Biome panel's body, each of which keeps its place.
+type Scrolling = Or<(With<PageScroll>, With<pages::PanelScroll>)>;
 
 /// The page's own scrolling column, whose position survives a rebuild of the same page.
 #[derive(Component)]
 struct PageScroll;
 
-/// One World on the Worlds screen, or one Mod on the Mods step, with the
-/// words that field's search matches.
+/// One World on the Worlds screen, one Mod on the Mods step or one Biome on the Biomes step,
+/// with the words that field's search matches.
 #[derive(Component)]
 struct WorldCard {
     words: String,
     by: Field,
 }
+
+/// A save slot on the Worlds: the World it holds, or none for New World.
+#[derive(Component)]
+struct Slot(Option<PathBuf>);
 
 /// Shown when the search in that field matches nothing.
 #[derive(Component)]
@@ -603,27 +741,54 @@ fn review_capture(
                     continue;
                 }
                 "new" => Act::New,
-                "more" => Act::More,
                 "edit" => Act::Edit(first.clone()),
                 "delete" => Act::Delete,
                 "recreate" => Act::ReCreate,
+                "survival" => Act::EditMode(GameMode::Survival),
                 "open" => Act::Play(first.clone()),
                 "create" => Act::Create,
                 "next" => Act::Next,
                 "back" => Act::Back,
+                "details" => Act::TrustDetails,
+                "trust-step" => Act::TrustStep,
                 "randomize" => Act::Randomize,
                 "reset" => Act::ResetBiomes,
+                "filter" => Act::ModPop(Pop::Filter),
+                "sort" => Act::ModPop(Pop::Sort),
+                "all" => Act::SelectShownMods,
+                "biome" => Act::SelectBiome(0),
+                "biome-filter" => Act::BiomePop(Pop::Filter),
+                "biome-sort" => Act::BiomePop(Pop::Sort),
+                "ground" => Act::GroundPop(Layer::Surface),
+                "ground-rock" => Act::GroundPop(Layer::Rock),
+                "sky" => Act::ColourPop(colour::Air::Sky),
+                "fog" => Act::ColourPop(colour::Air::Fog),
                 // The Opening card stays up: no World is handed to the loader.
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {
                         let name = l.display_name(&first);
+                        l.opening_game = l
+                            .entry(&first)
+                            .and_then(Entry::details)
+                            .map(|d| game_title(d.game.as_ref()));
                         l.show(Screen::Opening(name));
                     }
                     continue;
                 }
-                other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
+                other => match (other.strip_prefix("game"), other.strip_prefix("biome")) {
+                    (Some(n), _) if n.parse::<usize>().is_ok() => Act::PickGame(n.parse().unwrap()),
+                    (_, Some(n)) if n.parse::<usize>().is_ok() => {
+                        Act::SelectBiome(n.parse().unwrap())
+                    }
+                    _ => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
+                },
             });
         }
+    }
+    if *frame == 40
+        && let Ok(notices) = std::env::var("TESSERAE_SCREENSHOT_NOTICE")
+    {
+        super::capture::notify_each(&mut commands, &notices);
     }
     let Some(shot) = shot else {
         return;
@@ -659,6 +824,7 @@ fn close_request(
 }
 
 fn logic(app: &mut App) {
+    super::frame::plugin(app);
     app.init_resource::<Queue>()
         .init_resource::<Scenery>()
         .init_resource::<LastFailure>()
@@ -666,24 +832,50 @@ fn logic(app: &mut App) {
         .init_resource::<Previewer>()
         .init_resource::<Returning>()
         .init_resource::<InputFocus>()
+        .init_resource::<Thumbnails>()
+        .init_resource::<terrain::TerrainPreview>()
+        .init_resource::<diorama::Dioramas>()
+        .init_resource::<reads::Reads>()
         .add_observer(activate)
+        .add_observer(step)
         .add_observer(slide)
+        .add_observer(biomes::press_map)
+        .add_observer(biomes::drag_map)
+        .add_observer(colour::nudge)
+        .add_observer(colour::press)
+        .add_observer(colour::drag)
         .add_observer(open_settings)
+        .add_observer(dismiss)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(
             Update,
             (
-                keys,
+                (keys, colour::keys),
+                biomes::nudge,
                 sync_fields,
-                handle,
+                highlight,
+                (handle, reads::run).chain(),
+                load_thumbnails,
+                saved::load,
+                terrain::draw,
                 render,
+                terrain::show,
                 show_filter,
+                cover,
                 filter,
+                pages::paint_bulk,
+                pages::paint_biomes,
+                diorama::draw,
+                (
+                    pages::hang_ground_list,
+                    colour::paint_controls,
+                    colour::paint_picker,
+                    colour::hang,
+                ),
                 placeholders,
                 opening,
                 (
-                    hero_size,
-                    header_hover,
+                    paint_slots,
                     paint_picks,
                     shape_trees,
                     paint_scenery,
@@ -759,6 +951,21 @@ fn show_filter(
     }
 }
 
+/// Settings hide the page under them, as the in-game Menu hides under Settings.
+fn cover(
+    settings: Option<Res<super::settings::Settings>>,
+    mut roots: Query<&mut Visibility, With<Root>>,
+) {
+    let wanted = if settings.is_some_and(|s| s.open) {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    for mut visibility in &mut roots {
+        visibility.set_if_neq(wanted);
+    }
+}
+
 /// The launcher reads the pad and navigates focus as the in-game menus do,
 /// under one standing modal owner.
 fn standing_owner(mut ownership: ResMut<super::input::Ownership>) {
@@ -809,15 +1016,21 @@ fn start(
         modes: Modes::default(),
         search: String::new(),
         mod_search: String::new(),
-        mod_tab: None,
-        flipped: Default::default(),
+        mod_view: ModView::default(),
+        biome_search: String::new(),
+        biome_view: BiomeView::default(),
+        ground_search: String::new(),
+        refocus: None,
+        refield: None,
+        trust_details: false,
         problem: None,
         clashes: Default::default(),
+        clashes_for: None,
         version: 0,
-        trust_asked: false,
-        menu: None,
-        from_menu: false,
+        terrain: None,
+        from_list: false,
         opening_frames: 0,
+        opening_game: None,
     };
     launcher.refresh(&worlds.0);
     if let Some(failure) = &failure.0 {
@@ -846,6 +1059,34 @@ fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     }
 }
 
+fn step(event: On<super::pad::Step>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
+    if let Some(act) = acts
+        .get(event.entity)
+        .ok()
+        .and_then(|a| a.stepped(event.by))
+    {
+        queue.0.push(act);
+    }
+}
+
+/// Closes the open Mods or Biomes popup, or a Ground dropdown, back onto its control.
+fn close_pop(l: &mut Launcher) {
+    let icon = (l.mod_view.pop.take().map(Act::ModPop))
+        .or_else(|| l.biome_view.pop.take().map(Act::BiomePop))
+        .or_else(|| l.biome_view.ground.take().map(Act::GroundPop))
+        .or_else(|| (l.biome_view.colour.take()).map(|p| Act::ColourPop(p.air)));
+    if icon.is_some() {
+        l.refocus = icon;
+        l.version += 1;
+    }
+}
+
+fn dismiss(_: On<super::frame::Dismiss>, launcher: Option<ResMut<Launcher>>) {
+    if let Some(mut l) = launcher {
+        close_pop(&mut l);
+    }
+}
+
 /// Settings is one screen with the game's, drawn over the launcher.
 fn open_settings(event: On<Activate>, acts: Query<&Act>, mut settings: super::settings::Opener) {
     if acts.get(event.entity) == Ok(&Act::Settings) {
@@ -858,7 +1099,7 @@ fn keys(
     settings: Option<Res<super::settings::Settings>>,
     launcher: Option<Res<Launcher>>,
     focus: Res<InputFocus>,
-    fields: Query<&Field>,
+    (fields, texts): (Query<&Field>, Query<&EditableText>),
     pad: Option<Res<super::pad::PadInput>>,
     mut queue: ResMut<Queue>,
 ) {
@@ -868,25 +1109,62 @@ fn keys(
     if settings.is_some_and(|s| s.open) {
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) || pad.is_some_and(|pad| pad.cancel) {
+    if keys.just_pressed(KeyCode::Escape) || pad.as_ref().is_some_and(|pad| pad.cancel) {
         queue.0.push(match launcher.screen {
             Screen::Title | Screen::Worlds if launcher.card.is_some() => Act::Dismiss,
             _ => Act::Back,
         });
+    }
+    let chord = keys.just_pressed(KeyCode::Enter)
+        && keys.any_pressed([
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::SuperLeft,
+            KeyCode::SuperRight,
+        ]);
+    let start = pad.is_some_and(|pad| pad.navigation.just_pressed(GamepadButton::Start));
+    if matches!(launcher.screen, Screen::Edit(_)) && chord {
+        // The focused control took the same Enter; saving wins.
+        queue.0.clear();
+        queue.0.push(Act::SaveName);
+        return;
+    }
+    if let Screen::Create(step) = launcher.screen
+        && (chord || start)
+        && !launcher.form.biomes.as_ref().is_some_and(|d| d.resetting)
+    {
+        // The focused button took the same Enter; moving on wins, as it would from a text field.
+        queue.0.clear();
+        queue.0.push(if step.next().is_some() {
+            Act::Next
+        } else {
+            Act::Create
+        });
+        return;
     }
     // Enter in a text field submits its form; on buttons it activates them.
     if keys.just_pressed(KeyCode::Enter)
         && let Some(field) = focus.get().and_then(|e| fields.get(e).ok())
     {
         match field {
-            Field::Name
-            | Field::Seed
-            | Field::Sky
-            | Field::Fog
-            | Field::TemperatureSize
-            | Field::HumiditySize => queue.0.push(Act::Next),
+            Field::Name | Field::Seed | Field::TemperatureSize | Field::HumiditySize => {
+                queue.0.push(Act::Next)
+            }
             Field::Rename => queue.0.push(Act::SaveName),
-            Field::Search | Field::ModSearch => {}
+            Field::GroundSearch => {
+                if let Some(layer) = launcher.biome_view.ground
+                    && let Some(first) = biomes::ground_matches(&launcher).into_iter().next()
+                {
+                    queue.0.push(Act::PickGround(layer, first));
+                }
+            }
+            Field::ColourHex => {
+                let typed = focus.get().and_then(|e| texts.get(e).ok());
+                if typed.is_some_and(|t| colour::parse(&t.value().to_string()).is_some()) {
+                    queue.0.push(Act::ColourDone);
+                }
+            }
+            Field::Search | Field::ModSearch | Field::BiomeSearch => {}
         }
     }
 }
@@ -894,7 +1172,6 @@ fn keys(
 fn sync_fields(
     fields: Query<(&Field, &EditableText), Changed<EditableText>>,
     launcher: Option<ResMut<Launcher>>,
-    mut resolved: Query<&mut Text, With<Resolved>>,
 ) {
     let Some(mut launcher) = launcher else {
         return;
@@ -905,22 +1182,26 @@ fn sync_fields(
             Field::Name => launcher.form.name = value,
             Field::Seed => launcher.form.seed = value,
             Field::Rename => launcher.rename = value,
-            Field::Sky | Field::Fog | Field::TemperatureSize | Field::HumiditySize => {
-                // The page keeps the field; rebuilding it would take the focus.
+            Field::ColourHex => {
+                // The picker keeps the field; rebuilding it would take the focus. Its own refresh
+                // to a colour picked elsewhere is pending, and the old text must not win.
+                let refreshing = (text.pending_edits.iter())
+                    .any(|e| matches!(e, bevy::text::TextEdit::Insert(_)));
+                if !refreshing && let Some(rgb) = colour::parse(&value) {
+                    colour::set_rgb(launcher.bypass_change_detection(), rgb);
+                }
+            }
+            Field::TemperatureSize | Field::HumiditySize => {
                 let launcher = launcher.bypass_change_detection();
-                if let Some(draft) = launcher.form.biomes.as_mut() {
-                    typed(draft, *field, value);
+                if let Some(climate) = launcher.form.climate.as_mut() {
+                    climate.sizes[usize::from(*field == Field::HumiditySize)] = value;
                 }
             }
             // Typing filters the cards in place; a rebuild would take the field's focus.
             Field::Search => launcher.bypass_change_detection().search = value,
             Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
-        }
-    }
-    for mut text in &mut resolved {
-        let wanted = launcher.form.seed_label();
-        if text.0 != wanted {
-            text.0 = wanted;
+            Field::BiomeSearch => launcher.bypass_change_detection().biome_search = value,
+            Field::GroundSearch => launcher.bypass_change_detection().ground_search = value,
         }
     }
 }
@@ -934,12 +1215,11 @@ fn filter(
     let Some(launcher) = launcher else {
         return;
     };
-    let query = |by: Field| {
-        if by == Field::ModSearch {
-            &launcher.mod_search
-        } else {
-            &launcher.search
-        }
+    let query = |by: Field| match by {
+        Field::ModSearch => &launcher.mod_search,
+        Field::BiomeSearch => &launcher.biome_search,
+        Field::GroundSearch => &launcher.ground_search,
+        _ => &launcher.search,
     };
     let mut any = std::collections::BTreeSet::new();
     for (card, mut node) in &mut cards {
@@ -984,53 +1264,22 @@ fn placeholders(
     }
 }
 
-/// What typing in one of the Biomes step's fields changes.
-fn typed(draft: &mut BiomesDraft, field: Field, value: String) {
-    match field {
-        Field::TemperatureSize | Field::HumiditySize => {
-            let at = usize::from(field == Field::HumiditySize);
-            if let Ok(metres) = value.trim().parse::<f32>() {
-                if at == 0 {
-                    draft.climate.temperature_size_m = metres;
-                } else {
-                    draft.climate.humidity_size_m = metres;
-                }
-            }
-            draft.sizes[at] = value;
-        }
-        _ => {
-            let at = usize::from(field == Field::Fog);
-            let parsed = colour(&value);
-            draft.colours[at] = value;
-            let selected = draft.selected;
-            if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
-                // A Biome carries both colours or neither, so the other starts equal.
-                let mut pair = choice.sky_fog.unwrap_or(SkyFog { sky: rgb, fog: rgb });
-                if at == 0 {
-                    pair.sky = rgb;
-                } else {
-                    pair.fog = rgb;
-                }
-                choice.sky_fog = Some(pair);
-            }
-        }
-    }
-}
-
 impl Form {
+    /// What the World keeps of the Biomes and Climate steps, or `None` for one made as declared.
+    fn edits(&self) -> Option<BiomeEdits> {
+        let biomes = self
+            .biomes
+            .as_ref()
+            .map(BiomesDraft::changed)
+            .unwrap_or_default();
+        let climate = self.climate.as_ref().and_then(ClimateDraft::edit);
+        (!biomes.is_empty() || climate.is_some()).then_some(BiomeEdits { biomes, climate })
+    }
+
     fn seed(&self) -> Result<u64, String> {
         tesserae_core::seed::resolve(&self.seed)
             .map(|seed| seed.unwrap_or(self.random_seed))
             .map_err(|e| format!("Seed {e}"))
-    }
-
-    fn seed_label(&self) -> String {
-        match self.seed() {
-            Ok(seed) if self.seed.trim().is_empty() => format!("Random seed: {seed}"),
-            Ok(seed) if self.seed.trim().parse::<i128>().is_ok() => format!("Seed: {seed}"),
-            Ok(seed) => format!("Seed from these words: {seed}"),
-            Err(e) => e,
-        }
     }
 }
 
@@ -1040,7 +1289,7 @@ fn handle(
     mut queue: ResMut<Queue>,
     launcher: Option<ResMut<Launcher>>,
     mut installed: ResMut<Installed>,
-    (worlds, previewer): (Res<WorldsDir>, Res<Previewer>),
+    worlds: Res<WorldsDir>,
     remover: Res<Remover>,
     mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
@@ -1053,7 +1302,6 @@ fn handle(
         commands: &mut commands,
         installed: &mut installed,
         worlds: &worlds.0,
-        previewer: *previewer,
         remover: &remover,
         relaunch: &mut relaunch,
         exit: &mut exit,
@@ -1061,52 +1309,91 @@ fn handle(
     };
     for act in std::mem::take(&mut queue.0) {
         let l = &mut *l;
-        // Any act but the menu's own answers it; Back closes it itself.
-        if !matches!(act, Act::Menu(..) | Act::Back) && l.menu.take().is_some() {
+        l.refocus = None;
+        l.refield = None;
+        let popup = matches!(
+            act,
+            Act::ModPop(..)
+                | Act::ModCategory(..)
+                | Act::ModSelectedOnly
+                | Act::ModFilterReset
+                | Act::BiomePop(..)
+                | Act::BiomeStatus(..)
+                | Act::BiomeCustomised
+                | Act::BiomeFilterReset
+                | Act::GroundPop(..)
+                | Act::ColourPop(..)
+                | Act::Preset(..)
+                | Act::ColourDone
+        );
+        if !popup
+            && act != Act::Back
+            && (l.mod_view.pop.take().is_some()
+                | l.biome_view.pop.take().is_some()
+                | l.biome_view.ground.take().is_some()
+                | l.biome_view.colour.take().is_some())
+        {
             l.version += 1;
         }
         match act {
             Act::Continue | Act::Play(..) | Act::Trust => on_open(l, &mut cx, act),
+            Act::TrustDetails => {
+                l.trust_details = !l.trust_details;
+                l.refocus = Some(act);
+                l.version += 1;
+            }
             Act::Edit(..)
             | Act::Delete
-            | Act::Menu(..)
             | Act::DeleteWorld(..)
+            | Act::EditHighlighted
+            | Act::DeleteHighlighted
             | Act::ShowFolder
             | Act::CopySeed
-            | Act::DefaultMode(..)
-            | Act::OwnMode(..)
+            | Act::EditMode(..)
             | Act::SaveName
+            | Act::DontSave
+            | Act::SaveAndContinue
+            | Act::DiscardEdits
             | Act::ConfirmDelete => on_edit_world(l, &mut cx, act),
             Act::New
             | Act::ReCreate
             | Act::CopyResolved
             | Act::Randomize
-            | Act::More
             | Act::PickGame(..)
             | Act::ToggleMod(..)
             | Act::Next
             | Act::Step(..)
             | Act::ToggleBiome(..)
             | Act::SelectBiome(..)
-            | Act::CycleGround(..)
+            | Act::PickGround(..)
+            | Act::CloseBiome
+            | Act::ResetBiome
             | Act::ResetBiomes
             | Act::ConfirmReset
             | Act::KeepBiomes
             | Act::KeepEditing
             | Act::DiscardSetup
-            | Act::Voxel(..)
+            | Act::VoxelSize(..)
             | Act::Mode(..)
-            | Act::TrustMods
+            | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
-            Act::Home
-            | Act::Worlds
-            | Act::Library
-            | Act::Settings
-            | Act::Quit
-            | Act::Back
-            | Act::Dismiss
-            | Act::Disclose(..)
-            | Act::ModTab(..) => navigate(l, &mut cx, act),
+            Act::Worlds | Act::Library | Act::Settings | Act::Quit | Act::Back | Act::Dismiss => {
+                navigate(l, &mut cx, act)
+            }
+            Act::ModPop(..)
+            | Act::ModCategory(..)
+            | Act::ModSelectedOnly
+            | Act::ModFilterReset
+            | Act::ModSort(..)
+            | Act::SelectShownMods => on_mods(l, cx.installed, act),
+            Act::BiomePop(..)
+            | Act::BiomeStatus(..)
+            | Act::BiomeCustomised
+            | Act::BiomeFilterReset
+            | Act::BiomeSort(..)
+            | Act::SelectShownBiomes
+            | Act::GroundPop(..) => on_biomes(l, act),
+            Act::ColourPop(..) | Act::Preset(..) | Act::ColourDone => colour::on_colour(l, act),
         }
     }
 }
@@ -1116,7 +1403,6 @@ struct Acting<'a, 'w, 's, 'e> {
     commands: &'a mut Commands<'w, 's>,
     installed: &'a mut Installed,
     worlds: &'a Path,
-    previewer: Previewer,
     remover: &'a Remover,
     relaunch: &'a mut Switch,
     exit: &'a mut MessageWriter<'e, AppExit>,
@@ -1126,7 +1412,6 @@ struct Acting<'a, 'w, 's, 'e> {
 /// The acts that move between the title, the Worlds and the Library, or leave.
 fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
     match act {
-        Act::Home => l.show(Screen::Title),
         Act::Worlds => {
             l.search.clear();
             l.show(Screen::Worlds);
@@ -1137,15 +1422,16 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             cx.relaunch.0 = None;
             cx.exit.write(AppExit::Success);
         }
-        Act::Disclose(row) => {
-            if !l.flipped.remove(&row) {
-                l.flipped.insert(row);
-            }
-            l.version += 1;
+        Act::Back if l.biome_view.colour.is_some() => {
+            colour::revert(l);
+            close_pop(l);
         }
-        Act::ModTab(tab) => {
-            l.mod_tab = tab;
-            l.version += 1;
+        Act::Back
+            if l.mod_view.pop.is_some()
+                || l.biome_view.pop.is_some()
+                || l.biome_view.ground.is_some() =>
+        {
+            close_pop(l)
         }
         // Escape answers the reset dialog rather than leaving the step under it.
         Act::Back if l.form.biomes.as_ref().is_some_and(|d| d.resetting) => {
@@ -1154,12 +1440,13 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             l.version += 1;
         }
-        // Escape closes a card's menu rather than leaving the list under it.
-        Act::Back if l.menu.is_some() => {
-            l.menu = None;
-            l.version += 1;
+        Act::Back
+            if l.screen == Screen::Create(Step::Biomes)
+                && l.form.biomes.as_ref().is_some_and(|d| d.editing) =>
+        {
+            edit_biomes(l, |d| d.editing = false);
         }
-        Act::Back if matches!(l.screen, Screen::Delete(_)) && l.from_menu => l.show(Screen::Worlds),
+        Act::Back if matches!(l.screen, Screen::Delete(_)) && l.from_list => l.show(Screen::Worlds),
         Act::Back => match l.screen.clone() {
             Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
             Screen::Create(step) => match step.previous() {
@@ -1167,8 +1454,13 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 None if l.form.unchanged_from(&l.initial) => l.show(Screen::Worlds),
                 None => l.show(Screen::Discard(step)),
             },
-            Screen::Discard(step) => l.show(Screen::Create(step)),
-            Screen::Delete(path) => l.show(Screen::Edit(path)),
+            Screen::Discard(step) | Screen::StepTrust { on: step, .. } => {
+                l.show(Screen::Create(step))
+            }
+            Screen::Delete(path) | Screen::SaveFirst(path) | Screen::DiscardEdits(path) => {
+                l.show(Screen::Edit(path))
+            }
+            Screen::Edit(path) if unsaved(l) => l.show(Screen::DiscardEdits(path)),
             Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
             Screen::Worlds | Screen::Library => l.show(Screen::Title),
             Screen::Opening(_) | Screen::Title => {}
@@ -1191,8 +1483,8 @@ fn render(
     ),
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
-    scrolled: Query<&ScrollPosition, With<PageScroll>>,
-    logo: Option<Res<ui::Mosaic>>,
+    scrolled: Query<(&ScrollPosition, Has<PageScroll>), Scrolling>,
+    (logo, thumbnails): (Option<Res<ui::Mosaic>>, Res<Thumbnails>),
     (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
     let Some(l) = launcher else {
@@ -1206,16 +1498,41 @@ fn render(
     }
     *built = Some(l.version);
     // A click rebuilds the page it is on; keep its place there, and start a new page at the top.
-    let scroll = if shown.as_ref() == Some(&l.screen) {
-        scrolled.iter().next().map_or(Vec2::ZERO, |p| p.0)
+    let same = shown.as_ref() == Some(&l.screen);
+    let scroll = if same {
+        scrolled
+            .iter()
+            .find_map(|(p, page)| page.then_some(p.0))
+            .unwrap_or(Vec2::ZERO)
     } else {
         Vec2::ZERO
     };
+    let panel_scroll = scrolled
+        .iter()
+        .find_map(|(p, page)| (!page).then_some(p.0))
+        .filter(|_| same);
     *shown = Some(l.screen.clone());
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let focus = pages::spawn(&mut commands, &l, &installed, logo.as_deref(), scroll);
+    let focus = pages::spawn(
+        &mut commands,
+        &l,
+        &installed,
+        logo.as_deref(),
+        &thumbnails,
+        scroll,
+    );
+    // The Biome panel scrolls on its own, and its Ground dropdowns open from low in it.
+    if let Some(offset) = panel_scroll {
+        commands.queue(move |world: &mut World| {
+            let mut bodies =
+                world.query_filtered::<&mut ScrollPosition, With<pages::PanelScroll>>();
+            for mut body in bodies.iter_mut(world) {
+                body.0 = offset;
+            }
+        });
+    }
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
@@ -1223,6 +1540,98 @@ fn render(
             }
         });
     }
+    if let Some(act) = l.refocus.clone() {
+        // An opened Ground dropdown takes the focus to its search, as typing is how most pick.
+        let search = matches!(act, Act::GroundPop(_)) && l.biome_view.ground.is_some();
+        commands.queue(move |world: &mut World| {
+            let field = search.then(|| {
+                world
+                    .query::<(Entity, &Field)>()
+                    .iter(world)
+                    .find_map(|(e, f)| (*f == Field::GroundSearch).then_some(e))
+            });
+            let again = field.flatten().or_else(|| {
+                world
+                    .query::<(Entity, &Act)>()
+                    .iter(world)
+                    .find_map(|(e, a)| (*a == act).then_some(e))
+            });
+            if let (Some(entity), Some(mut focus)) = (again, world.get_resource_mut::<InputFocus>())
+            {
+                focus.set(entity, FocusCause::Auto);
+            }
+        });
+    }
+    if let Some(field) = l.refield {
+        commands.queue(move |world: &mut World| {
+            let again = world
+                .query::<(Entity, &Field)>()
+                .iter(world)
+                .find_map(|(e, f)| (*f == field).then_some(e));
+            if let (Some(entity), Some(mut focus)) = (again, world.get_resource_mut::<InputFocus>())
+            {
+                focus.set(entity, FocusCause::Auto);
+            }
+        });
+    }
+}
+
+/// Each installed Mod's and Game's thumbnail as an image, by id; `None` for one without.
+#[derive(Resource, Default)]
+pub(in crate::client) struct Thumbnails(
+    std::collections::HashMap<String, Option<Handle<Image>>>,
+    saved::Pictures,
+);
+
+impl Thumbnails {
+    /// The World's saved thumbnail, `None` for a World saved without one.
+    pub(in crate::client) fn world(&self, folder: &Path) -> Option<&Handle<Image>> {
+        self.1.get(folder)
+    }
+
+    /// Reads the open World's thumbnail, which may have been written after the list last looked.
+    pub(in crate::client) fn read_world(&mut self, folder: &Path, images: &mut Assets<Image>) {
+        self.1.refresh(folder, images);
+    }
+
+    pub(in crate::client) fn get(&self, id: &str) -> Option<&Handle<Image>> {
+        self.0.get(id)?.as_ref()
+    }
+}
+
+/// Decodes each id once, so a page rebuilt on every click never rereads a file.
+fn load_thumbnails(
+    installed: Res<Installed>,
+    images: Option<ResMut<Assets<Image>>>,
+    mut thumbnails: ResMut<Thumbnails>,
+) {
+    let Some(mut images) = images else {
+        return;
+    };
+    for item in installed.games.iter().chain(&installed.mods) {
+        if thumbnails.0.contains_key(&item.id) {
+            continue;
+        }
+        let handle = installed
+            .thumbnail(&item.id)
+            .map(|t| images.add(rgba_image(t.width, t.height, t.rgba)));
+        thumbnails.0.insert(item.id.clone(), handle);
+    }
+}
+
+/// Straight-alpha sRGBA8 pixels, row by row from the top, as a UI image.
+fn rgba_image(width: u32, height: u32, rgba: Vec<u8>) -> Image {
+    Image::new(
+        bevy::render::render_resource::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        bevy::render::render_resource::TextureDimension::D2,
+        rgba,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::default(),
+    )
 }
 
 fn relative(then_s: u64) -> String {
@@ -1238,58 +1647,45 @@ fn relative(then_s: u64) -> String {
     }
 }
 
-/// The headline follows the window's width as the prototype's `clamp()` does.
-fn hero_size(
-    mut heroes: Query<(&mut TextFont, &mut bevy::text::LetterSpacing), With<pages::Hero>>,
-    roots: Query<&ComputedNode, With<Root>>,
-) {
-    let Some(root) = roots.iter().next() else {
+/// The slot keyboard, controller or pointer focus rests on is the one E and Delete act on.
+fn highlight(launcher: Option<ResMut<Launcher>>, focus: Res<InputFocus>, slots: Query<&Slot>) {
+    let (Some(mut launcher), Some(slot)) = (launcher, focus.get().and_then(|f| slots.get(f).ok()))
+    else {
         return;
     };
-    let width = root.size().x * root.inverse_scale_factor();
-    if width <= 0.0 {
-        return;
-    }
-    let size = if width >= theme::WIDE_WINDOW {
-        theme::TEXT_HERO_WIDE
-    } else {
-        (width * theme::TEXT_HERO_VW / 100.0)
-            .clamp(*theme::TEXT_HERO.start(), *theme::TEXT_HERO.end())
-    };
-    for (mut font, mut spacing) in &mut heroes {
-        let wanted = bevy::text::FontSize::Px(size);
-        if font.font_size != wanted {
-            font.font_size = wanted;
-            font.font_variations = theme::optical(size);
-            *spacing = bevy::text::LetterSpacing::Px(theme::HERO_TRACKING * size);
-        }
+    if launcher.selected != slot.0 {
+        launcher.bypass_change_detection().selected = slot.0.clone();
     }
 }
 
-fn header_hover(
-    mut buttons: Query<
-        (
-            Entity,
-            &bevy::picking::hover::Hovered,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut Outline,
-        ),
-        With<pages::HeaderButton>,
-    >,
+type SlotPaint = (
+    Entity,
+    &'static bevy::picking::hover::Hovered,
+    &'static mut BackgroundColor,
+    &'static mut BorderColor,
+    &'static mut Outline,
+);
+
+/// A slot is lit while focused or hovered, and a lit World shows its Edit and Delete.
+fn paint_slots(
+    mut slots: Query<SlotPaint, (With<Slot>, Without<bevy::ui::InteractionDisabled>)>,
+    mut actions: Query<(&ChildOf, &mut Visibility), With<pages::SlotActions>>,
     focus: Res<InputFocus>,
     visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
-    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
-    for (entity, hovered, mut fill, mut edge, mut outline) in &mut buttons {
-        let (f, e) = if hovered.0 {
-            (theme::QUIET_HOVER, theme::QUIET_HOVER_EDGE)
+    let ringed = ui::visible_focus(Some(&focus), visible.as_deref());
+    let lit = |entity: Entity, hovered: bool| hovered || focus.get() == Some(entity);
+    for (entity, hovered, mut fill, mut edge, mut outline) in &mut slots {
+        let on = lit(entity, hovered.0);
+        fill.set_if_neq(BackgroundColor(if on {
+            theme::slot_lit()
         } else {
-            (Color::NONE, theme::ICON_EDGE)
-        };
-        fill.set_if_neq(BackgroundColor(f));
-        edge.set_if_neq(BorderColor::all(e));
-        let ring = if focused == Some(entity) {
+            theme::slot_fill()
+        }));
+        if on {
+            edge.set_if_neq(BorderColor::all(pages::SLOT_EDGE_LIT));
+        }
+        let ring = if ringed == Some(entity) {
             theme::FOCUS
         } else {
             Color::NONE
@@ -1297,6 +1693,16 @@ fn header_hover(
         if outline.color != ring {
             outline.color = ring;
         }
+    }
+    for (tile, mut visibility) in &mut actions {
+        let on = slots
+            .get(tile.parent())
+            .is_ok_and(|(entity, hovered, ..)| lit(entity, hovered.0));
+        visibility.set_if_neq(if on {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
 }
 
@@ -1535,7 +1941,7 @@ fn paint_scenery(
                 bevy::render::render_resource::TextureDimension::D2,
                 scenery::paint(size.x, size.y, scale, backdrop.0),
                 bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                bevy::asset::RenderAssetUsages::RENDER_WORLD,
+                bevy::asset::RenderAssetUsages::default(),
             );
             slot.image = Some(images.add(image));
             slot.size = size;
