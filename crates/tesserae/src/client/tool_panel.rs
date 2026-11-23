@@ -238,12 +238,20 @@ pub(super) fn foot(
                 Some(act) => look::button(foot, "Aim", act, kind, look::ROOMY),
                 None => look::button(foot, "Aim", frame::PointerOnly, kind, look::ROOMY),
             };
+            let (_, _, ink) = cine::colours(
+                cine::Look {
+                    kind,
+                    selected: false,
+                },
+                false,
+                !enabled,
+            );
             foot.commands().entity(button).with_children(|button| {
                 button.spawn(Node {
                     width: Val::Px(10.0),
                     ..default()
                 });
-                frame::key_cap(button, "Enter", theme::muted());
+                frame::key_cap(button, "Enter", ink);
             });
         }
         foot.spawn(Node {

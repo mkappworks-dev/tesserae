@@ -15,7 +15,6 @@ use super::{
 use super::{theme, tool_panel};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -999,6 +998,7 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::input_focus::InputFocus;
+    use bevy::input_focus::tab_navigation::TabIndex;
     use bevy::ui_widgets::Activate;
 
     fn app() -> App {
