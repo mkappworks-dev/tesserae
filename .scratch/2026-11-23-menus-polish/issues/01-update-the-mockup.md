@@ -96,3 +96,5 @@ states set from the browser console where there is no route):
   `#toast` and `#notice-card` are gone. At 1280×720 with three toasts, bottom
   centre in game reaches the reticle; top right in menus and top centre in menus
   sit over the Worlds sheet's top edge; nothing touches the HUD or prompt bar.
+
+- Settings help strip (`/settings/behavior` and every category): the boxed help column is gone, so the rows take the sheet's full width. A strip along the bottom of the sheet, above the prompt bar and outside the scrolling rows, shows the focused or hovered setting's name in bold, its explanation muted, and a note on the current value where it has one (`VALUE_NOTES` in `mockup/settings.js`: Sprint speed, Removal and Crouch activation, Window mode, Display sync, Frame rate limit, Anti-aliasing, Render scale). With no row focused it shows the category's one-line description (`CATEGORY_HELP`). Rows that had no explanation got one. `frame({ strip })` puts it after the body.

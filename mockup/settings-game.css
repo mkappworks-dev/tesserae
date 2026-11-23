@@ -1,17 +1,11 @@
 /* Game-feel pass for this area; see menus.css for the shared shell. */
-.settings-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  gap: 28px;
-  align-items: start;
-}
-.settings-help {
-  position: sticky;
-  top: 0;
-  padding: 14px 16px;
-  background: rgb(255 255 255 / 0.04);
-  border-left: 2px solid var(--leaf);
-  min-height: 96px;
+.game .menu-sheet .settings-help {
+  flex: none;
+  min-height: calc(64px * var(--text-scale, 1) + 23px);
+  padding: 11px 32px 12px;
+  border-top: 1px solid var(--edge);
+  font-size: calc(13px * var(--text-scale, 1));
+  line-height: 1.45;
 }
 .settings-help b {
   display: block;
@@ -19,17 +13,16 @@
   font-weight: 600;
 }
 .settings-help p {
-  margin: 8px 0 0;
-  font-size: calc(13px * var(--text-scale, 1));
-  line-height: 1.55;
+  margin: 2px 0 0;
+  max-width: 90ch;
   color: var(--muted);
 }
-.game.large-text .settings-layout {
-  grid-template-columns: 1fr;
+.settings-help .settings-note {
+  color: var(--ink);
+  opacity: 0.8;
 }
-.game.large-text .settings-help {
-  position: static;
-  order: -1;
+.settings-help .settings-note:empty {
+  display: none;
 }
 .game .settings-rows .setting-row {
   padding: 10px 0;
