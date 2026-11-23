@@ -1,6 +1,6 @@
 # 25: Settings help strip
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [21: Window mode in Display settings](./21-window-mode-setting.md)
 (both change Settings)
@@ -21,10 +21,15 @@ per-value notes and the new row explanations come from the mockup's
 
 ## Acceptance criteria
 
-- [ ] The strip shows the focused row's name, explanation and value note, and
+- [x] The strip shows the focused row's name, explanation and value note, and
       updates as focus or hover moves
-- [ ] With nothing focused it shows the category description
-- [ ] Rows use the full width and scroll under a fixed strip
-- [ ] The strip matches the mockup on screen (capture)
+- [x] With nothing focused it shows the category description
+- [x] Rows use the full width and scroll under a fixed strip
+- [x] The strip matches the mockup on screen (capture)
 
 ## Comments
+
+The strip explains a row only under the pointer or with a visible focus
+(keys, controller). The automatic focus on opening a category is invisible to
+a mouse Player, so the strip opens on the category description; the mockup's
+browser instead rings and explains the first row on load.
