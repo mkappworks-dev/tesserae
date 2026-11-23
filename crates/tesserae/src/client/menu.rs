@@ -181,7 +181,7 @@ pub(super) fn toggle(
         }
         return;
     }
-    if actions.started(Action::Menu) || escape {
+    if actions.started(Action::Menu) || (escape && !docked.in_hand()) {
         if escape {
             actions.consume_cancel();
         }

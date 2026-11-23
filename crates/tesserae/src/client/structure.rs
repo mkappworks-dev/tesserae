@@ -48,15 +48,6 @@ pub(super) enum Tint {
 impl Tint {
     pub(super) const ALL: [Tint; 4] = [Tint::Free, Tint::Ground, Tint::Water, Tint::Blocked];
 
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Tint::Free => "Free",
-            Tint::Ground => "Replaces ground",
-            Tint::Water => "Replaces water",
-            Tint::Blocked => "Blocked",
-        }
-    }
-
     /// The prototype's tint and its opacity.
     pub(super) fn color(self) -> Color {
         match self {
@@ -140,6 +131,10 @@ pub(super) struct PlaceTool {
     /// The preview the Player pinned: its anchor, and the heading it was aimed along, which
     /// centres it as it did then.
     pub(super) pinned: Option<([i32; 3], Vec3)>,
+    /// The last Template was built whole: none is chosen until the Player picks again.
+    spent: bool,
+    /// Set by a build, for the panel to open full to pick the next.
+    pub(super) reopen: bool,
 }
 
 /// The presses [`intercept`] took this frame, for [`act`] to answer once the camera is placed.
@@ -152,20 +147,49 @@ pub(super) struct Pressed {
 }
 
 impl PlaceTool {
-    /// The chosen Template, or the first the World declares.
+    /// The chosen Template, or the first the World declares; none once one is built.
     pub(super) fn chosen<'a>(
         &self,
         catalogue: &'a ContentCatalogue,
     ) -> Option<&'a CatalogueTemplate> {
-        let named = self
-            .template
+        if self.spent {
+            return None;
+        }
+        self.named(catalogue).or(catalogue.templates.first())
+    }
+
+    fn named<'a>(&self, catalogue: &'a ContentCatalogue) -> Option<&'a CatalogueTemplate> {
+        self.template
             .as_ref()
-            .and_then(|name| catalogue.templates.iter().find(|t| t.name == *name));
-        named.or(catalogue.templates.first())
+            .and_then(|name| catalogue.templates.iter().find(|t| t.name == *name))
     }
 
     pub(super) fn choose(&mut self, name: &str) {
         self.template = Some(name.to_owned());
+        self.spent = false;
+    }
+
+    /// Chooses the Template `by` places on from the last one, round the list; after a build
+    /// the first step picks the one beside it.
+    pub(super) fn step(&mut self, catalogue: &ContentCatalogue, by: i32) {
+        let count = catalogue.templates.len() as i32;
+        if count == 0 {
+            return;
+        }
+        let shown = self.named(catalogue).or(self.chosen(catalogue));
+        let at = shown
+            .and_then(|t| catalogue.templates.iter().position(|o| o == t))
+            .map_or(if by > 0 { -1 } else { 0 }, |at| at as i32);
+        let name = catalogue.templates[(at + by).rem_euclid(count) as usize]
+            .name
+            .clone();
+        self.choose(&name);
+    }
+
+    /// Built whole: the Template is spent and the panel opens to pick the next.
+    pub(super) fn spend(&mut self) {
+        self.spent = true;
+        self.reopen = true;
     }
 
     pub(super) fn intent(
@@ -291,13 +315,11 @@ pub(super) fn intercept(
         actions.cancel(Action::Respawn);
         actions.cancel(Action::Turn);
     }
-    // A stray click elsewhere never throws the preview away; the keys cancel it from anywhere.
-    if tool.pinned.is_some()
-        && (actions.started(Action::ClearTool) || actions.started(Action::Structures))
-    {
+    // A stray click elsewhere never throws the preview away; the clear key cancels it from
+    // anywhere.
+    if tool.pinned.is_some() && actions.started(Action::ClearTool) {
         tool.pinned = None;
         actions.cancel(Action::ClearTool);
-        actions.cancel(Action::Structures);
     }
     *pressed = Pressed {
         place: ready && actions.started(Action::Place),
@@ -349,6 +371,7 @@ pub(super) fn act(
     {
         intents.write(intent);
         tool.pinned = None;
+        tool.spend();
     }
     if pressed.remove && on_pin {
         tool.pinned = None;
@@ -926,7 +949,34 @@ mod tests {
             intent.direction.abs_diff_eq(Vec3::NEG_Y, 1e-6),
             "along the heading it was pinned with"
         );
-        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        let tool = app.world().resource::<PlaceTool>();
+        assert!(tool.pinned.is_none());
+        let catalogue = app.world().resource::<Catalogue>().0.clone();
+        assert!(tool.chosen(&catalogue).is_none(), "built, so unselected");
+        assert!(tool.reopen, "and the panel asked to open");
+        assert!(
+            frame(&mut app, None, Some(MouseButton::Right)).is_empty() && aims(&mut app).is_empty(),
+            "with none chosen there is no ghost to pin"
+        );
+    }
+
+    #[test]
+    fn stepping_after_a_build_picks_the_template_beside_the_last() {
+        let catalogue = catalogue();
+        let mut tool = PlaceTool::default();
+        tool.choose(&catalogue.templates[0].name);
+        tool.spend();
+        tool.step(&catalogue, 1);
+        assert_eq!(
+            tool.chosen(&catalogue).map(|t| &t.name),
+            Some(&catalogue.templates[1].name)
+        );
+        tool.step(&catalogue, 1);
+        assert_eq!(
+            tool.chosen(&catalogue).map(|t| &t.name),
+            Some(&catalogue.templates[0].name),
+            "round the list"
+        );
     }
 
     #[test]
@@ -977,24 +1027,18 @@ mod tests {
     }
 
     #[test]
-    fn the_clear_and_structures_keys_cancel_the_pinned_preview_from_anywhere_and_are_taken() {
-        for key in [KeyCode::Backspace, KeyCode::KeyK] {
-            let mut app = pinned_app();
-            look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key);
-            app.update();
-            assert!(
-                app.world().resource::<PlaceTool>().pinned.is_none(),
-                "{key:?}"
-            );
-            let actions = app.world().resource::<Actions>();
-            assert!(
-                !actions.started(Action::ClearTool) && !actions.started(Action::Structures),
-                "{key:?}: the Tool stays in hand"
-            );
-        }
+    fn the_clear_key_cancels_the_pinned_preview_from_anywhere_and_is_taken() {
+        let mut app = pinned_app();
+        look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Backspace);
+        app.update();
+        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        assert!(
+            !app.world().resource::<Actions>().started(Action::ClearTool),
+            "the Tool stays in hand"
+        );
     }
 
     #[test]

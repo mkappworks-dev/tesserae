@@ -73,17 +73,6 @@ pub(super) fn button(
     }
 }
 
-/// Small spaced capitals above a heading.
-pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str) {
-    tracked(
-        parent,
-        label,
-        theme::weighted(11.0, theme::LABEL),
-        1.32,
-        theme::item_eyebrow(),
-    );
-}
-
 fn tab(
     parent: &mut ChildSpawnerCommands,
     label: impl Into<String>,
@@ -271,21 +260,4 @@ fn cinematic(
             Pickable::IGNORE,
         ))
         .id()
-}
-
-fn tracked(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    font: TextFont,
-    tracking: f32,
-    color: Color,
-) {
-    parent.spawn((
-        Text::new(label),
-        font,
-        bevy::text::LineHeight::RelativeToFont(1.5),
-        bevy::text::LetterSpacing::Px(tracking),
-        TextColor(color),
-        Pickable::IGNORE,
-    ));
 }
