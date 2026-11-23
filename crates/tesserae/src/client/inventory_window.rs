@@ -193,7 +193,6 @@ pub(super) fn plugin(app: &mut App) {
                     catalogue::fill,
                     crafting::fill,
                     catalogue::focus_search,
-                    catalogue::show_search,
                     tip::point,
                     tip::to_hotbar,
                     tip::show,
@@ -1272,6 +1271,7 @@ mod tests {
                 ("Q", "Drop"),
                 ("1–9", "To hotbar"),
                 ("S", "Sort"),
+                ("/", "Search"),
                 ("I", "Close"),
                 ("Esc", "Back"),
             ])
@@ -2006,7 +2006,58 @@ mod tests {
     }
 
     #[test]
-    fn search_waits_behind_its_icon_until_its_prompt_opens_it() {
+    fn the_search_is_a_field_under_the_tabs_that_filters_the_tiles() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        let world = app.world_mut();
+        let search = world
+            .query_filtered::<Entity, With<SearchBox>>()
+            .single(world)
+            .unwrap();
+        let grid = world
+            .query_filtered::<Entity, With<catalogue::Tiles>>()
+            .single(world)
+            .unwrap();
+        let pane = world.get::<ChildOf>(grid).unwrap().parent();
+        let rows: Vec<Entity> = world.get::<Children>(pane).unwrap().to_vec();
+        let row_of = |world: &World, mut at: Entity| {
+            while !rows.contains(&at) {
+                at = world.get::<ChildOf>(at)?.parent();
+            }
+            Some(at)
+        };
+        let tabs = find(
+            &mut app,
+            crafting::CraftControl::Pane(crafting::Pane::Catalogue),
+        );
+        let world = app.world_mut();
+        let (tabs, search_row) = (row_of(world, tabs), row_of(world, search));
+        assert_eq!(
+            [tabs, search_row, Some(grid)],
+            [Some(rows[0]), Some(rows[1]), Some(rows[2])],
+            "tabs, then the search, then the tiles"
+        );
+        assert!(
+            world
+                .query_filtered::<&Control, Without<super::super::frame::PromptKey>>()
+                .iter(world)
+                .all(|c| *c != Control::Search),
+            "no icon stands in for the field"
+        );
+
+        app.world_mut().resource_mut::<ui::Searches>().catalogue = "sa".into();
+        app.update();
+        let world = app.world_mut();
+        let tiles: Vec<_> = world
+            .query::<&CatalogueControl>()
+            .iter(world)
+            .copied()
+            .collect();
+        assert_eq!(tiles, [CatalogueControl::Tile(SAND)]);
+    }
+
+    #[test]
+    fn slash_focuses_the_search_which_then_takes_no_letter_prompts() {
         let mut app = app();
         press(&mut app, KeyCode::KeyI);
         let search = app
@@ -2014,16 +2065,7 @@ mod tests {
             .query_filtered::<Entity, With<SearchBox>>()
             .single(app.world())
             .unwrap();
-        let display = |app: &mut App| {
-            let world = app.world_mut();
-            let slot = world
-                .query_filtered::<&Node, With<catalogue::SearchSlot>>()
-                .single(world)
-                .unwrap();
-            slot.display
-        };
-        assert_eq!(display(&mut app), Display::None);
-        hover(&mut app, CatalogueControl::Tile(SAND));
+        hover(&mut app, slot(Slot::Backpack(0)));
         press(&mut app, KeyCode::Slash);
         assert_eq!(
             app.world()
@@ -2031,6 +2073,26 @@ mod tests {
                 .get(),
             Some(search)
         );
-        assert_eq!(display(&mut app), Display::Flex);
+        press(&mut app, KeyCode::KeyQ);
+        press(&mut app, KeyCode::KeyS);
+        server(&mut app);
+        assert!(
+            sent(&mut app).is_empty(),
+            "Q and S are letters in the field"
+        );
+        assert_eq!(count(&mut app, Slot::Backpack(0)).as_deref(), Some("64"));
+    }
+
+    #[test]
+    fn a_tooltip_shows_whole_past_the_edge_of_the_pane_it_points_into() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        hover(&mut app, CatalogueControl::Tile(WATER));
+        let world = app.world_mut();
+        let unclipped = world
+            .query_filtered::<(), (With<tip::Tooltip>, With<bevy::ui::OverrideClip>)>()
+            .iter(world)
+            .count();
+        assert_eq!(unclipped, 1, "the grid's scroll clip would cut it off");
     }
 }

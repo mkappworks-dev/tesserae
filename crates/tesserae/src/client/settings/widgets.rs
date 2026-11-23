@@ -374,7 +374,7 @@ pub(super) fn cap_visuals(
 }
 
 /// Mouse buttons as the short caps games print, so a cap fits its column.
-pub(super) fn cap_text(label: String) -> String {
+pub(in crate::client) fn cap_text(label: String) -> String {
     let label = binding_display(label);
     for (long, short) in [
         ("Left mouse", "LMB"),

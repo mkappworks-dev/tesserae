@@ -1,6 +1,6 @@
 # 11: Layout-ready card
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [02: Approve the mockup](./02-mockup-approval.md)
 
@@ -12,7 +12,9 @@ The Layout-ready HUD card matches the approved mockup: its icon, the layout, its
 
 ## Acceptance criteria
 
-- [ ] The card shows the three key caps and no sentence of keys
-- [ ] The look-around hint does not overlap the prompt bar
+- [x] The card shows the three key caps and no sentence of keys
+- [x] The look-around hint does not overlap the prompt bar
 
 ## Comments
+
+The card keeps its live line under the size (Hold a solid to lay it out, Aim at a surface, the will-be-placed tally, the A/B/C step) though the mockup has none: it is status, not keys. The per-step key hints of point to point (hold and drag to B, step back) are gone with the sentence. The caps are the first binding of Layout, Clear tool and Place, so a rebind shows; Backspace is drawn as ⌫. The look-around hint hides while Quick layout is open rather than moving.

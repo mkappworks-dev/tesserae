@@ -516,6 +516,44 @@ fn quit_exits_without_restarting() {
     assert!(app.world().resource::<Switch>().0.is_none());
 }
 
+#[test]
+fn q_on_the_title_quits_as_the_quit_item_does() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    press(&mut app, KeyCode::KeyQ);
+    assert_eq!(exits(&app), 1);
+    assert!(app.world().resource::<Switch>().0.is_none());
+}
+
+#[test]
+fn clicking_the_title_q_prompt_quits() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    let prompt = app
+        .world_mut()
+        .query_filtered::<(Entity, &Act), With<frame::PromptKey>>()
+        .iter(app.world())
+        .find_map(|(e, act)| (*act == Act::Quit).then_some(e))
+        .expect("a Quit prompt");
+    app.world_mut().trigger(Activate { entity: prompt });
+    app.update();
+    assert_eq!(exits(&app), 1);
+}
+
+#[test]
+fn q_elsewhere_in_the_launcher_does_not_quit() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Library);
+    press(&mut app, KeyCode::KeyQ);
+    assert_eq!(exits(&app), 0);
+}
+
 fn controls(app: &mut App, wanted: &Act) -> usize {
     app.world_mut()
         .query::<&Act>()
@@ -537,12 +575,21 @@ fn the_title_is_framed_and_only_it_quits() {
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     app.update();
-    assert_eq!(controls(&mut app, &Act::Quit), 1);
+    assert_eq!(
+        controls(&mut app, &Act::Quit),
+        2,
+        "the item and the Q prompt"
+    );
     assert_eq!(controls(&mut app, &Act::Settings), 1, "in the title's menu");
     assert!(shown(&mut app, &format!("v{}", env!("CARGO_PKG_VERSION"))));
     assert_eq!(
         frame::testing::prompts(&mut app),
-        keys(&[("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")])
+        keys(&[
+            ("Tab", "Navigate"),
+            ("Enter", "Select"),
+            ("Esc", "Back"),
+            ("Q", "Quit")
+        ])
     );
     act(&mut app, Act::Library);
     assert_eq!(controls(&mut app, &Act::Quit), 0, "only the title quits");
@@ -650,16 +697,16 @@ fn the_prompt_bar_shows_controller_buttons_after_controller_input_and_keys_after
             .map(|(cap, _)| cap)
             .collect()
     };
-    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc", "Q"]);
     tap(&mut app, pad, GamepadButton::DPadUp);
     assert_eq!(
         focused_act(&app),
         Some(Act::Worlds),
         "the D-pad moves focus"
     );
-    assert_eq!(caps(&mut app), ["Tab", "A", "B"]);
+    assert_eq!(caps(&mut app), ["Tab", "A", "B", "Q"]);
     key(&mut app, KeyCode::ArrowDown);
-    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc", "Q"]);
     assert_eq!(focused_act(&app), Some(Act::Continue));
     tap(&mut app, pad, GamepadButton::South);
     assert!(
@@ -3815,4 +3862,82 @@ fn left_and_right_change_edit_worlds_game_mode() {
     assert_eq!(focused_act(&app), Some(Act::EditMode(GameMode::Survival)));
     step(&mut app, Act::EditMode(GameMode::Survival), -1);
     assert_eq!(launcher(&app).modes.own, GameMode::Creative);
+}
+
+#[test]
+fn the_step_trust_dialog_shows_limits_only_under_details_and_enter_does_not_trust() {
+    let worlds = Directory::new();
+    let (mut app, _) = pad_app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    assert!(shown(&mut app, "RUNS CODE"));
+    assert!(shown(&mut app, "Build "), "each item names its build");
+    assert!(!shown(&mut app, "fuel per call"), "closed by default");
+    assert_eq!(focused_act(&app), Some(Act::Back));
+    key(&mut app, KeyCode::Enter);
+    app.update();
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Game));
+    assert!(!app.world().resource::<Installed>().untrusted.is_empty());
+
+    act(&mut app, Act::Next);
+    act(&mut app, Act::TrustDetails);
+    assert!(shown(&mut app, "fuel per call"));
+    assert!(shown(&mut app, "Access files, network or environment."));
+    assert_eq!(focused_act(&app), Some(Act::TrustDetails), "focus stays");
+    act(&mut app, Act::TrustDetails);
+    assert!(!shown(&mut app, "fuel per call"));
+
+    act(&mut app, Act::TrustDetails);
+    act(&mut app, Act::Back);
+    act(&mut app, Act::Next);
+    assert!(!shown(&mut app, "fuel per call"), "reopens closed");
+}
+
+#[test]
+fn the_trust_page_shows_limits_only_under_details() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
+    let mut app = app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Play(path));
+    app.update();
+    assert!(shown(&mut app, "Trust this item?"));
+    assert!(!shown(&mut app, "fuel per call"));
+    act(&mut app, Act::TrustDetails);
+    assert!(shown(&mut app, "fuel per call"));
+    act(&mut app, Act::TrustDetails);
+    assert!(!shown(&mut app, "fuel per call"));
+}
+
+#[test]
+fn trust_terms_read_what_an_item_can_do_and_each_kind_of_limit_from_its_prompt() {
+    let prompt = &Installed::fake(None, &["terra"]).untrusted[0].prompt;
+    let terms = pages::trust_terms(prompt);
+    let names: Vec<&str> = terms.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Can", "Cannot", "Time", "Memory", "Commands", "Content"]
+    );
+    assert_eq!(
+        terms[0].1,
+        "Add Materials and Shapes. A Game can change World generation and view distance. \
+         Place and remove Voxels in loaded Chunks in batches."
+    );
+    assert_eq!(terms[1].1, "Access files, network or environment.");
+    assert!(terms[2].1.contains("fuel per call \u{b7} yield every"));
+    let limit = tesserae_mods::ModLimits::HOST.call_fuel;
+    assert!(limit >= 10_000, "a number long enough to group");
+    assert!(!terms[2].1.contains(&limit.to_string()), "{}", terms[2].1);
+    assert!(terms[2].1.contains(','), "{}", terms[2].1);
 }

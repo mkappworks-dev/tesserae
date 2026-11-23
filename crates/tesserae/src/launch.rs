@@ -198,7 +198,11 @@ impl Installed {
             untrusted: untrusted
                 .iter()
                 .map(|id| Untrusted {
-                    prompt: format!("Mod: {id}"),
+                    prompt: tesserae_mods::trust_prompt(
+                        &test_manifest(id),
+                        tesserae_mods::ModLimits::HOST,
+                        "",
+                    ),
                     found: tesserae_mods::Found {
                         manifest: test_manifest(id),
                         dir: PathBuf::new(),
