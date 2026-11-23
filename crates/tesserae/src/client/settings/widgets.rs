@@ -815,7 +815,7 @@ pub(super) fn group(
     parent
         .spawn(Node {
             width: Val::Percent(100.0),
-            margin: UiRect::bottom(Val::Px(25.0)),
+            margin: UiRect::top(Val::Px(25.0)),
             flex_direction: FlexDirection::Column,
             flex_shrink: 0.0,
             ..default()

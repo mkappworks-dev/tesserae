@@ -396,6 +396,7 @@ fn worlds(
         title: "Worlds",
         subtitle: None,
         height: frame::SheetHeight::Content,
+        wide: true,
     };
     frame::sheet_with_foot(
         main,
@@ -412,14 +413,14 @@ fn worlds(
             }
             if l.entries.len() > SEARCH_FROM {
                 body.spawn(Node {
-                    max_width: Val::Px(420.0),
+                    width: Val::Percent(100.0),
                     flex_shrink: 0.0,
                     ..default()
                 })
                 .with_children(|f| {
                     text_field(f, Field::Search, &l.search, "", "Find a World\u{2026}");
                 });
-                gap(body, 14.0);
+                gap(body, 20.0);
                 list_scroll(body, scroll, |slots| {
                     world_slots(slots, l, installed, thumbnails, &mut focus);
                 });
@@ -846,6 +847,7 @@ fn library_page(
         title: "Mods",
         subtitle: None,
         height: frame::SheetHeight::Content,
+        wide: false,
     };
     frame::sheet_with_foot(
         main,
@@ -910,6 +912,7 @@ fn edit(
                 title: "Edit World",
                 subtitle: None,
                 height: frame::SheetHeight::Content,
+                wide: false,
             },
             page_scroll(scroll),
             |body| {
@@ -2915,6 +2918,7 @@ fn trust(
             title: &title,
             subtitle: Some(subtitle),
             height: frame::SheetHeight::Content,
+            wide: false,
         },
         page_scroll(scroll),
         |col| {
@@ -2979,6 +2983,7 @@ fn step_frame(
                 title,
                 subtitle,
                 height: frame::SheetHeight::Steps,
+                wide: false,
             },
             Some((primary.0.as_str(), primary.1)),
             scroll,
@@ -4624,6 +4629,19 @@ fn dialog(
     body: impl FnOnce(&mut ChildSpawnerCommands),
     actions: impl FnOnce(&mut ChildSpawnerCommands) -> Entity,
 ) -> Option<Entity> {
+    sized_dialog(root, None, title, body, actions)
+}
+
+/// The step Trust modal's item rows need the room of the prototype's 520 px.
+const TRUST_DIALOG: f32 = 520.0;
+
+fn sized_dialog(
+    root: &mut ChildSpawnerCommands,
+    width: Option<f32>,
+    title: &str,
+    body: impl FnOnce(&mut ChildSpawnerCommands),
+    actions: impl FnOnce(&mut ChildSpawnerCommands) -> Entity,
+) -> Option<Entity> {
     let mut focus = None;
     root.spawn((
         BackgroundColor(theme::overlay()),
@@ -4636,9 +4654,12 @@ fn dialog(
     ))
     .with_children(|overlay| {
         let mut dialog = overlay.spawn((TabGroup::modal(), cine::dialog_box()));
-        dialog
-            .entry::<Node>()
-            .and_modify(|mut node| node.max_height = Val::Percent(100.0));
+        dialog.entry::<Node>().and_modify(move |mut node| {
+            node.max_height = Val::Percent(100.0);
+            if let Some(width) = width {
+                node.width = Val::Px(width);
+            }
+        });
         dialog.with_children(|d| {
             cine::dialog_title(d, title);
             body(d);
@@ -4752,8 +4773,9 @@ fn step_trust(
     } else {
         format!("Trust {} items to continue?", items.len())
     };
-    dialog(
+    sized_dialog(
         root,
+        Some(TRUST_DIALOG),
         &title,
         |d| {
             cine::dialog_text(
