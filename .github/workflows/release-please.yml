@@ -18,6 +18,7 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       release_id: ${{ steps.release.outputs.id }}
       sha: ${{ steps.release.outputs.sha }}
+      pr_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName }}
     steps:
       - id: release
         uses: googleapis/release-please-action@v5
@@ -25,6 +26,26 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
+  # release-please's TOML updater matches no Cargo.lock entry, so the release PR
+  # would leave the workspace crates' lock versions behind the bumped manifests.
+  sync-lockfile:
+    needs: release-please
+    if: needs.release-please.outputs.pr_branch != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.pr_branch }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      - run: cargo update --workspace
+      - name: Commit the lockfile
+        run: |
+          git diff --quiet Cargo.lock && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: sync Cargo.lock with the release version" Cargo.lock
+          git push
 
   build-and-publish:
     needs: release-please
