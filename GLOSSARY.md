@@ -523,6 +523,16 @@ the trunk or a leader, so it is felled and cut like any trunk Voxel. A
 **Lobe** — an ellipsoid of a tree's canopy Material around a limb or leader tip;
 the crown on the trunk's top is the largest lobe.
 
+**Storey** — one height band a tree row may declare: a share of its trees, their
+trunk height and their crown's size. Each tree belongs to one, fixed by the
+World seed and where it stands, so a forest has trees above and below its
+canopy. Where crowns meet, the taller storey's Voxel wins. A tree row with no
+storeys is one band.
+
+**Canopy variant** — one of several canopy Materials a tree row may declare,
+alike but for colour. Each tree grows one, fixed by the World seed and where it
+stands, so neighbouring crowns read as separate trees.
+
 **Vines** (generated) — climbers that worldgen hangs from a tree's canopy. A
 growing sapling never makes them.
 
