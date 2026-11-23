@@ -4174,6 +4174,67 @@ fn the_step_trust_dialog_shows_limits_only_under_details_and_enter_does_not_trus
 }
 
 #[test]
+fn the_trust_details_panel_takes_focus_and_scrolls_by_arrow_and_d_pad_without_trusting() {
+    let worlds = Directory::new();
+    let (mut app, pad) = pad_app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+    );
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    act(&mut app, Act::New);
+    act(&mut app, Act::Next);
+    act(&mut app, Act::TrustDetails);
+    let panel = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::client::pad::Reader>>()
+        .single(app.world())
+        .expect("the open Details panel is focusable");
+    assert!(
+        app.world()
+            .get::<bevy::input_focus::tab_navigation::TabIndex>(panel)
+            .is_some()
+    );
+    app.world_mut().entity_mut(panel).insert((
+        ComputedNode {
+            size: Vec2::new(400.0, 120.0),
+            content_size: Vec2::new(400.0, 600.0),
+            ..default()
+        },
+        UiGlobalTransform::from_translation(Vec2::new(200.0, 300.0)),
+        InheritedVisibility::VISIBLE,
+    ));
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(panel, bevy::input_focus::FocusCause::Navigated);
+    let scrolled = |app: &App| app.world().get::<ScrollPosition>(panel).unwrap().y;
+
+    key(&mut app, KeyCode::ArrowDown);
+    app.update();
+    let by_key = scrolled(&app);
+    assert!(by_key > 0.0, "Down scrolls the panel");
+    assert_eq!(app.world().resource::<InputFocus>().get(), Some(panel));
+    tap(&mut app, pad, GamepadButton::DPadDown);
+    let by_pad = scrolled(&app);
+    assert!(by_pad > by_key, "the D-pad scrolls it too");
+    key(&mut app, KeyCode::ArrowUp);
+    app.update();
+    assert!(scrolled(&app) < by_pad, "Up scrolls back");
+    assert_eq!(app.world().resource::<InputFocus>().get(), Some(panel));
+
+    key(&mut app, KeyCode::Enter);
+    app.update();
+    tap(&mut app, pad, GamepadButton::South);
+    assert!(
+        !app.world().resource::<Installed>().untrusted.is_empty(),
+        "neither Enter nor A on the panel trusts"
+    );
+    assert!(shown(&mut app, "fuel per call"), "the dialog stays open");
+}
+
+#[test]
 fn the_trust_page_shows_limits_only_under_details() {
     let worlds = Directory::new();
     let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();

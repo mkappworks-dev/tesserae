@@ -2676,8 +2676,13 @@ fn trust_details(
         .partition(|u| u.found.manifest.declaration.is_some());
     parent
         .spawn((
-            BackgroundColor(theme::CARD),
-            BorderColor::all(theme::edge()),
+            crate::client::pad::Reader,
+            TabIndex(0),
+            Pick {
+                fill: theme::CARD,
+                edge: theme::edge(),
+                hover: None,
+            },
             Node {
                 flex_direction: FlexDirection::Column,
                 min_height: Val::Px(120.0),
