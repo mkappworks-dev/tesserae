@@ -74,8 +74,8 @@ const KEY_EDGE: Color = Color::srgb_u8(0x62, 0x65, 0x6a);
 /// Over the World while the Inventory is open: it dims without the menus'
 /// shade so the World stays readable while sorting.
 pub(super) const INVENTORY_SCRIM: Color = Color::srgba_u8(3, 4, 5, 0xdb);
-/// Under a dialog.
-const OVERLAY: Color = Color::srgba_u8(0x09, 0x0a, 0x0c, 0xb3);
+/// Under a dialog: the prototype's 0.70 alpha as [`css_dim`] gives it.
+const OVERLAY: Color = Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe2);
 /// The shade over the scenery or the World, darkest at the left and the bottom.
 const SHADE: [u8; 3] = [0x19, 0x22, 0x28];
 /// An amber that marks a refusal or a change still to apply.
@@ -326,10 +326,27 @@ pub(super) fn focus_ring() -> Outline {
     )
 }
 
+/// `rgb` at the alpha that darkens a mid-grey backdrop as much as CSS's `css_alpha` does: Bevy UI
+/// blends in linear light, a browser in sRGB, so the prototype's alpha alone dims too little.
+pub(super) fn css_dim(rgb: [u8; 3], css_alpha: f32) -> Color {
+    let linear = |srgb: f32| Color::srgb(srgb, srgb, srgb).to_linear().red;
+    let grey = linear(0.5);
+    let alpha = rgb
+        .iter()
+        .map(|&c| {
+            let c = f32::from(c) / 255.0;
+            let dimmed = linear(css_alpha * c + (1.0 - css_alpha) * 0.5);
+            (grey - dimmed) / (grey - linear(c))
+        })
+        .sum::<f32>()
+        / 3.0;
+    let [r, g, b] = rgb;
+    Color::srgba_u8(r, g, b, 0).with_alpha(alpha)
+}
+
 /// The shade over the World or the launcher's backdrop.
 pub(super) fn shade() -> BackgroundGradient {
-    let [r, g, b] = SHADE;
-    let at = |alpha: f32| Color::srgba_u8(r, g, b, (alpha * 255.0).round() as u8);
+    let at = |alpha: f32| css_dim(SHADE, alpha);
     BackgroundGradient(vec![
         LinearGradient::to_right(vec![
             ColorStop::new(at(0.48), Val::Percent(0.0)),
@@ -604,6 +621,40 @@ mod tests {
             let light = |c: Color| c.to_linear().red;
             assert!(light(stronger) > light(normal), "{edge} is not brighter");
         }
+    }
+
+    /// `dim` over a mid-grey backdrop, blended in linear light as Bevy UI does, against the
+    /// prototype's `css` colour at `css_alpha` blended in sRGB as a browser does.
+    fn assert_dims_like_the_prototype(dim: Color, css: [u8; 3], css_alpha: f32) {
+        let grey = Color::srgb(0.5, 0.5, 0.5).to_linear();
+        let over = dim.to_linear();
+        let a = over.alpha;
+        let ours = Color::LinearRgba(LinearRgba::rgb(
+            a * over.red + (1.0 - a) * grey.red,
+            a * over.green + (1.0 - a) * grey.green,
+            a * over.blue + (1.0 - a) * grey.blue,
+        ))
+        .to_srgba();
+        let theirs = css.map(|c| css_alpha * f32::from(c) / 255.0 + (1.0 - css_alpha) * 0.5);
+        for (got, want) in [ours.red, ours.green, ours.blue].into_iter().zip(theirs) {
+            assert!((got - want).abs() < 0.01, "{ours:?} vs {theirs:?}");
+        }
+    }
+
+    #[test]
+    fn a_dialogs_overlay_dims_as_much_as_the_prototypes() {
+        assert_dims_like_the_prototype(OVERLAY, [0x09, 0x0a, 0x0c], 0.70);
+    }
+
+    #[test]
+    fn the_shade_dims_as_much_as_the_prototypes() {
+        let BackgroundGradient(layers) = shade();
+        let darkest = |layer: &Gradient| match layer {
+            Gradient::Linear(linear) => linear.stops[0].color,
+            other => panic!("{other:?} is not linear"),
+        };
+        assert_dims_like_the_prototype(darkest(&layers[0]), SHADE, 0.48);
+        assert_dims_like_the_prototype(darkest(&layers[1]), SHADE, 0.24);
     }
 
     #[test]

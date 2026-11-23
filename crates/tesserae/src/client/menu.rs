@@ -454,7 +454,7 @@ fn render(
 /// The prototype's shade: dark behind the list, clear by the middle of the screen.
 fn pause_shade() -> BackgroundGradient {
     BackgroundGradient::from(LinearGradient::to_right(vec![
-        ColorStop::new(Color::srgba_u8(6, 8, 7, 191), Val::Percent(0.0)),
+        ColorStop::new(theme::css_dim([6, 8, 7], 0.75), Val::Percent(0.0)),
         ColorStop::new(Color::NONE, Val::Percent(55.0)),
     ]))
 }
