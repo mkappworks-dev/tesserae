@@ -633,6 +633,15 @@ impl Bindings {
         }
         self.label_for(labels.device, action, labels)
     }
+    /// The first binding of `action` on `device`, for a cap with no room for the alternatives.
+    pub fn first(&self, device: Device, action: Action) -> Option<Binding> {
+        self.map(device)
+            .get(&action)?
+            .iter()
+            .flatten()
+            .next()
+            .copied()
+    }
     pub fn label_for(&self, device: Device, action: Action, labels: &Labels) -> String {
         let alternatives: Vec<_> = self
             .map(device)

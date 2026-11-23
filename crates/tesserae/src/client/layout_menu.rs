@@ -815,11 +815,17 @@ fn prompts(kind: Kind) -> Vec<Prompt<Control>> {
 /// The first key bound to `action`, as a cap: the card has no room for every
 /// alternative.
 fn card_cap(action: Action, bindings: &Bindings, labels: &Labels) -> String {
-    let all = bindings.label(action, labels);
-    let first = all.split(" / ").next().unwrap_or_default().to_owned();
-    match super::settings::cap_text(first).as_str() {
-        "Backspace" => "⌫".to_owned(),
-        other => other.to_owned(),
+    use super::actions::{Binding, Modifier, Trigger};
+    if labels.touch {
+        return bindings.label(action, labels);
+    }
+    match bindings.first(labels.device, action) {
+        Some(Binding {
+            trigger: Trigger::Key(KeyCode::Backspace),
+            modifier: Modifier::None,
+        }) => "⌫".to_owned(),
+        Some(binding) => super::settings::cap_text(labels.binding(binding)),
+        None => "Unbound".to_owned(),
     }
 }
 
