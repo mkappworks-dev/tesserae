@@ -267,9 +267,11 @@ document.addEventListener("keydown", (e) => {
     e.target.matches?.("input,textarea,select")
   )
     return;
+  // Quick layout and the place Tool are two ways to place; one at a time.
   if (
     e.key.toLowerCase() === "l" &&
-    ["play", "layout"].includes(state.screen)
+    ["play", "layout"].includes(state.screen) &&
+    state.heldTool !== "Place"
   ) {
     e.preventDefault();
     e.stopImmediatePropagation();
