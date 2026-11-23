@@ -76,6 +76,9 @@ const KEY_EDGE: Color = Color::srgb_u8(0x62, 0x65, 0x6a);
 pub(super) const INVENTORY_SCRIM: Color = Color::srgba_u8(3, 4, 5, 0xdb);
 /// Under a dialog: the prototype's 0.70 alpha as [`css_dim`] gives it.
 const OVERLAY: Color = Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe2);
+const OVERLAY_RGB: [u8; 3] = [0x09, 0x0a, 0x0c];
+/// The prototype has no stronger dim; this CSS alpha makes it plainly darker than its 0.70.
+const STRONGER_OVERLAY_ALPHA: f32 = 0.85;
 /// The shade over the scenery or the World, darkest at the left and the bottom.
 const SHADE: [u8; 3] = [0x19, 0x22, 0x28];
 /// An amber that marks a refusal or a change still to apply.
@@ -188,7 +191,7 @@ by_contrast! {
     NOTICE_CARD, notice_card, Color::srgb_u8(0x0b, 0x0b, 0x0d);
     FULL_NOTICE, full_notice, Color::srgb_u8(11, 11, 13);
     BAND, band, Color::srgb_u8(42, 52, 59);
-    OVERLAY, overlay, Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe6);
+    OVERLAY, overlay, css_dim(OVERLAY_RGB, STRONGER_OVERLAY_ALPHA);
     EDGE, edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     FIELD_EDGE, field_edge, Color::srgb_u8(0xb0, 0xb4, 0xbb);
     NOTICE_EDGE, notice_edge, Color::srgb_u8(0xd0, 0xd8, 0xdd);
@@ -622,24 +625,43 @@ mod tests {
     /// `dim` over a mid-grey backdrop, blended in linear light as Bevy UI does, against the
     /// prototype's `css` colour at `css_alpha` blended in sRGB as a browser does.
     fn assert_dims_like_the_prototype(dim: Color, css: [u8; 3], css_alpha: f32) {
-        let grey = Color::srgb(0.5, 0.5, 0.5).to_linear();
-        let over = dim.to_linear();
-        let a = over.alpha;
-        let ours = Color::LinearRgba(LinearRgba::rgb(
-            a * over.red + (1.0 - a) * grey.red,
-            a * over.green + (1.0 - a) * grey.green,
-            a * over.blue + (1.0 - a) * grey.blue,
-        ))
-        .to_srgba();
+        let ours = over_grey(dim);
         let theirs = css.map(|c| css_alpha * f32::from(c) / 255.0 + (1.0 - css_alpha) * 0.5);
         for (got, want) in [ours.red, ours.green, ours.blue].into_iter().zip(theirs) {
             assert!((got - want).abs() < 0.01, "{ours:?} vs {theirs:?}");
         }
     }
 
+    /// `dim` over a mid-grey backdrop, blended in linear light as Bevy UI does.
+    fn over_grey(dim: Color) -> Srgba {
+        let (over, grey) = (dim.to_linear(), Color::srgb(0.5, 0.5, 0.5).to_linear());
+        let a = over.alpha;
+        Color::LinearRgba(LinearRgba::rgb(
+            a * over.red + (1.0 - a) * grey.red,
+            a * over.green + (1.0 - a) * grey.green,
+            a * over.blue + (1.0 - a) * grey.blue,
+        ))
+        .to_srgba()
+    }
+
     #[test]
     fn a_dialogs_overlay_dims_as_much_as_the_prototypes() {
-        assert_dims_like_the_prototype(OVERLAY, [0x09, 0x0a, 0x0c], 0.70);
+        assert_dims_like_the_prototype(OVERLAY, OVERLAY_RGB, 0.70);
+    }
+
+    #[test]
+    fn the_stronger_overlay_dims_clearly_more() {
+        let pairs: std::collections::HashMap<_, _> = contrast_pairs()
+            .into_iter()
+            .map(|(name, normal, stronger)| (name, (normal, stronger)))
+            .collect();
+        let (normal, stronger) = pairs["OVERLAY"];
+        assert_dims_like_the_prototype(stronger, OVERLAY_RGB, STRONGER_OVERLAY_ALPHA);
+        let (normal, stronger) = (over_grey(normal).green, over_grey(stronger).green);
+        assert!(
+            normal - stronger > 0.05,
+            "mid-grey dims to {stronger} under stronger contrast, {normal} normally"
+        );
     }
 
     #[test]
