@@ -47,21 +47,17 @@ pub(super) fn distance(
     let shown = d.sliders(game);
     group(list, "Distant terrain", |card| {
         setting_row(card, "Preset", &preset_hint(d.preset, game), |row| {
-            segment(row, |buttons| {
-                for preset in DistancePreset::ALL {
-                    option(
-                        buttons,
-                        preset.label(),
-                        Operation::Distance(preset),
-                        d.preset == preset,
-                    );
-                }
-            })
+            select(
+                row,
+                d.preset,
+                DistancePreset::ALL.map(|preset| (preset, preset.label().to_owned())),
+                Operation::Distance,
+            )
         });
         setting_row(
             card,
             "Reach",
-            "How far distant terrain is drawn, in km.",
+            "How far distant terrain is drawn, in km. Choose Custom under Preset to move it.",
             |row| {
                 let max = *quality::reach_range(game).end();
                 locked_slider(row, Scalar::Reach(max), shown.reach_km as f32, locked)

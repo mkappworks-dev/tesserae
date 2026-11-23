@@ -59,6 +59,8 @@ pub(super) enum Cap {
     Esc,
     Del,
     Letter(char),
+    /// A pointer gesture or a key range, named only: it fires nothing.
+    Text(&'static str),
 }
 
 impl Cap {
@@ -70,6 +72,7 @@ impl Cap {
             Cap::Esc => "Esc".into(),
             Cap::Del => "Del".into(),
             Cap::Letter(c) => c.to_ascii_uppercase().to_string(),
+            Cap::Text(text) => text.into(),
         }
     }
 
@@ -109,6 +112,7 @@ impl Cap {
                 let at = (c.to_ascii_uppercase() as u8 - b'A') as usize;
                 std::slice::from_ref(&LETTERS[at])
             }
+            Cap::Letter('/') => &[KeyCode::Slash],
             _ => &[],
         }
     }
@@ -120,7 +124,7 @@ impl Cap {
             Cap::CtrlEnter => Some(GamepadButton::Start),
             Cap::Esc => Some(GamepadButton::East),
             Cap::Del => Some(GamepadButton::North),
-            Cap::Tab | Cap::Letter(_) => None,
+            Cap::Tab | Cap::Letter(_) | Cap::Text(_) => None,
         }
     }
 }

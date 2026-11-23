@@ -339,9 +339,22 @@ type Structure<'w, 's> = (
     Sliders<'w, 's>,
     Query<'w, 's, (Entity, &'static super::settings::Operation)>,
     Query<'w, 's, (), With<bevy::ui_widgets::TextInput>>,
+    Query<'w, 's, (), With<Stepper>>,
 );
 struct Candidate {
     area: FocusableArea,
+}
+
+/// A control that Left and Right change, as a slider's value, instead of
+/// moving focus off it.
+#[derive(Component)]
+pub(super) struct Stepper;
+
+/// Left (`by` -1) or Right (+1) on a focused [`Stepper`].
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub(super) struct Step {
+    pub entity: Entity,
+    pub by: i32,
 }
 
 fn area(entity: Entity, node: &ComputedNode, transform: &UiGlobalTransform) -> FocusableArea {
@@ -359,7 +372,7 @@ fn navigate(
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
     focusables: Focusables,
-    (groups, parents, disabled, sliders, tabs, typing): Structure,
+    (groups, parents, disabled, sliders, tabs, typing, steppers): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
     let owner = ownership.owner;
@@ -483,14 +496,18 @@ fn navigate(
     let entity = current.area.entity;
     if step && let Some(direction) = direction {
         visible.0 = true;
-        if matches!(direction, CompassOctant::East | CompassOctant::West)
-            && let Ok((value, range, slider_step)) = sliders.get(entity)
-        {
-            let sign = if direction == CompassOctant::East {
-                1.0
-            } else {
-                -1.0
-            };
+        let sign = if direction == CompassOctant::East {
+            1.0
+        } else {
+            -1.0
+        };
+        let sideways = matches!(direction, CompassOctant::East | CompassOctant::West);
+        if sideways && steppers.contains(entity) {
+            commands.trigger(Step {
+                entity,
+                by: sign as i32,
+            });
+        } else if sideways && let Ok((value, range, slider_step)) = sliders.get(entity) {
             commands.trigger(ValueChange {
                 source: entity,
                 value: range.clamp(value.0 + sign * slider_step.0),
@@ -895,6 +912,79 @@ mod tests {
         assert_eq!(initial(&candidates, None), entity(3));
         assert_eq!(initial(&candidates[..2], None), entity(2));
         assert_eq!(initial(&candidates, Some(Vec2::new(45.0, 95.0))), entity(1));
+    }
+
+    #[test]
+    fn left_and_right_step_a_focused_selector_instead_of_moving_focus() {
+        #[derive(Resource, Default)]
+        struct Steps(Vec<i32>);
+        let mut app = App::new();
+        app.add_plugins((bevy::time::TimePlugin, bevy::input::InputPlugin));
+        launcher(&mut app);
+        app.init_resource::<InputFocus>()
+            .init_resource::<Steps>()
+            .add_observer(|step: On<Step>, mut steps: ResMut<Steps>| steps.0.push(step.by));
+        let window = app
+            .world_mut()
+            .spawn((
+                PrimaryWindow,
+                Window {
+                    focused: true,
+                    ..default()
+                },
+            ))
+            .id();
+        let control = |app: &mut App, x: f32| {
+            app.world_mut()
+                .spawn((
+                    Button,
+                    ComputedNode {
+                        size: Vec2::new(40.0, 20.0),
+                        ..default()
+                    },
+                    UiGlobalTransform::from_translation(Vec2::new(x, 0.0)),
+                    InheritedVisibility::VISIBLE,
+                ))
+                .id()
+        };
+        let (selector, plain, beside) = (
+            control(&mut app, 0.0),
+            control(&mut app, 200.0),
+            control(&mut app, 100.0),
+        );
+        app.world_mut().entity_mut(selector).insert(Stepper);
+        let arrow = |app: &mut App, key_code: KeyCode| {
+            for state in [
+                bevy::input::ButtonState::Pressed,
+                bevy::input::ButtonState::Released,
+            ] {
+                app.world_mut()
+                    .write_message(bevy::input::keyboard::KeyboardInput {
+                        key_code,
+                        logical_key: bevy::input::keyboard::Key::Unidentified(
+                            bevy::input::keyboard::NativeKey::Unidentified,
+                        ),
+                        state,
+                        text: None,
+                        repeat: false,
+                        window,
+                    });
+                app.update();
+            }
+        };
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(selector, FocusCause::Navigated);
+        arrow(&mut app, KeyCode::ArrowRight);
+        arrow(&mut app, KeyCode::ArrowLeft);
+        assert_eq!(app.world().resource::<Steps>().0, [1, -1]);
+        assert_eq!(app.world().resource::<InputFocus>().get(), Some(selector));
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(plain, FocusCause::Navigated);
+        arrow(&mut app, KeyCode::ArrowLeft);
+        assert_eq!(app.world().resource::<InputFocus>().get(), Some(beside));
+        assert_eq!(app.world().resource::<Steps>().0.len(), 2);
     }
 
     #[test]

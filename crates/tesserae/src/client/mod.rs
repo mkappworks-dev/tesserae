@@ -130,6 +130,8 @@ pub fn plugin(app: &mut App) {
     ));
     app.add_plugins((hand_anim::plugin, hand_fx::plugin, place_settle::plugin));
     app.add_plugins((menu_blur::plugin, held_item::plugin, viewmodel::plugin));
+    // In-game screens on the frame need it whether or not the launcher ran.
+    frame::plugin(app);
     app.add_plugins((
         view::plugin,
         loading::plugin,

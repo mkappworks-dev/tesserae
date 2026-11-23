@@ -57,11 +57,6 @@ pub(super) const PILL_INK: Color = Color::srgb_u8(0xf0, 0xf2, 0xed);
 pub(super) const FOCUS: Color = Color::srgb_u8(0xe2, 0xd5, 0xab);
 /// The focus ring on checkboxes and slots, which sit tighter.
 pub(super) const FOCUS_TIGHT: Color = Color::srgb_u8(0xf3, 0xf6, 0xec);
-pub(super) const MENU: Color = Color::srgb_u8(0x15, 0x15, 0x17);
-const MENU_EDGE: Color = Color::srgb_u8(0x82, 0x82, 0x8a);
-pub(super) const OPTION_HOVER: Color = Color::srgb_u8(0x30, 0x30, 0x35);
-pub(super) const OPTION_HOVER_EDGE: Color = Color::srgb_u8(0x77, 0x77, 0x80);
-pub(super) const OPTION_CHOSEN_INK: Color = Color::srgb_u8(0xdc, 0xe6, 0xd1);
 pub(super) const SEGMENT_ON: Color = Color::srgb_u8(0x35, 0x39, 0x2f);
 pub(super) const SEGMENT_ON_EDGE: Color = Color::srgb_u8(0xaa, 0xb3, 0x9e);
 pub(super) const SEGMENT_ON_INK: Color = Color::srgb_u8(0xf1, 0xf3, 0xed);
@@ -69,7 +64,6 @@ pub(super) const CHECK_EDGE: Color = Color::srgb_u8(0x05, 0x05, 0x06);
 pub(super) const CHECK_TOP: Color = Color::srgb_u8(0x1b, 0x1c, 0x1f);
 pub(super) const CHECK_BOTTOM: Color = Color::srgb_u8(0x13, 0x14, 0x16);
 pub(super) const CHECK_RING: Color = Color::srgb_u8(0x5a, 0x5d, 0x63);
-pub(super) const CHECK_RING_HOVER: Color = Color::srgb_u8(0x9a, 0x9f, 0x93);
 pub(super) const CHECK_RING_ON: Color = Color::srgb_u8(0xe6, 0xee, 0xdb);
 /// A native range input's unfilled track, which the prototype leaves to Chrome.
 pub(super) const TRACK: Color = Color::srgb_u8(0xef, 0xef, 0xef);
@@ -197,9 +191,6 @@ by_contrast! {
     CATEGORY_INK, category_ink, INK;
     PLACEHOLDER, placeholder, INK;
     ITEM_SOFT, item_soft, ITEM_INK;
-    ITEM_CAPACITY, item_capacity, ITEM_INK;
-    ITEM_SOURCE, item_source, ITEM_INK;
-    ITEM_TERM, item_term, ITEM_INK;
     HUD_QUIET_INK, hud_quiet_ink, INK;
     PANEL, panel, Color::srgb_u8(0x11, 0x11, 0x12);
     SHEET_HEADER, sheet_header, Color::srgb_u8(0x17, 0x19, 0x1c);
@@ -209,12 +200,9 @@ by_contrast! {
     OVERLAY, overlay, Color::srgba_u8(0x09, 0x0a, 0x0c, 0xe6);
     EDGE, edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     FIELD_EDGE, field_edge, Color::srgb_u8(0xb0, 0xb4, 0xbb);
-    MENU_EDGE, menu_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     NOTICE_EDGE, notice_edge, Color::srgb_u8(0xd0, 0xd8, 0xdd);
     KEY_EDGE, key_edge, Color::srgb_u8(0xa2, 0xa6, 0xad);
     SLOT_RIM, slot_rim, Color::srgb_u8(130, 134, 142);
-    ITEM_RULE, item_rule, Color::srgb_u8(0x8a, 0x8a, 0x94);
-    ITEM_FOOTER_RULE, item_footer_rule, Color::srgb_u8(0x8a, 0x8a, 0x94);
     ITEM_ROW_RULE, item_row_rule, Color::srgb_u8(0x6e, 0x6e, 0x78);
     BAND_RULE, band_rule, Color::srgba_u8(220, 220, 225, 120);
     RING, ring_color, Color::srgba_u8(0xff, 0xff, 0xff, 0x59);
@@ -377,36 +365,16 @@ pub(super) const TEXT_STATUS: f32 = 24.0;
 
 // Pass D: the Inventory, the Catalogue and the quick Layout panel.
 pub(super) const ITEM_SURFACE: Color = Color::srgb_u8(0x0b, 0x0b, 0x0d);
-pub(super) const ITEM_FOOTER: Color = Color::srgb_u8(0x0d, 0x0d, 0x10);
-pub(super) const ITEM_INSPECTOR: Color = Color::srgb_u8(0x13, 0x13, 0x15);
-pub(super) const CATALOGUE_FOOTER: Color = Color::srgb_u8(0x0e, 0x0e, 0x11);
-const ITEM_RULE: Color = Color::srgb_u8(0x45, 0x45, 0x4c);
-const ITEM_FOOTER_RULE: Color = Color::srgb_u8(0x55, 0x55, 0x5e);
 const ITEM_ROW_RULE: Color = Color::srgb_u8(0x34, 0x34, 0x3c);
 pub(super) const ITEM_INK: Color = Color::srgb_u8(0xf4, 0xf4, 0xed);
 /// Hints and the hotbar caption under the grids.
 const ITEM_SOFT: Color = Color::srgb_u8(0xad, 0xaf, 0xb9);
-const ITEM_CAPACITY: Color = Color::srgb_u8(0xb9, 0xbc, 0xc4);
 pub(super) const ITEM_FULL: Color = Color::srgb_u8(0xe8, 0xd2, 0x9f);
-const ITEM_SOURCE: Color = Color::srgb_u8(0x99, 0x9c, 0xa7);
-const ITEM_TERM: Color = Color::srgb_u8(0xae, 0xb0, 0xb8);
-pub(super) const ITEM_VALUE: Color = Color::srgb_u8(0xec, 0xec, 0xec);
 pub(super) const ITEM_CAPTION: Color = Color::srgb_u8(0xa1, 0xa5, 0xaf);
-pub(super) const ITEM_EMPTY_ICON: Color = Color::srgb_u8(0x8b, 0x92, 0x9d);
 pub(super) const CATALOGUE_SUBTITLE: Color = Color::srgb_u8(0xa9, 0xad, 0xb6);
-pub(super) const CATALOGUE_ID: Color = Color::srgb_u8(0x9f, 0xa4, 0xad);
-pub(super) const CATALOGUE_LABEL: Color = Color::srgb_u8(0xc3, 0xc6, 0xcc);
-pub(super) const RECIPE: Color = Color::srgb_u8(0x14, 0x15, 0x18);
-pub(super) const RECIPE_EDGE: Color = Color::srgb_u8(0x2a, 0x2b, 0x31);
-pub(super) const RECIPE_HOVER_EDGE: Color = Color::srgb_u8(0x55, 0x57, 0x5f);
-pub(super) const RECIPE_CHOSEN: Color = Color::srgb_u8(0x1a, 0x1f, 0x1a);
 /// An input the Inventory holds too few of.
 pub(super) const RECIPE_SHORT: Color = Color::srgb_u8(0xd9, 0x9a, 0x83);
-pub(super) const TEXT_RECIPE: f32 = 13.0;
 pub(super) const RADIUS_ROW: f32 = 6.0;
-pub(super) const BADGE: Color = Color::srgb_u8(0x23, 0x26, 0x20);
-pub(super) const BADGE_EDGE: Color = Color::srgb_u8(0x57, 0x5a, 0x53);
-pub(super) const BADGE_INK: Color = Color::srgb_u8(0xc2, 0xc9, 0xba);
 pub(super) const CLOSE_EDGE: Color = Color::srgb_u8(0x51, 0x51, 0x59);
 pub(super) const CLOSE_INK: Color = Color::srgb_u8(0xd9, 0xda, 0xe0);
 pub(super) const KEY_CHIP: Color = Color::srgba_u8(0, 0, 0, 0xbb);
@@ -417,10 +385,7 @@ pub(super) const CHIP: Color = Color::srgb_u8(0x17, 0x18, 0x1b);
 pub(super) const CHIP_EDGE: Color = Color::srgb_u8(0x45, 0x46, 0x4d);
 pub(super) const CHIP_INK: Color = Color::srgb_u8(0xc4, 0xc7, 0xcd);
 pub(super) const CHIP_ON: Color = Color::srgb_u8(0xe9, 0xee, 0xe0);
-pub(super) const CHIP_ON_INK: Color = Color::srgb_u8(0x11, 0x11, 0x11);
 pub(super) const PRESET_ON_INK: Color = Color::srgb_u8(0xf3, 0xf5, 0xee);
-pub(super) const SHAPE_CHIP_ON: Color = Color::srgb_u8(0x1f, 0x26, 0x1f);
-pub(super) const SHAPE_CHIP_ON_EDGE: Color = Color::srgb_u8(0xc1, 0xcd, 0xb5);
 pub(super) const STEPPER: Color = Color::srgb_u8(0x18, 0x18, 0x1d);
 pub(super) const STEPPER_EDGE: Color = Color::srgb_u8(0x65, 0x65, 0x6f);
 pub(super) const STEPPER_INK: Color = Color::srgb_u8(0xe4, 0xe6, 0xe4);
@@ -432,8 +397,6 @@ pub(super) const SLOT_ACTIVE_TOP: Color = Color::srgb_u8(0x2c, 0x30, 0x2a);
 pub(super) const SLOT_ACTIVE_BOTTOM: Color = Color::srgb_u8(0x20, 0x23, 0x20);
 pub(super) const SLOT_RECESS: Color = Color::srgba_u8(0, 0, 0, 0x70);
 pub(super) const SLOT_LIFT: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x0d);
-pub(super) const SLOT_INSPECTED_EDGE: Color = Color::srgb_u8(0xb8, 0xc2, 0xb0);
-pub(super) const SLOT_INSPECTED_RIM: Color = Color::srgb_u8(0xc9, 0xd1, 0xbd);
 pub(super) const SLOT_PICKED: Color = Color::srgb_u8(0xe7, 0xd9, 0xa8);
 pub(super) const SLOT_DROP: Color = Color::srgb_u8(0xd6, 0xc8, 0x8f);
 pub(super) const SLOT_NUMBER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x73);
@@ -472,17 +435,10 @@ pub(super) const POINT_DONE_INK: Color = Color::srgb_u8(0x1d, 0x23, 0x1a);
 pub(super) const LAYOUT_NOTE: Color = Color::srgb_u8(0xc2, 0xc8, 0xd1);
 pub(super) const LAYOUT_STATUS_INK: Color = Color::srgb_u8(0xc3, 0xcc, 0xb9);
 pub(super) const ITEM_TEXT_TITLE: f32 = 23.0;
-pub(super) const ITEM_TEXT_HEADING: f32 = 19.0;
-pub(super) const ITEM_TEXT_NAME: f32 = 22.0;
 pub(super) const ITEM_TEXT_EYEBROW: f32 = 11.0;
 pub(super) const ITEM_BUTTON_TEXT: f32 = 13.0;
 pub(super) const ITEM_BUTTON_HEIGHT: f32 = 38.0;
-pub(super) const ITEM_SMALL_PAD_X: f32 = 12.0;
-pub(super) const ITEM_SMALL_PAD_Y: f32 = 8.0;
 pub(super) const ITEM_RADIUS: f32 = 9.0;
-pub(super) const ITEM_WINDOW_HEIGHT: f32 = 640.0;
-pub(super) const ITEM_HEADER_HEIGHT: f32 = 70.0;
-pub(super) const ITEM_GAP: f32 = 14.0;
 pub(super) const CLOSE_SIZE: f32 = 40.0;
 pub(super) const ICON_SIZE: f32 = 20.0;
 /// About one slot gap, so a selected slot's glow never reaches its neighbour.
@@ -652,7 +608,7 @@ mod tests {
         for fill in ["NOTICE_CARD", "FULL_NOTICE", "BAND"] {
             assert_eq!(pairs[fill].1.alpha(), 1.0, "{fill} is not opaque");
         }
-        for edge in ["EDGE", "FIELD_EDGE", "MENU_EDGE", "SLOT_RIM"] {
+        for edge in ["EDGE", "FIELD_EDGE", "SLOT_RIM"] {
             let (normal, stronger) = pairs[edge];
             let light = |c: Color| c.to_linear().red;
             assert!(light(stronger) > light(normal), "{edge} is not brighter");
