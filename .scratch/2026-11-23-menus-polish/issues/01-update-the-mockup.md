@@ -100,3 +100,17 @@ states set from the browser console where there is no route):
 - Settings help strip (`/settings/behavior` and every category): the boxed help column is gone, so the rows take the sheet's full width. A strip along the bottom of the sheet, above the prompt bar and outside the scrolling rows, shows the focused or hovered setting's name in bold, its explanation muted, and a note on the current value where it has one (`VALUE_NOTES` in `mockup/settings.js`: Sprint speed, Removal and Crouch activation, Window mode, Display sync, Frame rate limit, Anti-aliasing, Render scale). With no row focused it shows the category's one-line description (`CATEGORY_HELP`). Rows that had no explanation got one. `frame({ strip })` puts it after the body.
 
 - Settings help strip look: the strip is a band in the side rail's tone (`rgb(10 11 12 / 0.9)`) across the foot of the sheet, keeping its 1 px top edge, with 6 px more padding above and below. The setting's name is bold at 15 px, the explanation stays muted, and the value note is in `--leaf` with the value bold (**Walk**: no sprint.), split at the first `: ` of the `VALUE_NOTES` text. Checked at 1280×720 in all seven categories.
+
+- Biomes panel Atmosphere colour picker: `/worlds/new/biomes`, a biome's
+  pencil, then Sky or Fog. The native colour input is gone. The closed field is
+  a swatch plus its hex value, one control; Click, Enter or Space (A) opens a
+  popup with 8 presets (sky blue, white, dusk orange, overcast grey, night blue,
+  jungle haze, desert sand, ember red), a saturation/brightness square, a hue
+  slider and a hex field. Arrows move within the focused part (Shift for bigger
+  steps), Tab and Shift+Tab (LB/RB) move between parts, Enter picks. Every
+  change applies live, so the diorama redraws as you go: Esc (B) closes and
+  restores the colour the popup opened with, while a click outside closes and
+  keeps it. Clicking a preset picks it and closes. It opens above its row when
+  it would run past the panel body's bottom, as Sky and Fog both do at
+  1280×720. `colourField(label, bind, value)` in `mockup/colour-picker.js`;
+  `placePopup` in `controls.js` now places both it and the dropdowns.
