@@ -10,7 +10,7 @@ use super::{
     actions::{Action, Binding, Bindings, Device, Modifier, Trigger, Wheel},
     profile::{Preferences, Store},
 };
-use crate::client::buttons::{self, Align, ButtonStyle};
+use crate::client::buttons::{self, ButtonStyle};
 use crate::session::SessionApp;
 use bevy::{
     prelude::*,

@@ -5,7 +5,7 @@
 //! Drawn from Server messages only
 //! (`docs/adr/0002-client-server-from-day-one.md`).
 
-use crate::client::buttons::{self, Align, ButtonStyle};
+use crate::client::buttons::{self, ButtonStyle};
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
@@ -408,7 +408,6 @@ fn render(
                                 Respawn,
                                 ButtonStyle::Cinematic {
                                     kind: Kind::Primary,
-                                    align: Align::Centre,
                                 },
                             );
                             // Without a prompt bar, the button carries its own key.

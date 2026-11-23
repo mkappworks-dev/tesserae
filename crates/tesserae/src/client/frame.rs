@@ -1,6 +1,5 @@
-//! The menu frame every moved screen shares: a title over the scenery instead
-//! of a header bar, the prompt bar instead of footer hints, focus first, hover
-//! that moves focus, and press feedback.
+//! The menu frame every screen shares: a title over the scenery, the prompt
+//! bar, focus first, hover that moves focus, and press feedback.
 //!
 //! A screen marks its root [`Frame`] and builds the rest from here; the
 //! behaviour comes with the marker, so no screen wires it by hand.

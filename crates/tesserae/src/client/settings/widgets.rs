@@ -901,10 +901,7 @@ pub(super) fn waiting_overlay(
 /// change to keep.
 pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
     use crate::client::cinematic::{self as cine, Kind};
-    let kind = |kind| ButtonStyle::Cinematic {
-        kind,
-        align: Align::Centre,
-    };
+    let kind = |kind| ButtonStyle::Cinematic { kind };
     let mut first = None;
     commands
         .spawn((

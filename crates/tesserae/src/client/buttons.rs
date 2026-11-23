@@ -9,19 +9,9 @@ use super::cinematic::{self as cine, Kind, Look};
 use super::menu_ui::{IconKind, Quiet, Styled, icon, text};
 use super::theme;
 
-/// Where a button's label sits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Align<'a> {
-    Centre,
-    /// Centred, with a glyph such as `→` just after the label.
-    After(&'a str),
-    /// Centred, with a glyph such as `+` just before the label.
-    Before(&'a str),
-}
-
 /// How a button looks.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum ButtonStyle<'a> {
+pub(super) enum ButtonStyle {
     Plain,
     /// A dialog's main action.
     Primary,
@@ -36,7 +26,6 @@ pub(super) enum ButtonStyle<'a> {
     /// The launcher's.
     Cinematic {
         kind: Kind,
-        align: Align<'a>,
     },
     /// One of a set of Cinematic options.
     Choice {
@@ -59,19 +48,15 @@ pub(super) fn button(
         tab,
         primary,
     };
-    let kind = |kind| ButtonStyle::Cinematic {
-        kind,
-        align: Align::Centre,
-    };
+    let kind = |kind| ButtonStyle::Cinematic { kind };
     match style {
         ButtonStyle::Plain => button(parent, label, act, kind(Kind::Plain)),
         ButtonStyle::Primary => button(parent, label, act, kind(Kind::Primary)),
         ButtonStyle::Tab { selected } => tab(parent, label, act, styled(selected, true, false)),
         ButtonStyle::Quiet { text_px } => quiet(parent, label, act, text_px),
-        ButtonStyle::Cinematic { kind, align } => cinematic(
+        ButtonStyle::Cinematic { kind } => cinematic(
             parent,
             label,
-            align,
             act,
             Look {
                 kind,
@@ -82,7 +67,6 @@ pub(super) fn button(
         ButtonStyle::Choice { selected } => cinematic(
             parent,
             label,
-            Align::Centre,
             act,
             Look {
                 kind: Kind::Plain,
@@ -93,7 +77,6 @@ pub(super) fn button(
         ButtonStyle::Small { kind } => cinematic(
             parent,
             label,
-            Align::Centre,
             act,
             Look {
                 kind,
@@ -105,29 +88,14 @@ pub(super) fn button(
 }
 
 /// Small spaced capitals above a heading.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Eyebrow {
-    Cinematic,
-    Inventory,
-}
-
-pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str, look: Eyebrow) {
-    match look {
-        Eyebrow::Cinematic => tracked(
-            parent,
-            label,
-            theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
-            theme::EYEBROW_TRACKING,
-            theme::EYEBROW,
-        ),
-        Eyebrow::Inventory => tracked(
-            parent,
-            label,
-            theme::weighted(11.0, theme::LABEL),
-            1.32,
-            theme::item_eyebrow(),
-        ),
-    }
+pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str) {
+    tracked(
+        parent,
+        label,
+        theme::weighted(11.0, theme::LABEL),
+        1.32,
+        theme::item_eyebrow(),
+    );
 }
 
 fn tab(
@@ -267,7 +235,6 @@ fn quiet(
 fn cinematic(
     parent: &mut ChildSpawnerCommands,
     label: impl Into<String>,
-    align: Align,
     act: impl Bundle,
     look: Look,
     small: bool,
@@ -285,16 +252,6 @@ fn cinematic(
             theme::REGULAR
         },
     );
-    let spawn_label = |b: &mut ChildSpawnerCommands, value: String| {
-        b.spawn((
-            cine::Label,
-            Text::new(value),
-            font.clone(),
-            bevy::text::LineHeight::RelativeToFont(1.25),
-            TextColor(ink),
-            Pickable::IGNORE,
-        ));
-    };
     parent
         .spawn((
             Button,
@@ -319,17 +276,14 @@ fn cinematic(
             BackgroundColor(fill),
             BorderColor::all(edge),
         ))
-        .with_children(|b| {
-            if let Align::Before(glyph) = align {
-                spawn_label(b, glyph.into());
-            }
-            spawn_label(b, label.into());
-            if let Align::After(glyph) = align
-                && !glyph.is_empty()
-            {
-                spawn_label(b, glyph.into());
-            }
-        })
+        .with_child((
+            cine::Label,
+            Text::new(label),
+            font,
+            bevy::text::LineHeight::RelativeToFont(1.25),
+            TextColor(ink),
+            Pickable::IGNORE,
+        ))
         .id()
 }
 

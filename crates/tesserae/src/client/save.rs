@@ -1,5 +1,5 @@
 //! Save controls send intents; only the Server sees persistence or World data.
-use crate::client::buttons::{self, Align, ButtonStyle};
+use crate::client::buttons::{self, ButtonStyle};
 use crate::server::persistence::{SaveAction, SaveStatus};
 use bevy::prelude::*;
 
@@ -29,10 +29,7 @@ pub(super) fn to_list_button(parent: &mut ChildSpawnerCommands, kind: Kind) -> E
         parent,
         "Return to Worlds",
         ToList,
-        ButtonStyle::Cinematic {
-            kind,
-            align: Align::Centre,
-        },
+        ButtonStyle::Cinematic { kind },
     )
 }
 
@@ -199,10 +196,7 @@ fn show(
                                     actions,
                                     "Exit without saving",
                                     Action(SaveAction::ConfirmUnsafe),
-                                    ButtonStyle::Cinematic {
-                                        kind: Kind::Danger,
-                                        align: Align::Centre,
-                                    },
+                                    ButtonStyle::Cinematic { kind: Kind::Danger },
                                 );
                                 initial_focus = Some(buttons::button(
                                     actions,
@@ -267,10 +261,7 @@ fn show(
                                         actions,
                                         "Exit without saving…",
                                         Action(SaveAction::AskUnsafe),
-                                        ButtonStyle::Cinematic {
-                                            kind: Kind::Danger,
-                                            align: Align::Centre,
-                                        },
+                                        ButtonStyle::Cinematic { kind: Kind::Danger },
                                     );
                                 });
                         }
