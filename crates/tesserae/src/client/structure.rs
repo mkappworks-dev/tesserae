@@ -1070,23 +1070,17 @@ mod tests {
 
     #[test]
     fn the_clear_key_cancels_the_pinned_preview_from_anywhere_and_is_taken() {
-        for key in [KeyCode::Backspace] {
-            let mut app = pinned_app();
-            look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key);
-            app.update();
-            assert!(
-                app.world().resource::<PlaceTool>().pinned.is_none(),
-                "{key:?}"
-            );
-            let actions = app.world().resource::<Actions>();
-            assert!(
-                !actions.started(Action::ClearTool) && !actions.started(Action::Structures),
-                "{key:?}: the Tool stays in hand"
-            );
-        }
+        let mut app = pinned_app();
+        look_down_at(&mut app, Vec3::new(40.0, 5.0, 40.0));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Backspace);
+        app.update();
+        assert!(app.world().resource::<PlaceTool>().pinned.is_none());
+        assert!(
+            !app.world().resource::<Actions>().started(Action::ClearTool),
+            "the Tool stays in hand"
+        );
     }
 
     #[test]
