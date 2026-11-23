@@ -2429,7 +2429,8 @@ fn draw_picture(parent: &mut ChildSpawnerCommands, picture: Picture) {
                     Pickable::IGNORE,
                 ))
                 .with_children(|row| {
-                    for colour in colours {
+                    // As wide as a thumbnail at most: a big Mod declares dozens of Materials.
+                    for colour in colours.into_iter().take(8) {
                         row.spawn((
                             BackgroundColor(colour),
                             Node {

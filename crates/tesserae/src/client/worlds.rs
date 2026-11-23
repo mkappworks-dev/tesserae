@@ -638,6 +638,9 @@ fn review_capture(
                 "back" => Act::Back,
                 "randomize" => Act::Randomize,
                 "reset" => Act::ResetBiomes,
+                "filter" => Act::ModPop(Pop::Filter),
+                "sort" => Act::ModPop(Pop::Sort),
+                "all" => Act::SelectShownMods,
                 // The Opening card stays up: no World is handed to the loader.
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {

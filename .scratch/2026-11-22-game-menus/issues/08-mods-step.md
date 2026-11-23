@@ -1,6 +1,6 @@
 # 08: Mods step
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [03: Optional thumbnail in mod.toml](./03-mod-thumbnail-field.md),
 [05: Create World: Game step and titles](./05-create-world-game-step.md)
@@ -18,10 +18,19 @@ opens a trust modal listing each item, its build and whether it runs code.
 
 ## Acceptance criteria
 
-- [ ] Filter and sort change the list; the select-all checkbox acts only on the
+- [x] Filter and sort change the list; the select-all checkbox acts only on the
       Mods shown
-- [ ] Required Mods cannot be cleared
-- [ ] Changing the selection after trusting asks for trust again on continue
-- [ ] Cancelling the trust modal stays on the Mods step
+- [x] Required Mods cannot be cleared
+- [x] Changing the selection after trusting asks for trust again on continue
+- [x] Cancelling the trust modal stays on the Mods step
 
 ## Comments
+
+The trust modal is the Game step's `Screen::StepTrust` dialog; the inline panel
+is gone. "Asks again" holds whenever the new selection contains an untrusted
+item: Trust is recorded per build, so dropping a Mod asks nothing.
+
+A popup closes on Esc, on its icon, on picking a sort, or on any other control;
+a click on empty space leaves it open. Filters persist across steps (the mockup
+resets them on a step change). Mods with many Materials show at most 8 swatches,
+the width of a thumbnail.
