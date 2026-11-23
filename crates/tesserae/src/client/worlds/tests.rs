@@ -1594,7 +1594,7 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     act(&mut app, Act::SelectBiome(1));
     slide(&mut app, Knob::Temperature, 0.35);
     slide(&mut app, Knob::Caves, 0.0);
-    act(&mut app, Act::CycleGround(Layer::Surface));
+    pick_ground(&mut app, Layer::Surface, "t:sand");
     type_into(&mut app, Field::Sky, "#0a141e");
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
@@ -1854,7 +1854,7 @@ fn an_edited_biome_is_marked_customised_and_its_preview_redraws() {
     assert_eq!(sky.sky, [10, 20, 30]);
     assert_eq!(biome_tag(&mut app, 1), "Customised");
     assert_eq!(biome_tag(&mut app, 0), "Terra", "only the edited Biome");
-    act(&mut app, Act::CycleGround(Layer::Surface));
+    pick_ground(&mut app, Layer::Surface, "t:sand");
     let ground = biome_look(&mut app, 1);
     assert_ne!(ground.surface, sky.surface, "a new surface redraws it");
     slide(&mut app, Knob::Caves, 0.0);
@@ -1914,6 +1914,149 @@ fn a_biome_without_colours_shows_and_resets_to_sky_blue_and_white() {
     act(&mut app, Act::ResetBiome);
     assert_eq!(colours(&app), ["#87ceeb", "#ffffff"]);
     assert_eq!(edited(&app, 1).sky_fog, None);
+}
+
+/// The Materials a Ground dropdown lists, top to bottom, leaving out those its search hides.
+fn ground_options(app: &mut App) -> Vec<String> {
+    app.world_mut()
+        .query::<(&Act, &Node)>()
+        .iter(app.world())
+        .filter(|(_, node)| node.display != Display::None)
+        .filter_map(|(act, _)| match act {
+            Act::PickGround(_, name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_ground_dropdown_lists_every_material_narrows_to_its_search_and_picks_one() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+    act(&mut app, Act::GroundPop(Layer::Surface));
+    assert_eq!(count::<frame::Popup>(&mut app), 1);
+    assert_eq!(
+        ground_options(&mut app),
+        ["t:stone", "t:dirt", "t:grass", "t:sand"]
+    );
+    assert_eq!(
+        count::<pages::GroundSwatch>(&mut app),
+        4 + 3,
+        "a swatch on each row and field"
+    );
+    type_into(&mut app, Field::GroundSearch, "sa");
+    assert_eq!(
+        ground_options(&mut app),
+        ["t:sand"],
+        "the list shrinks to the results"
+    );
+    act(&mut app, Act::PickGround(Layer::Surface, "t:sand".into()));
+    assert_eq!(count::<frame::Popup>(&mut app), 0, "a pick closes it");
+    assert_eq!(edited(&app, 1).ground.unwrap().surface, "t:sand");
+    assert_eq!(focused_act(&app), Some(Act::GroundPop(Layer::Surface)));
+    act(&mut app, Act::GroundPop(Layer::Rock));
+    assert_eq!(
+        ground_options(&mut app).len(),
+        4,
+        "a dropdown opens with its search cleared"
+    );
+}
+
+#[test]
+fn a_ground_dropdown_closes_on_escape_or_a_click_outside_and_enter_picks_the_first_match() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    act(&mut app, Act::GroundPop(Layer::Soil));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+    assert_eq!(
+        count::<pages::ClimateMap>(&mut app),
+        1,
+        "the panel stays open"
+    );
+    assert_eq!(focused_act(&app), Some(Act::GroundPop(Layer::Soil)));
+    act(&mut app, Act::GroundPop(Layer::Soil));
+    frame::testing::click_outside(&mut app);
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+    act(&mut app, Act::GroundPop(Layer::Soil));
+    type_into(&mut app, Field::GroundSearch, "gr");
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(edited(&app, 1).ground.unwrap().soil, "t:grass");
+    assert_eq!(count::<frame::Popup>(&mut app), 0);
+}
+
+#[test]
+fn opening_a_ground_dropdown_keeps_the_panel_scrolled_to_it() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    let body = |app: &mut App| {
+        app.world_mut()
+            .query_filtered::<&mut ScrollPosition, With<pages::PanelScroll>>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .0
+    };
+    let scrolled = Vec2::new(0.0, 120.0);
+    app.world_mut()
+        .query_filtered::<&mut ScrollPosition, With<pages::PanelScroll>>()
+        .single_mut(app.world_mut())
+        .unwrap()
+        .0 = scrolled;
+    act(&mut app, Act::GroundPop(Layer::Rock));
+    assert_eq!(body(&mut app), scrolled);
+}
+
+/// Updates until every Biome's diorama being drawn lands.
+fn dioramas_drawn(app: &mut App) {
+    let start = std::time::Instant::now();
+    app.update();
+    while app.world().resource::<diorama::Dioramas>().drawing() {
+        assert!(start.elapsed().as_secs() < 60, "the dioramas never landed");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.update();
+    }
+    app.update();
+}
+
+/// The pixels Biome `at`'s list picture shows.
+fn diorama(app: &mut App, at: usize) -> Vec<u8> {
+    let handle = app
+        .world_mut()
+        .query::<(&pages::BiomeThumb, &ImageNode)>()
+        .iter(app.world())
+        .find_map(|(t, image)| (t.at == at).then(|| image.image.clone()))
+        .unwrap_or_else(|| panic!("no diorama of Biome {at}"));
+    let image = app
+        .world()
+        .resource::<Assets<Image>>()
+        .get(&handle)
+        .unwrap();
+    image.data.clone().unwrap()
+}
+
+#[test]
+fn each_biome_shows_a_diorama_drawn_off_the_main_thread_and_redrawn_after_an_edit() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    dioramas_drawn(&mut app);
+    let before = diorama(&mut app, 1);
+    assert_eq!(before[..3], [0x87, 0xce, 0xeb], "its sky at the top");
+    assert_ne!(before, diorama(&mut app, 0), "each Biome is its own island");
+    act(&mut app, Act::SelectBiome(1));
+    type_into(&mut app, Field::Sky, "#0a141e");
+    assert!(
+        app.world().resource::<diorama::Dioramas>().drawing(),
+        "an edit redraws on another thread"
+    );
+    dioramas_drawn(&mut app);
+    let after = diorama(&mut app, 1);
+    assert_eq!(after[..3], [10, 20, 30]);
+    assert_eq!(
+        count::<pages::BiomeThumb>(&mut app),
+        3,
+        "the panel's head shows the open Biome's diorama too"
+    );
 }
 
 fn three_biomes(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
@@ -3775,4 +3918,9 @@ fn left_and_right_change_edit_worlds_game_mode() {
     assert_eq!(focused_act(&app), Some(Act::EditMode(GameMode::Survival)));
     step(&mut app, Act::EditMode(GameMode::Survival), -1);
     assert_eq!(launcher(&app).modes.own, GameMode::Creative);
+}
+
+fn pick_ground(app: &mut App, layer: Layer, name: &str) {
+    act(app, Act::GroundPop(layer));
+    act(app, Act::PickGround(layer, name.into()));
 }

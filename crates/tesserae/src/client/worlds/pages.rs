@@ -1025,25 +1025,6 @@ fn fixed_rows(d: &Sidecar) -> Vec<(&'static str, Value)> {
     rows
 }
 
-/// Equal columns side by side.
-fn columns(
-    parent: &mut ChildSpawnerCommands,
-    gap: f32,
-    children: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    parent
-        .spawn(Node {
-            display: Display::Grid,
-            grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(1.0)],
-            column_gap: Val::Px(gap),
-            row_gap: Val::Px(gap),
-            align_items: AlignItems::End,
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(children);
-}
-
 /// What each Game mode means, in the one line under the control.
 const MODES: [(GameMode, &str, &str); 2] = [
     (
@@ -2990,7 +2971,7 @@ fn review_sections(
                     ..default()
                 })
                 .with_children(|item| {
-                    biome_thumb(item, l, at);
+                    biome_thumb(item, l, at, HEAD_THUMB);
                     item.spawn((
                         Node {
                             flex_direction: FlexDirection::Column,
@@ -3154,7 +3135,7 @@ fn biomes_page(
                 })
                 .with_children(|list| biome_list(list, l, draft));
             if draft.editing {
-                biome_editor(split, draft);
+                biome_editor(split, l, draft);
             } else {
                 terrain_aside(split);
             }
@@ -3335,9 +3316,8 @@ fn panel_status(draft: &BiomesDraft) -> &'static str {
 /// Keeps each Biome's preview and tag, and the edit panel's status, on the draft: sliders, the
 /// climate map and the colour fields change it without a rebuild.
 pub(super) fn paint_biomes(
-    mut commands: Commands,
     launcher: Option<Res<Launcher>>,
-    mut thumbs: Query<(Entity, &mut BiomeThumb)>,
+    mut thumbs: Query<&mut BiomeThumb>,
     mut tags: Query<(&BiomeTag, &mut Text), Without<PanelStatus>>,
     mut status: Query<&mut Text, With<PanelStatus>>,
 ) {
@@ -3347,15 +3327,11 @@ pub(super) fn paint_biomes(
     let Some(draft) = l.form.biomes.as_ref() else {
         return;
     };
-    for (entity, mut thumb) in &mut thumbs {
+    for mut thumb in &mut thumbs {
         let Some(look) = biomes::look(&l, thumb.at) else {
             continue;
         };
         if thumb.look != look {
-            commands
-                .entity(entity)
-                .despawn_related::<Children>()
-                .with_children(|t| draw_look(t, &look));
             thumb.look = look;
         }
     }
@@ -3377,82 +3353,27 @@ fn rgb(c: [u8; 3]) -> Color {
     Color::srgb_u8(c[0], c[1], c[2])
 }
 
-const THUMB: Vec2 = Vec2::new(64.0, 40.0);
+const LIST_THUMB: Vec2 = Vec2::new(96.0, 54.0);
+const HEAD_THUMB: Vec2 = Vec2::new(72.0, 40.0);
 
-/// A cut through the Biome: its sky fading to fog over a band each of surface, soil and rock,
-/// the rock holed in proportion to its caves.
-fn draw_look(thumb: &mut ChildSpawnerCommands, look: &biomes::Look) {
-    let band = |top: f32, height: f32, colour: [u8; 3]| {
-        (
-            BackgroundColor(rgb(colour)),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(top),
-                height: Val::Px(height),
-                ..default()
-            },
-            Pickable::IGNORE,
-        )
+/// A Biome's diorama, which `diorama::draw` paints; until it lands it shows the Biome's fog.
+fn biome_thumb(parent: &mut ChildSpawnerCommands, l: &Launcher, at: usize, size: Vec2) {
+    let Some(look) = biomes::look(l, at) else {
+        return;
     };
-    thumb.spawn((
-        BackgroundGradient::from(LinearGradient::to_bottom(vec![
-            ColorStop::auto(rgb(look.sky)),
-            ColorStop::auto(rgb(look.fog)),
-        ])),
+    parent.spawn((
+        BiomeThumb { at, look },
+        BackgroundColor(rgb(look.fog)),
         Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            height: Val::Px(22.0),
+            width: Val::Px(size.x),
+            height: Val::Px(size.y),
+            flex_shrink: 0.0,
+            overflow: Overflow::clip(),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
             ..default()
         },
         Pickable::IGNORE,
     ));
-    thumb.spawn(band(22.0, 4.0, look.surface));
-    thumb.spawn(band(26.0, 5.0, look.soil));
-    thumb.spawn(band(31.0, THUMB.y - 31.0, look.rock));
-    let holes = (look.caves * 1.5).round().clamp(0.0, 4.0) as usize;
-    for hole in 0..holes {
-        thumb.spawn((
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(6.0 + hole as f32 * 14.0),
-                top: Val::Px(33.0 + (hole % 2) as f32 * 2.0),
-                width: Val::Px(8.0),
-                height: Val::Px(3.0),
-                border_radius: BorderRadius::all(Val::Px(1.5)),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
-    }
-}
-
-fn biome_thumb(parent: &mut ChildSpawnerCommands, l: &Launcher, at: usize) {
-    let Some(look) = biomes::look(l, at) else {
-        return;
-    };
-    parent
-        .spawn((
-            BorderColor::all(theme::edge()),
-            Node {
-                width: Val::Px(THUMB.x),
-                height: Val::Px(THUMB.y),
-                flex_shrink: 0.0,
-                overflow: Overflow::clip(),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .with_children(|t| {
-            draw_look(t, &look);
-        })
-        .insert(BiomeThumb { at, look });
 }
 
 /// One Biome: its tick box turns it on or off; its name and the pencil open it in the panel.
@@ -3461,13 +3382,18 @@ fn biome_row(list: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft,
         return;
     };
     let selected = draft.editing && at == draft.selected;
+    let inset = if selected { theme::RULE } else { 0.0 };
     list.spawn((
         BiomeRow(at),
         WorldCard {
             words: biomes::words(choice),
             by: Field::BiomeSearch,
         },
-        BackgroundColor(theme::CARD),
+        BackgroundColor(if selected {
+            theme::CARD_CHOSEN
+        } else {
+            theme::CARD
+        }),
         BorderColor::all(if selected {
             theme::CARD_CHOSEN_EDGE
         } else {
@@ -3475,30 +3401,17 @@ fn biome_row(list: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft,
         }),
         Node {
             align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(6.0), Val::Px(6.0)),
-            border: UiRect::all(Val::Px(theme::RULE)),
+            column_gap: Val::Px(12.0),
+            // The chosen row's border is a rule thicker all round and its padding a rule thinner,
+            // so choosing a row never moves its content.
+            padding: UiRect::axes(Val::Px(8.0 - inset), Val::Px(10.0 - inset)),
+            border: UiRect::all(Val::Px(theme::RULE + inset)),
             border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
             flex_shrink: 0.0,
             ..default()
         },
     ))
     .with_children(|card| {
-        if selected {
-            card.spawn((
-                BackgroundColor(theme::CARD_CHOSEN_EDGE),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    width: Val::Px(theme::CARD_BAR),
-                    border_radius: BorderRadius::left(Val::Px(theme::RADIUS_CONTROL - theme::RULE)),
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ));
-        }
         card.spawn((
             bevy::ui_widgets::Button,
             TabIndex(0),
@@ -3518,7 +3431,7 @@ fn biome_row(list: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft,
             },
         ))
         .with_children(|b| tick_box(b, choice.enabled, true, 18.0));
-        biome_thumb(card, l, at);
+        biome_thumb(card, l, at, LIST_THUMB);
         card.spawn((
             bevy::ui_widgets::Button,
             frame::PointerOnly,
@@ -3580,7 +3493,7 @@ fn biome_row(list: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft,
 
 /// The edit panel, in place of the terrain preview: its body scrolls on its own between a fixed
 /// head and Reset and Done.
-fn biome_editor(split: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
+fn biome_editor(split: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft) {
     let Some(choice) = draft.choices.get(draft.selected) else {
         return;
     };
@@ -3602,21 +3515,18 @@ fn biome_editor(split: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
         .with_children(|panel| {
             panel
                 .spawn(Node {
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::FlexStart,
-                    padding: UiRect::new(
-                        Val::Px(17.0),
-                        Val::Px(10.0),
-                        Val::Px(14.0),
-                        Val::Px(10.0),
-                    ),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(12.0),
+                    padding: UiRect::new(Val::Px(16.0), Val::Px(12.0), Val::Px(12.0), Val::Px(8.0)),
                     flex_shrink: 0.0,
                     ..default()
                 })
                 .with_children(|head| {
+                    biome_thumb(head, l, draft.selected, HEAD_THUMB);
                     head.spawn(Node {
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(2.0),
+                        flex_grow: 1.0,
                         min_width: Val::Px(0.0),
                         ..default()
                     })
@@ -3659,18 +3569,19 @@ fn biome_editor(split: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 });
             panel
                 .spawn((
+                    PanelScroll,
                     ScrollPosition::default(),
                     Node {
                         flex_direction: FlexDirection::Column,
                         flex_grow: 1.0,
                         flex_shrink: 1.0,
                         min_height: Val::Px(0.0),
-                        padding: UiRect::axes(Val::Px(17.0), Val::Px(4.0)),
+                        padding: UiRect::axes(Val::Px(16.0), Val::Px(0.0)),
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
                 ))
-                .with_children(|body| biome_settings(body, draft, choice));
+                .with_children(|body| biome_settings(body, l, draft, choice));
             panel
                 .spawn((
                     BorderColor::all(theme::edge()),
@@ -3702,90 +3613,353 @@ fn biome_editor(split: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
         });
 }
 
-fn biome_settings(body: &mut ChildSpawnerCommands, draft: &BiomesDraft, choice: &BiomeChoice) {
-    label(body, "Climate");
-    climate_map(body, draft);
-    gap(body, 8.0);
-    columns(body, 11.0, |c| {
-        slider(c, "Temperature", Knob::Temperature, choice.temperature);
-        slider(c, "Humidity", Knob::Humidity, choice.humidity);
+fn biome_settings(
+    body: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    draft: &BiomesDraft,
+    choice: &BiomeChoice,
+) {
+    panel_section(body, "Climate", false, |s| {
+        climate_map(s, draft);
+        slider(s, "Temperature", Knob::Temperature, choice.temperature);
+        slider(s, "Humidity", Knob::Humidity, choice.humidity);
+        slider(s, "Caves", Knob::Caves, choice.cave_scale.unwrap_or(1.0));
     });
-    gap(body, 15.0);
-    slider(body, "Caves", Knob::Caves, choice.cave_scale.unwrap_or(1.0));
-    gap(body, 6.0);
-    ui::paragraph(
-        body,
-        "0 turns caves off. 1 keeps the Game\u{2019}s caves.",
-        theme::TEXT_SMALL,
-        theme::muted(),
-    );
-    gap(body, 15.0);
     let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
     if let Some(ground) = ground {
-        label(body, "Ground");
-        gap(body, 8.0);
-        for (title, layer, name) in [
-            ("Surface", Layer::Surface, &ground.surface),
-            ("Soil", Layer::Soil, &ground.soil),
-            ("Rock", Layer::Rock, &ground.rock),
-        ] {
-            ground_selector(body, title, layer, name);
-            gap(body, 6.0);
-        }
-        gap(body, 9.0);
+        panel_section(body, "Ground", true, |s| {
+            for (title, layer, name) in [
+                ("Surface", Layer::Surface, &ground.surface),
+                ("Soil", Layer::Soil, &ground.soil),
+                ("Rock", Layer::Rock, &ground.rock),
+            ] {
+                ground_row(s, l, title, layer, name);
+            }
+        });
     }
-    label(body, "Atmosphere");
-    gap(body, 8.0);
-    columns(body, 11.0, |c| {
+    panel_section(body, "Atmosphere", true, |s| {
         for (title, field_id, at) in [("Sky", Field::Sky, 0), ("Fog", Field::Fog, 1)] {
-            field(c, title, field_id, &draft.colours[at], "", "Game default");
+            panel_row(s, title, |r| {
+                text_field(r, field_id, &draft.colours[at], "", "#rrggbb");
+            });
         }
     });
-    gap(body, 12.0);
 }
 
-/// A ground layer: its name, and the Material, which Enter or a click moves to the next one.
-fn ground_selector(body: &mut ChildSpawnerCommands, title: &str, layer: Layer, name: &str) {
+/// The edit panel's scrolling body, whose place survives a rebuild of the same page.
+#[derive(Component)]
+pub(super) struct PanelScroll;
+
+/// One of the edit panel's groups, ruled off from the one above.
+fn panel_section(
+    body: &mut ChildSpawnerCommands,
+    title: &str,
+    ruled: bool,
+    content: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     body.spawn((
-        bevy::ui_widgets::Button,
-        TabIndex(0),
-        Act::CycleGround(layer),
-        Pick {
-            fill: theme::FIELD,
-            edge: theme::field_edge(),
-            hover: Some((theme::FIELD_HOVER, theme::field_edge())),
-        },
-        BackgroundColor(theme::FIELD),
-        BorderColor::all(theme::field_edge()),
+        BorderColor::all(theme::edge()),
         Node {
-            height: Val::Px(theme::CONTROL_HEIGHT),
-            padding: UiRect::axes(Val::Px(10.0), Val::Px(0.0)),
-            border: UiRect::all(Val::Px(theme::RULE)),
-            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::SpaceBetween,
-            column_gap: Val::Px(8.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            padding: UiRect::axes(Val::Px(0.0), Val::Px(10.0)),
+            border: UiRect::top(Val::Px(if ruled { theme::RULE } else { 0.0 })),
             flex_shrink: 0.0,
             ..default()
         },
     ))
-    .with_children(|select| {
-        ui::text(select, title, theme::TEXT_SMALL, theme::muted());
-        select
-            .spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
+    .with_children(|section| {
+        label(section, title);
+        content(section);
+    });
+}
+
+/// A labelled line of the edit panel: its name in a fixed column, then its control.
+fn panel_row(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    control: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    parent
+        .spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            min_height: Val::Px(30.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node {
+                width: Val::Px(86.0),
+                flex_shrink: 0.0,
                 ..default()
             })
-            .with_children(|value| {
-                ui::text(
-                    value,
-                    ui::declared_title(name),
-                    theme::TEXT_BODY,
-                    theme::INK,
-                );
-                ui::icon(value, IconKind::Chevron, theme::muted(), 12.0);
+            .with_children(|name| {
+                ui::weighted_text(name, title, theme::TEXT_SMALL, theme::LABEL, theme::INK);
             });
+            row.spawn(Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(0.0),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            })
+            .with_children(control);
+        });
+}
+
+/// A Material's colour beside its name, in a Ground field and its dropdown.
+#[derive(Component)]
+pub(super) struct GroundSwatch;
+
+fn ground_swatch(parent: &mut ChildSpawnerCommands, colour: [u8; 3]) {
+    parent.spawn((
+        GroundSwatch,
+        BackgroundColor(rgb(colour)),
+        BorderColor::all(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+        Node {
+            width: Val::Px(14.0),
+            height: Val::Px(14.0),
+            flex_shrink: 0.0,
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
+            ..default()
+        },
+        Pickable::IGNORE,
+    ));
+}
+
+/// The open Ground dropdown's list, which hangs above its field when there is no room below.
+#[derive(Component)]
+pub(super) struct GroundList;
+
+/// A ground layer: its name, and a dropdown of the selection's Materials, each with its colour,
+/// that a search at its top narrows.
+fn ground_row(
+    parent: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    title: &str,
+    layer: Layer,
+    name: &str,
+) {
+    let source = l.terrain.as_ref().map(|(_, source)| source.as_ref());
+    let open = l.biome_view.ground == Some(layer);
+    let materials = l
+        .form
+        .biomes
+        .as_ref()
+        .map(|d| d.declared.materials.clone())
+        .unwrap_or_default();
+    panel_row(parent, title, |r| {
+        r.spawn(Node {
+            flex_grow: 1.0,
+            min_width: Val::Px(0.0),
+            ..default()
+        })
+        .with_children(|wrap| {
+            wrap.spawn((
+                bevy::ui_widgets::Button,
+                TabIndex(0),
+                Act::GroundPop(layer),
+                Pick {
+                    fill: theme::FIELD,
+                    edge: theme::field_edge(),
+                    hover: Some((theme::FIELD_HOVER, theme::field_edge())),
+                },
+                BackgroundColor(theme::FIELD),
+                BorderColor::all(theme::field_edge()),
+                Node {
+                    flex_grow: 1.0,
+                    min_width: Val::Px(0.0),
+                    height: Val::Px(theme::CONTROL_HEIGHT),
+                    padding: UiRect::axes(Val::Px(10.0), Val::Px(0.0)),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },
+            ))
+            .with_children(|select| {
+                ground_swatch(select, biomes::material(source, name));
+                select.spawn((
+                    Text::new(ui::declared_title(name)),
+                    theme::font(theme::TEXT_BODY),
+                    TextColor(theme::INK),
+                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                    Node {
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+                let chevron = if open {
+                    IconKind::Expanded
+                } else {
+                    IconKind::Chevron
+                };
+                ui::icon(select, chevron, theme::muted(), 12.0);
+            });
+            if !open {
+                return;
+            }
+            wrap.spawn((
+                frame::Popup,
+                GroundList,
+                // The panel's body scrolls, and must not cut the list off at its edge.
+                bevy::ui::OverrideClip,
+                BackgroundColor(theme::RAISED),
+                BorderColor::all(theme::edge()),
+                GlobalZIndex(10),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(theme::CONTROL_HEIGHT + 4.0),
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    max_height: Val::Px(280.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(5.0)),
+                    row_gap: Val::Px(4.0),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+                    ..default()
+                },
+            ))
+            .with_children(|pop| {
+                pop.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    padding: UiRect::left(Val::Px(6.0)),
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|line| {
+                    ui::icon(line, IconKind::Search, theme::muted(), 16.0);
+                    line.spawn(Node {
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    })
+                    .with_children(|search| {
+                        text_field(
+                            search,
+                            Field::GroundSearch,
+                            &l.ground_search,
+                            "",
+                            "Search Materials",
+                        );
+                    });
+                });
+                pop.spawn((
+                    ScrollPosition::default(),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        flex_shrink: 1.0,
+                        min_height: Val::Px(0.0),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                ))
+                .with_children(|list| {
+                    for material in &materials {
+                        ground_option(list, layer, material, material == name, source);
+                    }
+                    list.spawn((
+                        NoMatch(Field::GroundSearch),
+                        Node {
+                            display: Display::None,
+                            justify_content: JustifyContent::Center,
+                            padding: UiRect::all(Val::Px(12.0)),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|empty| {
+                        ui::text(
+                            empty,
+                            "No matching Materials.",
+                            theme::TEXT_SMALL,
+                            theme::muted(),
+                        );
+                    });
+                });
+            });
+        });
+    });
+}
+
+/// Hangs the open Ground list from the top of its field when it would run past the bottom of the
+/// window. Layout has placed it by then, so it moves a frame after it opens.
+pub(super) fn hang_ground_list(
+    mut lists: Query<(&mut Node, &ComputedNode, &bevy::ui::UiGlobalTransform), With<GroundList>>,
+    roots: Query<&ComputedNode, (With<Root>, Without<GroundList>)>,
+) {
+    let Some(window) = roots.iter().next().map(|r| r.size().y) else {
+        return;
+    };
+    for (mut node, computed, transform) in &mut lists {
+        let bottom = transform.translation.y + computed.size().y / 2.0;
+        if node.bottom == Val::Auto && computed.size().y > 0.0 && bottom > window {
+            node.top = Val::Auto;
+            node.bottom = Val::Px(theme::CONTROL_HEIGHT + 4.0);
+        }
+    }
+}
+
+fn ground_option(
+    list: &mut ChildSpawnerCommands,
+    layer: Layer,
+    material: &str,
+    chosen: bool,
+    source: Option<&tesserae_core::terrain_preview::Source>,
+) {
+    let fill = if chosen { theme::CHOSEN } else { Color::NONE };
+    let edge = if chosen {
+        theme::CHOSEN_EDGE
+    } else {
+        Color::NONE
+    };
+    list.spawn((
+        bevy::ui_widgets::Button,
+        TabIndex(0),
+        Act::PickGround(layer, material.to_owned()),
+        WorldCard {
+            words: ui::declared_title(material),
+            by: Field::GroundSearch,
+        },
+        Pick {
+            fill,
+            edge,
+            hover: Some((theme::FIELD_HOVER, edge)),
+        },
+        BackgroundColor(fill),
+        BorderColor::all(edge),
+        Node {
+            min_height: Val::Px(theme::CONTROL_HEIGHT),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(0.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
+    .with_children(|row| {
+        ground_swatch(row, biomes::material(source, material));
+        row.spawn((
+            Text::new(ui::declared_title(material)),
+            theme::font(theme::TEXT_BODY),
+            TextColor(theme::INK),
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ));
+        if chosen {
+            ui::icon(row, IconKind::Check, theme::INK, 16.0);
+        }
     });
 }
 
@@ -3837,15 +4011,51 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
             ClimateMap,
             BorderColor::all(theme::CLIMATE_EDGE),
             Node {
-                height: Val::Px(110.0),
+                aspect_ratio: Some(2.0),
                 border: UiRect::all(Val::Px(theme::RULE)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(14.0), Val::Px(6.0)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                 flex_shrink: 0.0,
                 ..default()
             },
         ))
         .with_children(|map| {
+            for vertical in [true, false] {
+                map.spawn((
+                    BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.12)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(if vertical { 50.0 } else { 0.0 }),
+                        top: Val::Percent(if vertical { 0.0 } else { 50.0 }),
+                        width: if vertical {
+                            Val::Px(theme::RULE)
+                        } else {
+                            Val::Percent(100.0)
+                        },
+                        height: if vertical {
+                            Val::Percent(100.0)
+                        } else {
+                            Val::Px(theme::RULE)
+                        },
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
+            for (corner, top) in [("Wet", true), ("Dry", false)] {
+                map.spawn((
+                    Text::new(corner),
+                    theme::font(theme::TEXT_CAPTION),
+                    TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(8.0),
+                        top: if top { Val::Px(6.0) } else { Val::Auto },
+                        bottom: if top { Val::Auto } else { Val::Px(6.0) },
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
             // The selected dot last, so it draws over the others.
             let order = (0..draft.choices.len())
                 .filter(|at| *at != draft.selected)
@@ -3855,7 +4065,7 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                     continue;
                 };
                 let current = at == draft.selected;
-                let size = if current { 16.0 } else { 12.0 };
+                let size = if current { 18.0 } else { 12.0 };
                 let fade = |c: Color| {
                     if choice.enabled {
                         c
@@ -3885,7 +4095,7 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                             Val::Px(-size / 2.0),
                         ),
                         border: UiRect::all(Val::Px(theme::FRAME)),
-                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
+                        border_radius: BorderRadius::all(Val::Px(size / 2.0)),
                         ..default()
                     },
                 ));
@@ -3949,23 +4159,15 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
     editor
         .spawn(Node {
             justify_content: JustifyContent::SpaceBetween,
+            margin: UiRect::bottom(Val::Px(4.0)),
+            flex_shrink: 0.0,
             ..default()
         })
         .with_children(|axis| {
-            ui::text(
-                axis,
-                "Cold \u{2190} temperature",
-                theme::TEXT_CAPTION,
-                theme::muted(),
-            );
-            ui::text(axis, "Warm \u{2192}", theme::TEXT_CAPTION, theme::muted());
+            for end in ["Cold", "Temperature", "Warm"] {
+                ui::text(axis, end, theme::TEXT_CAPTION, theme::muted());
+            }
         });
-    ui::paragraph(
-        editor,
-        "Humidity increases from bottom to top.",
-        theme::TEXT_SMALL,
-        theme::muted(),
-    );
 }
 
 /// One of the selected Biome's values on a slider, which changes the draft in
@@ -3990,110 +4192,74 @@ pub(super) fn reading(knob: Knob, value: f32) -> String {
     }
 }
 
+/// One line: the name, the track, and the value it reads.
 fn slider(parent: &mut ChildSpawnerCommands, title: &str, knob: Knob, value: f32) {
     use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderThumb, SliderValue, TrackClick};
     let range = knob_range(knob);
     let fraction = (value - range.start()) / (range.end() - range.start());
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            min_width: Val::Px(0.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|c| {
-            let mut reading_text = Entity::PLACEHOLDER;
-            c.spawn(Node {
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Baseline,
+    panel_row(parent, title, |c| {
+        let slider = c
+            .spawn((
+                KnobSlider(knob),
+                Slider {
+                    track_click: TrackClick::Snap,
+                    ..default()
+                },
+                SliderRange::new(*range.start(), *range.end()),
+                SliderValue(value),
+                SliderStep(knob_step(knob)),
+                TabIndex(0),
+                theme::focus_ring(),
+                Node {
+                    height: Val::Px(THUMB_PX),
+                    flex_grow: 1.0,
+                    min_width: Val::Px(0.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+            ))
+            .id();
+        c.spawn((
+            KnobPart::Reading(slider),
+            Text::new(reading(knob, value)),
+            theme::figures(theme::TEXT_SMALL, theme::SEMIBOLD),
+            TextColor(theme::VALUE_INK),
+            TextLayout::justify(Justify::Right),
+            Node {
+                min_width: Val::Px(38.0),
+                flex_shrink: 0.0,
                 ..default()
-            })
-            .with_children(|head| {
-                label(head, title);
-                reading_text = head
-                    .spawn((
-                        Text::new(reading(knob, value)),
-                        theme::figures(theme::TEXT_CAPTION, theme::SEMIBOLD),
-                        TextColor(theme::VALUE_INK),
-                        Pickable::IGNORE,
-                    ))
-                    .id();
-            });
-            let slider = c
+            },
+            Pickable::IGNORE,
+        ));
+        c.commands().entity(slider).with_children(|track| {
+            track
                 .spawn((
-                    KnobSlider(knob),
-                    Slider {
-                        track_click: TrackClick::Snap,
-                        ..default()
-                    },
-                    SliderRange::new(*range.start(), *range.end()),
-                    SliderValue(value),
-                    SliderStep(knob_step(knob)),
-                    TabIndex(0),
-                    theme::focus_ring(),
+                    BackgroundColor(theme::TRACK),
                     Node {
-                        height: Val::Px(THUMB_PX),
-                        align_items: AlignItems::Center,
-                        flex_shrink: 0.0,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(6.0),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        overflow: Overflow::clip(),
                         ..default()
                     },
+                    Pickable::IGNORE,
                 ))
-                .id();
-            c.commands()
-                .entity(reading_text)
-                .insert(KnobPart::Reading(slider));
-            c.commands().entity(slider).with_children(|track| {
-                track
-                    .spawn((
-                        BackgroundColor(theme::TRACK),
+                .with_children(|bar| {
+                    bar.spawn((
+                        BackgroundColor(theme::SAGE),
                         Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Px(6.0),
-                            border_radius: BorderRadius::all(Val::Px(3.0)),
-                            overflow: Overflow::clip(),
+                            width: Val::Px(THUMB_PX / 2.0),
+                            height: Val::Percent(100.0),
                             ..default()
                         },
                         Pickable::IGNORE,
-                    ))
-                    .with_children(|bar| {
-                        bar.spawn((
-                            BackgroundColor(theme::SAGE),
-                            Node {
-                                width: Val::Px(THUMB_PX / 2.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ));
-                        bar.spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(THUMB_PX / 2.0),
-                                right: Val::Px(THUMB_PX / 2.0),
-                                top: Val::Px(0.0),
-                                bottom: Val::Px(0.0),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ))
-                        .with_child((
-                            KnobPart::Fill(slider),
-                            BackgroundColor(theme::SAGE),
-                            Node {
-                                width: Val::Percent(fraction * 100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ));
-                    });
-                track
-                    .spawn((
+                    ));
+                    bar.spawn((
                         Node {
                             position_type: PositionType::Absolute,
-                            left: Val::Px(0.0),
-                            right: Val::Px(THUMB_PX),
+                            left: Val::Px(THUMB_PX / 2.0),
+                            right: Val::Px(THUMB_PX / 2.0),
                             top: Val::Px(0.0),
                             bottom: Val::Px(0.0),
                             ..default()
@@ -4101,22 +4267,45 @@ fn slider(parent: &mut ChildSpawnerCommands, title: &str, knob: Knob, value: f32
                         Pickable::IGNORE,
                     ))
                     .with_child((
-                        SliderThumb,
-                        KnobPart::Thumb(slider),
+                        KnobPart::Fill(slider),
                         BackgroundColor(theme::SAGE),
-                        BorderColor::all(theme::SAGE_INK.with_alpha(0.35)),
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: Val::Percent(fraction * 100.0),
-                            width: Val::Px(THUMB_PX),
-                            height: Val::Px(THUMB_PX),
-                            border: UiRect::all(Val::Px(theme::RULE)),
-                            border_radius: BorderRadius::all(Val::Px(THUMB_PX / 2.0)),
+                            width: Val::Percent(fraction * 100.0),
+                            height: Val::Percent(100.0),
                             ..default()
                         },
+                        Pickable::IGNORE,
                     ));
-            });
+                });
+            track
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        right: Val::Px(THUMB_PX),
+                        top: Val::Px(0.0),
+                        bottom: Val::Px(0.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_child((
+                    SliderThumb,
+                    KnobPart::Thumb(slider),
+                    BackgroundColor(theme::SAGE),
+                    BorderColor::all(theme::SAGE_INK.with_alpha(0.35)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(fraction * 100.0),
+                        width: Val::Px(THUMB_PX),
+                        height: Val::Px(THUMB_PX),
+                        border: UiRect::all(Val::Px(theme::RULE)),
+                        border_radius: BorderRadius::all(Val::Px(THUMB_PX / 2.0)),
+                        ..default()
+                    },
+                ));
         });
+    });
 }
 
 /// A modal dialog over the dimmed page, its buttons at the bottom right.

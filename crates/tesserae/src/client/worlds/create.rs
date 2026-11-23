@@ -113,7 +113,10 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
         }),
         Act::CloseBiome => edit_biomes(l, |d| d.editing = false),
         Act::ResetBiome => edit_biomes(l, |d| d.reset_one(d.selected)),
-        Act::CycleGround(layer) => edit_biomes(l, |d| cycle(d, layer)),
+        Act::PickGround(layer, name) => {
+            edit_biomes(l, |d| pick(d, layer, name));
+            l.refocus = Some(Act::GroundPop(layer));
+        }
         Act::ResetBiomes => edit_biomes(l, |d| d.resetting = true),
         Act::ConfirmReset => {
             if l.screen == Screen::Create(Step::Biomes)
@@ -374,10 +377,9 @@ pub(super) fn set(draft: &mut BiomesDraft, knob: Knob, value: f32) {
     }
 }
 
-/// The next of the selection's solid Materials for one ground layer; a Biome
-/// still on the World's ground starts from it.
-pub(super) fn cycle(draft: &mut BiomesDraft, layer: Layer) {
-    let materials = &draft.declared.materials;
+/// Sets one ground layer of the selected Biome; a Biome still on the World's ground takes the rest
+/// of it.
+pub(super) fn pick(draft: &mut BiomesDraft, layer: Layer, name: String) {
     let fallback = draft.declared.ground.clone();
     let Some(choice) = draft.choices.get_mut(draft.selected) else {
         return;
@@ -385,16 +387,12 @@ pub(super) fn cycle(draft: &mut BiomesDraft, layer: Layer) {
     let Some(mut ground) = choice.ground.clone().or(fallback) else {
         return;
     };
-    let slot = match layer {
+    *match layer {
         Layer::Rock => &mut ground.rock,
         Layer::Soil => &mut ground.soil,
         Layer::Surface => &mut ground.surface,
-    };
-    let at = materials.iter().position(|m| m == slot);
-    if let Some(next) = materials.get(at.map_or(0, |i| (i + 1) % materials.len())) {
-        *slot = next.clone();
-        choice.ground = Some(ground);
-    }
+    } = name;
+    choice.ground = Some(ground);
 }
 
 /// Why a step cannot be left forward, if it cannot.
