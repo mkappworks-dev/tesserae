@@ -81,3 +81,18 @@ states set from the browser console where there is no route):
   (`/map`). `/mods` has no toolbar and the `/inventory` catalogue grid already
   scrolls under its search. Focus scrolls a row clear of the toolbar
   (`scroll-padding-top`).
+
+- Toasts study (`/toasts`, also "Toasts (study)" in the screen picker): one
+  toast component (`notify(text, tone)` in `mockup/toasts.js`, styles in
+  `mockup/toasts.css`) for every screen. The study panel switches the backdrop
+  (Worlds with its prompt bar, or the /play HUD in Survival with Compass and
+  minimap on) and the position (bottom centre, top centre, top right, bottom
+  left; defaults top centre in game, bottom centre in menus), and fires info,
+  done, refused, an 8 s error, a repeat (×2, timer restarts) and three at once
+  (at most 3, newest nearest the anchor edge). Dark notice-card panel, icon and
+  left edge by tone (neutral, green, amber), fade with an 8 px move away from the
+  anchor edge, 3 s; fade only under reduced motion. `toast()` and the engine
+  mirror `notice()` both go through it at the screen's default position; the old
+  `#toast` and `#notice-card` are gone. At 1280×720 with three toasts, bottom
+  centre in game reaches the reticle; top right in menus and top centre in menus
+  sit over the Worlds sheet's top edge; nothing touches the HUD or prompt bar.

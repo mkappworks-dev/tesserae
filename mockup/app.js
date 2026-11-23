@@ -257,12 +257,6 @@ function mini(game) {
 function activeWorld() {
   return worlds.find((w) => w.id === state.activeWorld) || worlds[0];
 }
-function toast(text) {
-  $("#toast").textContent = text;
-  $("#toast").classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => $("#toast").classList.remove("show"), 3200);
-}
 function navigate(screen) {
   state.screen = screen;
   state.search = "";
@@ -368,8 +362,12 @@ function render() {
   } else if (state.screen === "place") {
     screen.innerHTML = placePage();
     drawStructure();
+  } else if (state.screen === "toasts") {
+    screen.innerHTML = toastsPage();
+    $("#game").dataset.view =
+      toastStudy().backdrop === "game" ? "play" : "worlds";
   }
-  if (state.screen === "play") mapPlayMount();
+  if (["play", "toasts"].includes(state.screen)) mapPlayMount();
   drawWorldPreviews();
   syncBulk();
   if (screenPrompts)
@@ -1115,6 +1113,7 @@ function action(name, value) {
   if (structuresAction(name, value)) return;
   if (placeAction(name, value)) return;
   if (craftingAction(name, value)) return;
+  if (toastsAction(name, value)) return;
   if (inventoryAction(name, value)) return;
   if (name.startsWith("settings-") && settingsAction(name, value)) return;
   if (name === "close-dialog") {
@@ -2059,6 +2058,7 @@ const prototypeScreens = [
   { value: "vegetation", label: "Vegetation (step 18b)" },
   { value: "map", label: "Map (step 19)" },
   { value: "structures", label: "Structures" },
+  { value: "toasts", label: "Toasts (study)" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",
