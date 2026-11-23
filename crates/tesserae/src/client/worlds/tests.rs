@@ -1485,7 +1485,6 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     act(&mut app, Act::SelectBiome(1));
     slide(&mut app, Knob::Temperature, 0.35);
     slide(&mut app, Knob::Caves, 0.0);
-    act(&mut app, Act::Disclose(Disclosure::Ground));
     act(&mut app, Act::CycleGround(Layer::Surface));
     type_into(&mut app, Field::Sky, "#0a141e");
     act(&mut app, Act::Next);
@@ -1541,6 +1540,7 @@ fn slide(app: &mut App, knob: Knob, value: f32) {
 #[test]
 fn a_slider_sets_the_selected_biome_on_its_step_without_rebuilding_the_page() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(0));
     let version = launcher(&app).version;
     slide(&mut app, Knob::Humidity, 0.734);
     slide(&mut app, Knob::Caves, 2.46);
@@ -1578,6 +1578,346 @@ fn modal_groups(app: &mut App) -> usize {
         .iter(app.world())
         .filter(|group| group.modal)
         .count()
+}
+
+fn edited(app: &App, at: usize) -> BiomeChoice {
+    launcher(app).form.biomes.as_ref().unwrap().choices[at].clone()
+}
+
+fn slider_value(app: &mut App, knob: Knob) -> f32 {
+    app.world_mut()
+        .query::<(&pages::KnobSlider, &bevy::ui_widgets::SliderValue)>()
+        .iter(app.world())
+        .find_map(|(k, v)| (k.0 == knob).then_some(v.0))
+        .unwrap_or_else(|| panic!("no {knob:?} slider on screen"))
+}
+
+#[test]
+fn arrow_keys_move_the_edited_biome_on_the_climate_map() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    let handle = app
+        .world_mut()
+        .query_filtered::<Entity, With<pages::ClimateHandle>>()
+        .single(app.world())
+        .expect("the edit panel's climate map has a handle");
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(handle, FocusCause::Auto);
+    let version = launcher(&app).version;
+    press(&mut app, KeyCode::ArrowRight);
+    press(&mut app, KeyCode::ArrowDown);
+    press(&mut app, KeyCode::ArrowDown);
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::ShiftLeft);
+    press(&mut app, KeyCode::ArrowUp);
+    let meadow = edited(&app, 1);
+    assert_eq!((meadow.temperature, meadow.humidity), (0.31, 0.58));
+    assert_eq!(edited(&app, 0), declared("t:ash_flats", 0.7));
+    assert_eq!(slider_value(&mut app, Knob::Temperature), 0.31);
+    assert_eq!(slider_value(&mut app, Knob::Humidity), 0.58);
+    assert_eq!(
+        launcher(&app).version,
+        version,
+        "the handle keeps its focus"
+    );
+}
+
+#[test]
+fn dragging_on_the_climate_map_places_the_edited_biome_under_the_pointer() {
+    use bevy::picking::backend::HitData;
+    use bevy::picking::events::{Pointer, PointerDrag, PointerPress};
+    use bevy::picking::pointer::{Location, PointerButton, PointerId};
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    let map = app
+        .world_mut()
+        .query_filtered::<Entity, With<pages::ClimateMap>>()
+        .single(app.world())
+        .unwrap();
+    // Centred on the origin, as the identity transform the headless app leaves it with.
+    app.world_mut()
+        .entity_mut(map)
+        .insert(bevy::ui::ComputedNode {
+            size: Vec2::new(200.0, 100.0),
+            ..default()
+        });
+    let at = |x: f32, y: f32| {
+        Pointer::new(
+            PointerId::Mouse,
+            Location {
+                target: bevy::camera::NormalizedRenderTarget::None {
+                    width: 800,
+                    height: 600,
+                },
+                position: Vec2::new(x, y),
+            },
+        )
+    };
+    let version = launcher(&app).version;
+    app.world_mut().trigger(PointerPress {
+        entity: map,
+        pointer: at(50.0, -25.0),
+        button: PointerButton::Primary,
+        hit: HitData::new(map, 0.0, None, None),
+        count: 1,
+    });
+    app.update();
+    let meadow = edited(&app, 1);
+    assert_eq!((meadow.temperature, meadow.humidity), (0.75, 0.75));
+    app.world_mut().trigger(PointerDrag {
+        entity: map,
+        pointer: at(-150.0, 10.0),
+        button: PointerButton::Primary,
+        distance: Vec2::ZERO,
+        delta: Vec2::ZERO,
+    });
+    app.update();
+    let meadow = edited(&app, 1);
+    assert_eq!(
+        (meadow.temperature, meadow.humidity),
+        (0.0, 0.4),
+        "past the edge stays on the map"
+    );
+    assert_eq!(slider_value(&mut app, Knob::Temperature), 0.0);
+    assert_eq!(launcher(&app).version, version, "a drag keeps its map");
+}
+
+fn biome_look(app: &mut App, at: usize) -> biomes::Look {
+    app.world_mut()
+        .query::<&pages::BiomeThumb>()
+        .iter(app.world())
+        .find_map(|t| (t.at == at).then(|| t.look.clone()))
+        .unwrap_or_else(|| panic!("no preview of Biome {at}"))
+}
+
+fn biome_tag(app: &mut App, at: usize) -> String {
+    app.world_mut()
+        .query::<(&pages::BiomeTag, &Text)>()
+        .iter(app.world())
+        .find_map(|(tag, text)| (tag.0 == at).then(|| text.0.clone()))
+        .unwrap_or_else(|| panic!("no tag on Biome {at}"))
+}
+
+fn count<C: Component>(app: &mut App) -> usize {
+    app.world_mut()
+        .query_filtered::<(), With<C>>()
+        .iter(app.world())
+        .count()
+}
+
+#[test]
+fn the_pencil_opens_the_edit_panel_in_place_of_the_terrain_preview() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    assert_eq!(count::<terrain::TerrainPicture>(&mut app), 1);
+    assert_eq!(count::<pages::ClimateMap>(&mut app), 0, "no Biome is open");
+    act(&mut app, Act::SelectBiome(1));
+    assert_eq!(count::<terrain::TerrainPicture>(&mut app), 0);
+    assert_eq!(count::<pages::ClimateMap>(&mut app), 1);
+    assert!(shown(&mut app, "Game defaults"));
+    act(&mut app, Act::CloseBiome);
+    assert_eq!(count::<pages::ClimateMap>(&mut app), 0, "Done closes it");
+    act(&mut app, Act::SelectBiome(0));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(
+        (
+            launcher(&app).screen.clone(),
+            count::<pages::ClimateMap>(&mut app)
+        ),
+        (Screen::Create(Step::Biomes), 0),
+        "Escape closes the panel before it leaves the step"
+    );
+}
+
+#[test]
+fn an_edited_biome_is_marked_customised_and_its_preview_redraws() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    let before = biome_look(&mut app, 1);
+    assert_eq!(biome_tag(&mut app, 1), "Terra");
+    act(&mut app, Act::SelectBiome(1));
+    type_into(&mut app, Field::Sky, "#0a141e");
+    let sky = biome_look(&mut app, 1);
+    assert_eq!(sky.sky, [10, 20, 30]);
+    assert_eq!(biome_tag(&mut app, 1), "Customised");
+    assert_eq!(biome_tag(&mut app, 0), "Terra", "only the edited Biome");
+    act(&mut app, Act::CycleGround(Layer::Surface));
+    let ground = biome_look(&mut app, 1);
+    assert_ne!(ground.surface, sky.surface, "a new surface redraws it");
+    slide(&mut app, Knob::Caves, 0.0);
+    assert_ne!(biome_look(&mut app, 1).caves, ground.caves);
+    assert_ne!(biome_look(&mut app, 1), before);
+    act(&mut app, Act::ToggleBiome(0));
+    assert_eq!(
+        biome_tag(&mut app, 0),
+        "Terra",
+        "turning a Biome off does not customise it"
+    );
+}
+
+#[test]
+fn reset_restores_the_open_biome_and_reset_all_restores_every_biome() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(0));
+    slide(&mut app, Knob::Caves, 3.0);
+    act(&mut app, Act::SelectBiome(1));
+    slide(&mut app, Knob::Temperature, 0.9);
+    act(&mut app, Act::ToggleBiome(1));
+    act(&mut app, Act::ResetBiome);
+    assert_eq!(
+        edited(&app, 1),
+        BiomeChoice {
+            enabled: false,
+            ..declared("t:meadow", 0.3)
+        },
+        "Reset keeps the Biome off"
+    );
+    assert_eq!(slider_value(&mut app, Knob::Temperature), 0.3);
+    assert_eq!(biome_tag(&mut app, 1), "Terra");
+    assert_eq!(edited(&app, 0).cave_scale, Some(3.0), "only the open Biome");
+    act(&mut app, Act::ResetBiomes);
+    act(&mut app, Act::ConfirmReset);
+    assert_eq!(edited(&app, 0), declared("t:ash_flats", 0.7));
+    assert_eq!(edited(&app, 1), declared("t:meadow", 0.3));
+}
+
+fn three_biomes(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
+    let biome = |name: &str, temperature: f32, humidity: f32| BiomeChoice {
+        humidity,
+        ..declared(name, temperature)
+    };
+    Ok(BiomePreview {
+        biomes: vec![
+            biome("t:zebra_plains", 0.5, 0.2),
+            biome("t:ash_flats", 0.7, 0.6),
+            biome("t:meadow", 0.3, 0.9),
+        ],
+        ..fake_preview(&Installed::fake(None, &[]), &[])?
+    })
+}
+
+fn to_three_biomes() -> (App, Directory) {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.insert_resource(Previewer(three_biomes));
+    app.update();
+    new_world(&mut app);
+    act(&mut app, Act::Next);
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    (app, worlds)
+}
+
+/// The Biomes the step lists, top to bottom, leaving out those the search hides.
+fn biomes_listed(app: &mut App) -> Vec<String> {
+    let list = app
+        .world_mut()
+        .query_filtered::<&Children, With<pages::BiomeList>>()
+        .single(app.world())
+        .unwrap()
+        .to_vec();
+    let names = launcher(app)
+        .form
+        .biomes
+        .as_ref()
+        .unwrap()
+        .choices
+        .iter()
+        .map(|c| ui::declared_title(&c.name))
+        .collect::<Vec<_>>();
+    list.into_iter()
+        .filter_map(|row| {
+            let at = app.world().get::<pages::BiomeRow>(row)?.0;
+            let node = app.world().get::<Node>(row)?;
+            (node.display != Display::None).then(|| names[at].clone())
+        })
+        .collect()
+}
+
+fn bulk_shown(app: &mut App) -> (Bulk, String) {
+    let tick = app
+        .world_mut()
+        .query::<&pages::BulkTick>()
+        .single(app.world())
+        .unwrap()
+        .state();
+    let count = app
+        .world_mut()
+        .query_filtered::<&Text, With<pages::BulkCount>>()
+        .single(app.world())
+        .unwrap()
+        .0
+        .clone();
+    (tick, count)
+}
+
+#[test]
+fn the_biomes_step_sorts_by_game_order_name_temperature_or_humidity() {
+    let (mut app, _worlds) = to_three_biomes();
+    assert_eq!(
+        biomes_listed(&mut app),
+        ["Zebra plains", "Ash flats", "Meadow"]
+    );
+    for (sort, order) in [
+        (BiomeSort::Name, ["Ash flats", "Meadow", "Zebra plains"]),
+        (
+            BiomeSort::Temperature,
+            ["Meadow", "Zebra plains", "Ash flats"],
+        ),
+        (BiomeSort::Humidity, ["Zebra plains", "Ash flats", "Meadow"]),
+        (BiomeSort::Game, ["Zebra plains", "Ash flats", "Meadow"]),
+    ] {
+        act(&mut app, Act::BiomePop(Pop::Sort));
+        act(&mut app, Act::BiomeSort(sort));
+        assert_eq!(biomes_listed(&mut app), order, "{sort:?}");
+        assert_eq!(launcher(&app).biome_view.pop, None, "choosing closes it");
+    }
+}
+
+#[test]
+fn the_biomes_step_filters_by_status_and_customisation_and_searches_in_place() {
+    let (mut app, _worlds) = to_three_biomes();
+    act(&mut app, Act::ToggleBiome(0));
+    act(&mut app, Act::SelectBiome(1));
+    slide(&mut app, Knob::Caves, 0.0);
+    act(&mut app, Act::CloseBiome);
+    act(&mut app, Act::BiomePop(Pop::Filter));
+    act(&mut app, Act::BiomeStatus(false));
+    assert_eq!(biomes_listed(&mut app), ["Zebra plains"]);
+    assert_eq!(filter_badge(&mut app).as_deref(), Some("1"));
+    act(&mut app, Act::BiomeStatus(true));
+    assert_eq!(biomes_listed(&mut app).len(), 3, "both statuses is all");
+    act(&mut app, Act::BiomeFilterReset);
+    act(&mut app, Act::BiomeCustomised);
+    assert_eq!(biomes_listed(&mut app), ["Ash flats"]);
+    act(&mut app, Act::BiomeFilterReset);
+    assert_eq!(filter_badge(&mut app), None);
+    let version = launcher(&app).version;
+    type_into(&mut app, Field::BiomeSearch, "MEA");
+    assert_eq!(biomes_listed(&mut app), ["Meadow"]);
+    assert_eq!(launcher(&app).version, version, "typing keeps the field");
+    type_into(&mut app, Field::BiomeSearch, "tundra");
+    assert!(biomes_listed(&mut app).is_empty());
+    assert!(shown(&mut app, "No matching Biomes."));
+}
+
+#[test]
+fn the_tri_state_box_turns_the_biomes_shown_on_or_off() {
+    let (mut app, _worlds) = to_three_biomes();
+    assert_eq!(bulk_shown(&mut app), (Bulk::All, "3 of 3 enabled".into()));
+    act(&mut app, Act::SelectShownBiomes);
+    assert_eq!(bulk_shown(&mut app), (Bulk::None, "0 of 3 enabled".into()));
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    assert!(shown(&mut app, "Turn on at least one Biome to continue."));
+    type_into(&mut app, Field::BiomeSearch, "ash");
+    assert_eq!(bulk_shown(&mut app), (Bulk::None, "0 of 1 enabled".into()));
+    act(&mut app, Act::SelectShownBiomes);
+    assert_eq!(bulk_shown(&mut app), (Bulk::All, "1 of 1 enabled".into()));
+    type_into(&mut app, Field::BiomeSearch, "");
+    assert_eq!(bulk_shown(&mut app), (Bulk::Some, "1 of 3 enabled".into()));
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
 }
 
 #[test]

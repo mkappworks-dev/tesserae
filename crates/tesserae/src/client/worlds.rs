@@ -2,6 +2,7 @@
 //! library, before any Game runs. It only manages closed World folders;
 //! opening one hands it to the loader.
 
+mod biomes;
 mod create;
 mod edit_world;
 mod mods;
@@ -10,6 +11,7 @@ pub(super) mod pages;
 mod saved;
 mod terrain;
 
+use biomes::{BiomeSort, BiomeView, on_biomes};
 use create::*;
 use edit_world::*;
 use mods::{Bulk, ModSort, ModView, Pop, on_mods};
@@ -186,6 +188,8 @@ struct BiomesDraft {
     declared: BiomePreview,
     choices: Vec<BiomeChoice>,
     selected: usize,
+    /// Whether the edit panel shows the selected Biome, in place of the terrain preview.
+    editing: bool,
     resetting: bool,
     /// Typed text, kept while it does not parse: sky, then fog.
     colours: [String; 2],
@@ -247,6 +251,7 @@ impl BiomesDraft {
             choices: declared.biomes.clone(),
             declared,
             selected: 0,
+            editing: false,
             resetting: false,
             colours: Default::default(),
         };
@@ -277,6 +282,32 @@ impl BiomesDraft {
             sky_fog.map_or_else(String::new, |s| hex(s.sky)),
             sky_fog.map_or_else(String::new, |s| hex(s.fog)),
         ];
+    }
+
+    /// Whether the player changed Biome `at` beyond turning it on or off.
+    fn customised(&self, at: usize) -> bool {
+        let (Some(choice), Some(declared)) = (self.choices.get(at), self.declared.biomes.get(at))
+        else {
+            return false;
+        };
+        BiomeChoice {
+            enabled: declared.enabled,
+            ..choice.clone()
+        } != *declared
+    }
+
+    /// Restores Biome `at` to the Game's, leaving it on or off.
+    fn reset_one(&mut self, at: usize) {
+        let (Some(choice), Some(declared)) =
+            (self.choices.get_mut(at), self.declared.biomes.get(at))
+        else {
+            return;
+        };
+        *choice = BiomeChoice {
+            enabled: choice.enabled,
+            ..declared.clone()
+        };
+        self.select(self.selected);
     }
 
     /// The Biomes that differ from the declarations.
@@ -386,6 +417,8 @@ struct Launcher {
     search: String,
     mod_search: String,
     mod_view: ModView,
+    biome_search: String,
+    biome_view: BiomeView,
     /// The control the last act came from, focused again when its page is rebuilt.
     refocus: Option<Act>,
     /// Disclosure rows the player has flipped from how they start.
@@ -408,7 +441,6 @@ struct Launcher {
 /// A row that shows or hides the settings under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Disclosure {
-    Ground,
     BiomeParameters,
     WorldInformation,
     ManageWorld,
@@ -445,6 +477,7 @@ impl Launcher {
         self.screen = screen;
         self.problem = None;
         self.mod_view.pop = None;
+        self.biome_view.pop = None;
         self.refocus = None;
         self.version += 1;
     }
@@ -500,6 +533,10 @@ pub(super) enum Act {
     ToggleBiome(usize),
     SelectBiome(usize),
     CycleGround(Layer),
+    /// The edit panel's Done: back to the terrain preview.
+    CloseBiome,
+    /// Restores the Biome in the edit panel.
+    ResetBiome,
     ResetBiomes,
     ConfirmReset,
     KeepBiomes,
@@ -522,6 +559,15 @@ pub(super) enum Act {
     ModSort(ModSort),
     /// The Mods step's tri-state box: ticks every Mod shown, or clears them.
     SelectShownMods,
+    /// Opens or closes a popup beside the Biomes search.
+    BiomePop(Pop),
+    /// Shows enabled (`true`) or disabled Biomes.
+    BiomeStatus(bool),
+    BiomeCustomised,
+    BiomeFilterReset,
+    BiomeSort(BiomeSort),
+    /// The Biomes step's tri-state box: turns on every Biome shown, or turns them off.
+    SelectShownBiomes,
 }
 
 #[derive(Resource, Default)]
@@ -534,6 +580,7 @@ enum Field {
     Rename,
     Search,
     ModSearch,
+    BiomeSearch,
     Sky,
     Fog,
     TemperatureSize,
@@ -550,8 +597,8 @@ struct Root;
 #[derive(Component)]
 struct PageScroll;
 
-/// One World on the Worlds screen, or one Mod on the Mods step, with the
-/// words that field's search matches.
+/// One World on the Worlds screen, one Mod on the Mods step or one Biome on the Biomes step,
+/// with the words that field's search matches.
 #[derive(Component)]
 struct WorldCard {
     words: String,
@@ -663,6 +710,9 @@ fn review_capture(
                 "filter" => Act::ModPop(Pop::Filter),
                 "sort" => Act::ModPop(Pop::Sort),
                 "all" => Act::SelectShownMods,
+                "biome" => Act::SelectBiome(0),
+                "biome-filter" => Act::BiomePop(Pop::Filter),
+                "biome-sort" => Act::BiomePop(Pop::Sort),
                 // The Opening card stays up: no World is handed to the loader.
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {
@@ -725,12 +775,15 @@ fn logic(app: &mut App) {
         .init_resource::<terrain::TerrainPreview>()
         .add_observer(activate)
         .add_observer(slide)
+        .add_observer(biomes::press_map)
+        .add_observer(biomes::drag_map)
         .add_observer(open_settings)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(
             Update,
             (
                 keys,
+                biomes::nudge,
                 sync_fields,
                 highlight,
                 handle,
@@ -742,6 +795,7 @@ fn logic(app: &mut App) {
                 show_filter,
                 filter,
                 pages::paint_bulk,
+                pages::paint_biomes,
                 placeholders,
                 opening,
                 (
@@ -873,6 +927,8 @@ fn start(
         search: String::new(),
         mod_search: String::new(),
         mod_view: ModView::default(),
+        biome_search: String::new(),
+        biome_view: BiomeView::default(),
         refocus: None,
         flipped: Default::default(),
         problem: None,
@@ -971,7 +1027,7 @@ fn keys(
             | Field::TemperatureSize
             | Field::HumiditySize => queue.0.push(Act::Next),
             Field::Rename => queue.0.push(Act::SaveName),
-            Field::Search | Field::ModSearch => {}
+            Field::Search | Field::ModSearch | Field::BiomeSearch => {}
         }
     }
 }
@@ -1006,6 +1062,7 @@ fn sync_fields(
             // Typing filters the cards in place; a rebuild would take the field's focus.
             Field::Search => launcher.bypass_change_detection().search = value,
             Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
+            Field::BiomeSearch => launcher.bypass_change_detection().biome_search = value,
         }
     }
     for mut text in &mut resolved {
@@ -1025,12 +1082,10 @@ fn filter(
     let Some(launcher) = launcher else {
         return;
     };
-    let query = |by: Field| {
-        if by == Field::ModSearch {
-            &launcher.mod_search
-        } else {
-            &launcher.search
-        }
+    let query = |by: Field| match by {
+        Field::ModSearch => &launcher.mod_search,
+        Field::BiomeSearch => &launcher.biome_search,
+        _ => &launcher.search,
     };
     let mut any = std::collections::BTreeSet::new();
     for (card, mut node) in &mut cards {
@@ -1151,9 +1206,19 @@ fn handle(
         l.refocus = None;
         let popup = matches!(
             act,
-            Act::ModPop(..) | Act::ModCategory(..) | Act::ModSelectedOnly | Act::ModFilterReset
+            Act::ModPop(..)
+                | Act::ModCategory(..)
+                | Act::ModSelectedOnly
+                | Act::ModFilterReset
+                | Act::BiomePop(..)
+                | Act::BiomeStatus(..)
+                | Act::BiomeCustomised
+                | Act::BiomeFilterReset
         );
-        if !popup && act != Act::Back && l.mod_view.pop.take().is_some() {
+        if !popup
+            && act != Act::Back
+            && (l.mod_view.pop.take().is_some() | l.biome_view.pop.take().is_some())
+        {
             l.version += 1;
         }
         match act {
@@ -1180,6 +1245,8 @@ fn handle(
             | Act::ToggleBiome(..)
             | Act::SelectBiome(..)
             | Act::CycleGround(..)
+            | Act::CloseBiome
+            | Act::ResetBiome
             | Act::ResetBiomes
             | Act::ConfirmReset
             | Act::KeepBiomes
@@ -1203,6 +1270,12 @@ fn handle(
             | Act::ModFilterReset
             | Act::ModSort(..)
             | Act::SelectShownMods => on_mods(l, cx.installed, act),
+            Act::BiomePop(..)
+            | Act::BiomeStatus(..)
+            | Act::BiomeCustomised
+            | Act::BiomeFilterReset
+            | Act::BiomeSort(..)
+            | Act::SelectShownBiomes => on_biomes(l, act),
         }
     }
 }
@@ -1243,12 +1316,22 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             l.refocus = l.mod_view.pop.take().map(Act::ModPop);
             l.version += 1;
         }
+        Act::Back if l.biome_view.pop.is_some() => {
+            l.refocus = l.biome_view.pop.take().map(Act::BiomePop);
+            l.version += 1;
+        }
         // Escape answers the reset dialog rather than leaving the step under it.
         Act::Back if l.form.biomes.as_ref().is_some_and(|d| d.resetting) => {
             if let Some(draft) = l.form.biomes.as_mut() {
                 draft.resetting = false;
             }
             l.version += 1;
+        }
+        Act::Back
+            if l.screen == Screen::Create(Step::Biomes)
+                && l.form.biomes.as_ref().is_some_and(|d| d.editing) =>
+        {
+            edit_biomes(l, |d| d.editing = false);
         }
         Act::Back if matches!(l.screen, Screen::Delete(_)) && l.from_list => l.show(Screen::Worlds),
         Act::Back => match l.screen.clone() {
