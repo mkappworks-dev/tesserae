@@ -531,3 +531,7 @@
   border: 0;
   box-shadow: none;
 }
+/* World details sits over the already-dimmed pause screen, so its own dim stays light. */
+.game .overlay:has(.details-dialog) {
+  background: rgb(9 10 12 / 0.3);
+}
