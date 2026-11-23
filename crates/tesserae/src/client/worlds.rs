@@ -346,12 +346,10 @@ pub(super) fn listed(world: &World) -> Vec<PathBuf> {
 struct Launcher {
     screen: Screen,
     entries: Vec<Entry>,
-    /// The World being edited, deleted or opened.
+    /// The World being edited, deleted or opened, or the highlighted slot on the Worlds.
     selected: Option<PathBuf>,
-    /// The World whose card menu is open.
-    menu: Option<PathBuf>,
-    /// The Delete prompt came from a card's menu, so it answers back to the list.
-    from_menu: bool,
+    /// The Delete prompt came from the Worlds, so it answers back to the list.
+    from_list: bool,
     card: Option<Card>,
     form: Form,
     /// The form as Create World opened it, to tell whether leaving loses anything.
@@ -456,10 +454,11 @@ pub(super) enum Act {
     New,
     ReCreate,
     Delete,
-    /// Opens or closes the menu on a World's card.
-    Menu(PathBuf),
-    /// Delete from a card's menu, without going through Edit.
+    /// Delete from the Worlds, without going through Edit.
     DeleteWorld(PathBuf),
+    /// The E and Delete prompts, on the highlighted World.
+    EditHighlighted,
+    DeleteHighlighted,
     ShowFolder,
     CopySeed,
     Quit,
@@ -529,6 +528,10 @@ struct WorldCard {
     words: String,
     by: Field,
 }
+
+/// A save slot on the Worlds: the World it holds, or none for New World.
+#[derive(Component)]
+struct Slot(Option<PathBuf>);
 
 /// Shown when the search in that field matches nothing.
 #[derive(Component)]
@@ -693,6 +696,7 @@ fn logic(app: &mut App) {
             (
                 keys,
                 sync_fields,
+                highlight,
                 handle,
                 load_thumbnails,
                 render,
@@ -702,6 +706,7 @@ fn logic(app: &mut App) {
                 opening,
                 (
                     header_hover,
+                    paint_slots,
                     paint_picks,
                     shape_trees,
                     paint_scenery,
@@ -833,8 +838,7 @@ fn start(
         clashes: Default::default(),
         version: 0,
         trust_asked: false,
-        menu: None,
-        from_menu: false,
+        from_list: false,
         opening_frames: 0,
     };
     launcher.refresh(&worlds.0);
@@ -1100,16 +1104,13 @@ fn handle(
     };
     for act in std::mem::take(&mut queue.0) {
         let l = &mut *l;
-        // Any act but the menu's own answers it; Back closes it itself.
-        if !matches!(act, Act::Menu(..) | Act::Back) && l.menu.take().is_some() {
-            l.version += 1;
-        }
         match act {
             Act::Continue | Act::Play(..) | Act::Trust => on_open(l, &mut cx, act),
             Act::Edit(..)
             | Act::Delete
-            | Act::Menu(..)
             | Act::DeleteWorld(..)
+            | Act::EditHighlighted
+            | Act::DeleteHighlighted
             | Act::ShowFolder
             | Act::CopySeed
             | Act::DefaultMode(..)
@@ -1194,12 +1195,7 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             l.version += 1;
         }
-        // Escape closes a card's menu rather than leaving the list under it.
-        Act::Back if l.menu.is_some() => {
-            l.menu = None;
-            l.version += 1;
-        }
-        Act::Back if matches!(l.screen, Screen::Delete(_)) && l.from_menu => l.show(Screen::Worlds),
+        Act::Back if matches!(l.screen, Screen::Delete(_)) && l.from_list => l.show(Screen::Worlds),
         Act::Back => match l.screen.clone() {
             Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
             Screen::Create(step) => match step.previous() {
@@ -1324,6 +1320,65 @@ fn relative(then_s: u64) -> String {
         7200..86_400 => format!("{} hours ago", ago / 3600),
         86_400..172_800 => "yesterday".into(),
         _ => format!("{} days ago", ago / 86_400),
+    }
+}
+
+/// The slot keyboard, controller or pointer focus rests on is the one E and Delete act on.
+fn highlight(launcher: Option<ResMut<Launcher>>, focus: Res<InputFocus>, slots: Query<&Slot>) {
+    let (Some(mut launcher), Some(slot)) = (launcher, focus.get().and_then(|f| slots.get(f).ok()))
+    else {
+        return;
+    };
+    if launcher.selected != slot.0 {
+        launcher.bypass_change_detection().selected = slot.0.clone();
+    }
+}
+
+type SlotPaint = (
+    Entity,
+    &'static bevy::picking::hover::Hovered,
+    &'static mut BackgroundColor,
+    &'static mut BorderColor,
+    &'static mut Outline,
+);
+
+/// A slot is lit while focused or hovered, and a lit World shows its Edit and Delete.
+fn paint_slots(
+    mut slots: Query<SlotPaint, (With<Slot>, Without<bevy::ui::InteractionDisabled>)>,
+    mut actions: Query<(&ChildOf, &mut Visibility), With<pages::SlotActions>>,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let ringed = ui::visible_focus(Some(&focus), visible.as_deref());
+    let lit = |entity: Entity, hovered: bool| hovered || focus.get() == Some(entity);
+    for (entity, hovered, mut fill, mut edge, mut outline) in &mut slots {
+        let on = lit(entity, hovered.0);
+        fill.set_if_neq(BackgroundColor(if on {
+            pages::SLOT_LIT
+        } else {
+            pages::SLOT_FILL
+        }));
+        if on {
+            edge.set_if_neq(BorderColor::all(pages::SLOT_EDGE_LIT));
+        }
+        let ring = if ringed == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+    for (tile, mut visibility) in &mut actions {
+        let on = slots
+            .get(tile.parent())
+            .is_ok_and(|(entity, hovered, ..)| lit(entity, hovered.0));
+        visibility.set_if_neq(if on {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
     }
 }
 

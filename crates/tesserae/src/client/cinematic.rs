@@ -1,12 +1,10 @@
 //! The approved menu look's building blocks: framed panels and sheets, the
 //! button states, notices and pills, all drawn from [`theme`].
 
-use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
-use bevy::ui_widgets::Button;
 
 use super::menu_ui as ui;
 use super::theme;
@@ -33,82 +31,7 @@ pub(super) struct Look {
 pub(super) struct Label;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(
-        PostUpdate,
-        (paint, paint_menu_items).before(bevy::ui::UiSystems::Layout),
-    );
-}
-
-/// One row of a popover menu: plain text that lights on hover, red when it destroys.
-#[derive(Component, Clone, Copy)]
-#[require(Hovered, Outline = theme::focus_ring())]
-pub(super) struct MenuItem {
-    pub danger: bool,
-}
-
-pub(super) fn menu_item(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    act: impl Bundle,
-    danger: bool,
-) -> Entity {
-    parent
-        .spawn((
-            Button,
-            TabIndex(0),
-            act,
-            MenuItem { danger },
-            Node {
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::FlexStart,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .with_child((
-            Text::new(label),
-            theme::font(theme::TEXT_SMALL),
-            TextColor(if danger {
-                theme::MENU_DANGER_INK
-            } else {
-                theme::INK
-            }),
-            Pickable::IGNORE,
-        ))
-        .id()
-}
-
-fn paint_menu_items(
-    mut items: Query<(
-        Entity,
-        &MenuItem,
-        &Hovered,
-        &mut BackgroundColor,
-        &mut Outline,
-    )>,
-    focus: Option<Res<InputFocus>>,
-    visible: Option<Res<InputFocusVisible>>,
-) {
-    let focused = ui::visible_focus(focus.as_deref(), visible.as_deref());
-    for (entity, item, hovered, mut background, mut outline) in &mut items {
-        let lit = hovered.0 || focused == Some(entity);
-        let fill = match (lit, item.danger) {
-            (false, _) => Color::NONE,
-            (true, false) => theme::MENU_HOVER,
-            (true, true) => theme::MENU_DANGER_HOVER,
-        };
-        background.set_if_neq(BackgroundColor(fill));
-        let ring = if focused == Some(entity) {
-            theme::FOCUS
-        } else {
-            Color::NONE
-        };
-        if outline.color != ring {
-            outline.color = ring;
-        }
-    }
+    app.add_systems(PostUpdate, paint.before(bevy::ui::UiSystems::Layout));
 }
 
 /// Fill, edge and label ink for a button in one state.
