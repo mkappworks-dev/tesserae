@@ -603,6 +603,9 @@ enum Field {
 #[derive(Component)]
 struct Root;
 
+/// The page's scrolling column and the Biome panel's body, each of which keeps its place.
+type Scrolling = Or<(With<PageScroll>, With<pages::PanelScroll>)>;
+
 /// The page's own scrolling column, whose position survives a rebuild of the same page.
 #[derive(Component)]
 struct PageScroll;
@@ -1401,8 +1404,7 @@ fn render(
     ),
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
-    scrolled: Query<&ScrollPosition, With<PageScroll>>,
-    panel: Query<&ScrollPosition, With<pages::PanelScroll>>,
+    scrolled: Query<(&ScrollPosition, Has<PageScroll>), Scrolling>,
     (logo, thumbnails): (Option<Res<ui::Mosaic>>, Res<Thumbnails>),
     (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
@@ -1419,11 +1421,17 @@ fn render(
     // A click rebuilds the page it is on; keep its place there, and start a new page at the top.
     let same = shown.as_ref() == Some(&l.screen);
     let scroll = if same {
-        scrolled.iter().next().map_or(Vec2::ZERO, |p| p.0)
+        scrolled
+            .iter()
+            .find_map(|(p, page)| page.then_some(p.0))
+            .unwrap_or(Vec2::ZERO)
     } else {
         Vec2::ZERO
     };
-    let panel_scroll = panel.iter().next().map(|p| p.0).filter(|_| same);
+    let panel_scroll = scrolled
+        .iter()
+        .find_map(|(p, page)| (!page).then_some(p.0))
+        .filter(|_| same);
     *shown = Some(l.screen.clone());
     for root in &roots {
         commands.entity(root).despawn();

@@ -171,7 +171,8 @@ fn heights(shape: u32) -> Vec<usize> {
             let n = crate::noise::fbm2(x as f32 * 0.28, y as f32 * 0.28, shape, 3);
             let ex = (x as f32 - (SIDE as f32 - 1.0) / 2.0) / half;
             let ey = (y as f32 - (SIDE as f32 - 1.0) / 2.0) / half;
-            let edge = (1.0 - ex.abs().max(ey.abs()).powi(3) * 0.55).max(0.0);
+            let far = ex.abs().max(ey.abs());
+            let edge = (1.0 - far * far * far * 0.55).max(0.0);
             let rise = (n * 6.0 * edge).round() as usize;
             out[x * SIDE + y] = (SOIL_DEPTH + 2 + rise).min(10);
         }

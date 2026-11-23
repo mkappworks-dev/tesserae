@@ -3783,7 +3783,7 @@ fn ground_row(
             .with_children(|select| {
                 ground_swatch(select, biomes::material(source, name));
                 select.spawn((
-                    Text::new(ui::declared_title(name)),
+                    Text::new(biomes::material_title(&materials, name)),
                     theme::font(theme::TEXT_BODY),
                     TextColor(theme::INK),
                     TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
@@ -3794,12 +3794,7 @@ fn ground_row(
                     },
                     Pickable::IGNORE,
                 ));
-                let chevron = if open {
-                    IconKind::Expanded
-                } else {
-                    IconKind::Chevron
-                };
-                ui::icon(select, chevron, theme::muted(), 12.0);
+                ui::icon(select, IconKind::Expanded, theme::muted(), 12.0);
             });
             if !open {
                 return;
@@ -3851,8 +3846,10 @@ fn ground_row(
                         );
                     });
                 });
+                // Opens at the chosen Material; layout clamps the offset near the end.
+                let chosen = materials.iter().position(|m| m == name).unwrap_or(0);
                 pop.spawn((
-                    ScrollPosition::default(),
+                    ScrollPosition(Vec2::new(0.0, chosen as f32 * theme::CONTROL_HEIGHT)),
                     Node {
                         flex_direction: FlexDirection::Column,
                         flex_shrink: 1.0,
@@ -3863,7 +3860,8 @@ fn ground_row(
                 ))
                 .with_children(|list| {
                     for material in &materials {
-                        ground_option(list, layer, material, material == name, source);
+                        let title = biomes::material_title(&materials, material);
+                        ground_option(list, layer, material, &title, material == name, source);
                     }
                     list.spawn((
                         NoMatch(Field::GroundSearch),
@@ -3910,6 +3908,7 @@ fn ground_option(
     list: &mut ChildSpawnerCommands,
     layer: Layer,
     material: &str,
+    title: &str,
     chosen: bool,
     source: Option<&tesserae_core::terrain_preview::Source>,
 ) {
@@ -3924,7 +3923,7 @@ fn ground_option(
         TabIndex(0),
         Act::PickGround(layer, material.to_owned()),
         WorldCard {
-            words: ui::declared_title(material),
+            words: title.to_owned(),
             by: Field::GroundSearch,
         },
         Pick {
@@ -3948,7 +3947,7 @@ fn ground_option(
     .with_children(|row| {
         ground_swatch(row, biomes::material(source, material));
         row.spawn((
-            Text::new(ui::declared_title(material)),
+            Text::new(title),
             theme::font(theme::TEXT_BODY),
             TextColor(theme::INK),
             Node {

@@ -1801,7 +1801,7 @@ fn biome_look(app: &mut App, at: usize) -> biomes::Look {
     app.world_mut()
         .query::<&pages::BiomeThumb>()
         .iter(app.world())
-        .find_map(|t| (t.at == at).then(|| t.look.clone()))
+        .find_map(|t| (t.at == at).then_some(t.look))
         .unwrap_or_else(|| panic!("no preview of Biome {at}"))
 }
 
@@ -2005,6 +2005,16 @@ fn opening_a_ground_dropdown_keeps_the_panel_scrolled_to_it() {
         .0 = scrolled;
     act(&mut app, Act::GroundPop(Layer::Rock));
     assert_eq!(body(&mut app), scrolled);
+}
+
+#[test]
+fn a_material_name_two_mods_declare_shows_its_mod() {
+    let materials = ["strata:stone", "terra:stone", "terra:dirt"].map(String::from);
+    assert_eq!(
+        biomes::material_title(&materials, "terra:stone"),
+        "Stone \u{00b7} Terra"
+    );
+    assert_eq!(biomes::material_title(&materials, "terra:dirt"), "Dirt");
 }
 
 /// Updates until every Biome's diorama being drawn lands.

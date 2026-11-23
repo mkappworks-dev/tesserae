@@ -169,9 +169,26 @@ pub(super) fn ground_matches(l: &Launcher) -> Vec<String> {
         .declared
         .materials
         .iter()
-        .filter(|m| ui::matches(&l.ground_search, &ui::declared_title(m)))
+        .filter(|m| {
+            ui::matches(
+                &l.ground_search,
+                &material_title(&draft.declared.materials, m),
+            )
+        })
         .cloned()
         .collect()
+}
+
+/// A Material's name as the menus show it, with its Mod's when another Material shares it.
+pub(super) fn material_title(materials: &[String], material: &str) -> String {
+    let title = ui::declared_title(material);
+    let shared = materials
+        .iter()
+        .any(|m| m != material && ui::declared_title(m) == title);
+    match material.split_once(':') {
+        Some((owner, _)) if shared => format!("{title} \u{00b7} {}", ui::declared_title(owner)),
+        _ => title,
+    }
 }
 
 /// What a Biome's diorama is drawn from: its own sky, fog and ground, and how cavernous it is.
