@@ -311,7 +311,7 @@ type Focusables<'w, 's> = Query<
         &'static InheritedVisibility,
     ),
     (
-        Or<(With<Button>, With<Slider>, With<Reader>)>,
+        Or<(With<Button>, With<Slider>, With<Reader>, With<Surface>)>,
         Without<super::menu_ui::SearchField>,
         Without<super::frame::PromptKey>,
         Without<super::frame::PointerOnly>,
@@ -345,6 +345,7 @@ type Structure<'w, 's> = (
     Query<'w, 's, (), With<bevy::ui_widgets::TextInput>>,
     Query<'w, 's, (), With<Stepper>>,
     Query<'w, 's, (), With<Plane>>,
+    Query<'w, 's, (), With<Surface>>,
 );
 struct Candidate {
     area: FocusableArea,
@@ -364,6 +365,18 @@ pub(super) struct Plane;
 /// scroll it while it has more to show that way, and move focus on at its ends.
 #[derive(Component)]
 pub(super) struct Reader;
+
+/// A control that every direction changes, keys, D-pad and stick alike, as a colour square: focus
+/// leaves it only by Tab.
+#[derive(Component)]
+pub(super) struct Surface;
+
+/// A direction on a focused [`Surface`]: `by` is one of the four unit steps, up positive.
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub(super) struct Nudge {
+    pub entity: Entity,
+    pub by: IVec2,
+}
 
 /// Left (`by` -1) or Right (+1) on a focused [`Stepper`].
 #[derive(EntityEvent, Clone, Copy, Debug)]
@@ -387,7 +400,7 @@ fn navigate(
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
     (focusables, mut readers): (Focusables, Readers),
-    (groups, parents, disabled, sliders, tabs, typing, steppers, planes): Structure,
+    (groups, parents, disabled, sliders, tabs, typing, steppers, planes, surfaces): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
     let owner = ownership.owner;
@@ -521,7 +534,15 @@ fn navigate(
             -1.0
         };
         let sideways = matches!(direction, CompassOctant::East | CompassOctant::West);
-        if sideways && steppers.contains(entity) {
+        if surfaces.contains(entity) {
+            let by = match direction {
+                CompassOctant::North => IVec2::Y,
+                CompassOctant::South => IVec2::NEG_Y,
+                CompassOctant::East => IVec2::X,
+                _ => IVec2::NEG_X,
+            };
+            commands.trigger(Nudge { entity, by });
+        } else if sideways && steppers.contains(entity) {
             commands.trigger(Step {
                 entity,
                 by: sign as i32,

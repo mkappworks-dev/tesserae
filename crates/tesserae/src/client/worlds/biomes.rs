@@ -274,6 +274,7 @@ pub(super) struct BiomeView {
     pub(super) pop: Option<Pop>,
     /// The ground layer whose Material dropdown is open.
     pub(super) ground: Option<Layer>,
+    pub(super) colour: Option<super::colour::Picking>,
 }
 
 impl BiomeView {

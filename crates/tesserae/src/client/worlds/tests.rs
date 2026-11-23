@@ -1737,7 +1737,7 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     slide(&mut app, Knob::Temperature, 0.35);
     slide(&mut app, Knob::Caves, 0.0);
     pick_ground(&mut app, Layer::Surface, "t:sand");
-    type_into(&mut app, Field::Sky, "#0a141e");
+    pick_sky(&mut app, "#0a141e");
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
     assert!(shown(&mut app, "Meadow") && shown(&mut app, "Customised"));
@@ -1991,7 +1991,7 @@ fn an_edited_biome_is_marked_customised_and_its_preview_redraws() {
     let before = biome_look(&mut app, 1);
     assert_eq!(biome_tag(&mut app, 1), "Terra");
     act(&mut app, Act::SelectBiome(1));
-    type_into(&mut app, Field::Sky, "#0a141e");
+    pick_sky(&mut app, "#0a141e");
     let sky = biome_look(&mut app, 1);
     assert_eq!(sky.sky, [10, 20, 30]);
     assert_eq!(biome_tag(&mut app, 1), "Customised");
@@ -2039,23 +2039,33 @@ fn reset_restores_the_open_biome_and_reset_all_restores_every_biome() {
 #[test]
 fn a_biome_without_colours_shows_and_resets_to_sky_blue_and_white() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
-    let colours = |app: &App| launcher(app).form.biomes.as_ref().unwrap().colours.clone();
     let look = biome_look(&mut app, 1);
     assert_eq!(
         (look.sky, look.fog),
         ([0x87, 0xce, 0xeb], [0xff, 0xff, 0xff])
     );
     act(&mut app, Act::SelectBiome(1));
-    assert_eq!(colours(&app), ["#87ceeb", "#ffffff"]);
-    type_into(&mut app, Field::Sky, "#0a141e");
+    assert_eq!(shown_colours(&mut app), ["#87CEEB", "#FFFFFF"]);
+    pick_sky(&mut app, "#0a141e");
     assert_eq!(
         edited(&app, 1).sky_fog.map(|s| s.fog),
         Some([0xff, 0xff, 0xff]),
         "the fog the field showed is the fog kept"
     );
     act(&mut app, Act::ResetBiome);
-    assert_eq!(colours(&app), ["#87ceeb", "#ffffff"]);
+    assert_eq!(shown_colours(&mut app), ["#87CEEB", "#FFFFFF"]);
     assert_eq!(edited(&app, 1).sky_fog, None);
+}
+
+/// What the closed Sky and Fog controls read.
+fn shown_colours(app: &mut App) -> [String; 2] {
+    [colour::Air::Sky, colour::Air::Fog].map(|air| {
+        app.world_mut()
+            .query::<(&colour::Shown, &Text)>()
+            .iter(app.world())
+            .find_map(|(s, t)| (s.0 == air).then(|| t.0.clone()))
+            .unwrap_or_else(|| panic!("no {air:?} control"))
+    })
 }
 
 const ASH: SkyFog = SkyFog {
@@ -2078,21 +2088,20 @@ fn beside_coloured_biomes_a_colourless_one_shows_the_land_around_it() {
     new_world(&mut app);
     act(&mut app, Act::Next);
     act(&mut app, Act::Next);
-    let colours = |app: &App| launcher(app).form.biomes.as_ref().unwrap().colours.clone();
     let look = biome_look(&mut app, 1);
     assert_eq!((look.sky, look.fog), (ASH.sky, ASH.fog), "the diorama");
 
     act(&mut app, Act::SelectBiome(1));
-    assert_eq!(colours(&app), ["", ""]);
-    assert!(shown(&mut app, "Same as the land around it"));
-    type_into(&mut app, Field::Sky, "#0a141e");
+    let land = "Same as the land around it";
+    assert_eq!(shown_colours(&mut app), [land, land]);
+    pick_sky(&mut app, "#0a141e");
     assert_eq!(
         edited(&app, 1).sky_fog.map(|s| s.fog),
         Some(ASH.fog),
         "the untyped half keeps the land's"
     );
     act(&mut app, Act::ResetBiome);
-    assert_eq!(colours(&app), ["", ""]);
+    assert_eq!(shown_colours(&mut app), [land, land]);
     assert_eq!(edited(&app, 1).sky_fog, None);
 }
 
@@ -2234,10 +2243,11 @@ fn each_biome_shows_a_diorama_drawn_off_the_main_thread_and_redrawn_after_an_edi
     assert_eq!(before[..3], [0x87, 0xce, 0xeb], "its sky at the top");
     assert_ne!(before, diorama(&mut app, 0), "each Biome is its own island");
     act(&mut app, Act::SelectBiome(1));
-    type_into(&mut app, Field::Sky, "#0a141e");
+    act(&mut app, Act::ColourPop(colour::Air::Sky));
+    type_into(&mut app, Field::ColourHex, "#0a141e");
     assert!(
         app.world().resource::<diorama::Dioramas>().drawing(),
-        "an edit redraws on another thread"
+        "an edit redraws on another thread, while the picker is open"
     );
     dioramas_drawn(&mut app);
     let after = diorama(&mut app, 1);
@@ -4170,6 +4180,12 @@ fn left_and_right_change_edit_worlds_game_mode() {
     assert_eq!(launcher(&app).modes.own, GameMode::Creative);
 }
 
+fn pick_sky(app: &mut App, hex: &str) {
+    act(app, Act::ColourPop(colour::Air::Sky));
+    type_into(app, Field::ColourHex, hex);
+    act(app, Act::ColourDone);
+}
+
 fn pick_ground(app: &mut App, layer: Layer, name: &str) {
     act(app, Act::GroundPop(layer));
     act(app, Act::PickGround(layer, name.into()));
@@ -4312,3 +4328,5 @@ fn trust_terms_list_what_an_item_can_do_and_each_kind_of_limit() {
     assert!(!terms[2].1.contains(&limit.to_string()), "{}", terms[2].1);
     assert!(terms[2].1.contains(','), "{}", terms[2].1);
 }
+
+mod colour_picker;
