@@ -189,6 +189,12 @@ fn prompts(page: &Screen, l: &Launcher, installed: &Installed) -> Vec<frame::Pro
             Prompt::new(Cap::Tab, "Navigate"),
             Prompt::new(Cap::Esc, "Back").act(Act::Back),
         ],
+        Screen::Title => vec![
+            Prompt::new(Cap::Tab, "Navigate"),
+            Prompt::new(Cap::Enter, "Select"),
+            Prompt::new(Cap::Esc, "Back"),
+            Prompt::new(Cap::Letter('Q'), "Quit").act(Act::Quit),
+        ],
         _ => vec![
             Prompt::new(Cap::Tab, "Navigate"),
             Prompt::new(Cap::Enter, "Select"),

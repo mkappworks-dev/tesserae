@@ -516,6 +516,44 @@ fn quit_exits_without_restarting() {
     assert!(app.world().resource::<Switch>().0.is_none());
 }
 
+#[test]
+fn q_on_the_title_quits_as_the_quit_item_does() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    press(&mut app, KeyCode::KeyQ);
+    assert_eq!(exits(&app), 1);
+    assert!(app.world().resource::<Switch>().0.is_none());
+}
+
+#[test]
+fn clicking_the_title_q_prompt_quits() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    app.update();
+    let prompt = app
+        .world_mut()
+        .query_filtered::<(Entity, &Act), With<frame::PromptKey>>()
+        .iter(app.world())
+        .find_map(|(e, act)| (*act == Act::Quit).then_some(e))
+        .expect("a Quit prompt");
+    app.world_mut().trigger(Activate { entity: prompt });
+    app.update();
+    assert_eq!(exits(&app), 1);
+}
+
+#[test]
+fn q_elsewhere_in_the_launcher_does_not_quit() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Library);
+    press(&mut app, KeyCode::KeyQ);
+    assert_eq!(exits(&app), 0);
+}
+
 fn controls(app: &mut App, wanted: &Act) -> usize {
     app.world_mut()
         .query::<&Act>()
@@ -537,12 +575,21 @@ fn the_title_is_framed_and_only_it_quits() {
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     app.update();
-    assert_eq!(controls(&mut app, &Act::Quit), 1);
+    assert_eq!(
+        controls(&mut app, &Act::Quit),
+        2,
+        "the item and the Q prompt"
+    );
     assert_eq!(controls(&mut app, &Act::Settings), 1, "in the title's menu");
     assert!(shown(&mut app, &format!("v{}", env!("CARGO_PKG_VERSION"))));
     assert_eq!(
         frame::testing::prompts(&mut app),
-        keys(&[("Tab", "Navigate"), ("Enter", "Select"), ("Esc", "Back")])
+        keys(&[
+            ("Tab", "Navigate"),
+            ("Enter", "Select"),
+            ("Esc", "Back"),
+            ("Q", "Quit")
+        ])
     );
     act(&mut app, Act::Library);
     assert_eq!(controls(&mut app, &Act::Quit), 0, "only the title quits");
@@ -650,16 +697,16 @@ fn the_prompt_bar_shows_controller_buttons_after_controller_input_and_keys_after
             .map(|(cap, _)| cap)
             .collect()
     };
-    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc", "Q"]);
     tap(&mut app, pad, GamepadButton::DPadUp);
     assert_eq!(
         focused_act(&app),
         Some(Act::Worlds),
         "the D-pad moves focus"
     );
-    assert_eq!(caps(&mut app), ["Tab", "A", "B"]);
+    assert_eq!(caps(&mut app), ["Tab", "A", "B", "Q"]);
     key(&mut app, KeyCode::ArrowDown);
-    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc"]);
+    assert_eq!(caps(&mut app), ["Tab", "Enter", "Esc", "Q"]);
     assert_eq!(focused_act(&app), Some(Act::Continue));
     tap(&mut app, pad, GamepadButton::South);
     assert!(
