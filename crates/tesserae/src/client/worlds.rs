@@ -529,7 +529,8 @@ pub(super) enum Act {
     ResetBiomes,
     ConfirmReset,
     KeepBiomes,
-    Voxel(f32),
+    /// Steps the Voxel size by this many sizes, wrapping; the selector itself carries `1`.
+    VoxelStep(i32),
     Mode(GameMode),
     PickGame(usize),
     ToggleMod(usize),
@@ -571,6 +572,7 @@ impl Act {
         match self {
             Act::Mode(_) => Some(Act::Mode(mode)),
             Act::EditMode(_) => Some(Act::EditMode(mode)),
+            Act::VoxelStep(_) => Some(Act::VoxelStep(by)),
             _ => None,
         }
     }
@@ -1275,7 +1277,7 @@ fn handle(
             | Act::KeepBiomes
             | Act::KeepEditing
             | Act::DiscardSetup
-            | Act::Voxel(..)
+            | Act::VoxelStep(..)
             | Act::Mode(..)
             | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),

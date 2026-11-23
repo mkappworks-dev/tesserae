@@ -165,7 +165,7 @@ fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
     new_world(&mut app);
     type_into(&mut app, Field::Name, "  Ridge ");
     type_into(&mut app, Field::Seed, "-1");
-    act(&mut app, Act::Voxel(0.25));
+    step(&mut app, Act::VoxelStep(1), -1);
     finish(&mut app);
     let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
         panic!("no World to open");
@@ -1360,7 +1360,8 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             Some(Act::Edit(path.clone())),
             vec![
                 "Rename",
-                "EditMode(Survival)",
+                // Tab reaches the chosen Game mode; Left and Right the other.
+                "EditMode(Creative)",
                 "CopySeed",
                 "ReCreate",
                 "SaveName",
@@ -3618,4 +3619,26 @@ fn left_and_right_change_the_game_mode_and_keep_the_focus_on_it() {
     step(&mut app, Act::Mode(GameMode::Survival), -1);
     assert_eq!(launcher(&app).form.game_mode, GameMode::Creative);
     assert_eq!(focused_act(&app), Some(Act::Mode(GameMode::Creative)));
+}
+
+#[test]
+fn voxel_size_is_one_selector_that_left_right_and_enter_step_through() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    assert!(shown(&mut app, "1 m \u{b7} default"));
+    act(&mut app, Act::VoxelStep(1));
+    assert_eq!(launcher(&app).form.voxel_size_m, 0.5);
+    assert!(shown(
+        &mut app,
+        "0.5 m \u{b7} 2\u{d7} finer, half the view distance"
+    ));
+    step(&mut app, Act::VoxelStep(1), 1);
+    assert_eq!(launcher(&app).form.voxel_size_m, 0.25);
+    assert_eq!(focused_act(&app), Some(Act::VoxelStep(1)));
+    step(&mut app, Act::VoxelStep(1), 1);
+    assert_eq!(launcher(&app).form.voxel_size_m, 1.0, "it wraps");
+    step(&mut app, Act::VoxelStep(1), -1);
+    assert_eq!(launcher(&app).form.voxel_size_m, 0.25);
 }
