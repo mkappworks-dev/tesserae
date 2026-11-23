@@ -228,6 +228,9 @@ function layoutAction(name, value) {
   ensureLayout();
   const l = state.quickLayout;
   if (name === "layout-open") {
+    // Always on Count: the method is never kept from one opening to the next.
+    l.kind = "directions";
+    l.points = 0;
     l.active = true;
     state.layoutError = "";
     navigate("layout");

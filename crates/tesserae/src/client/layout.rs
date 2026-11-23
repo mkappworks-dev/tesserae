@@ -52,6 +52,8 @@ pub(crate) enum Kind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct LayoutPreferences {
+    /// Not saved: the panel opens on Count each time, as the user chose.
+    #[serde(skip)]
     pub kind: Kind,
     /// Voxels along X, Y and Z. A length of 1 leaves that axis out, so one axis
     /// above 1 is a line, two a flat rectangle and three a box.
