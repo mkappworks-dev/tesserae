@@ -8,13 +8,12 @@ use bevy::audio::{
 };
 use bevy::input::gamepad::{GamepadRumbleIntensity, GamepadRumbleRequest};
 use bevy::prelude::*;
-use tesserae_core::audio::SoundCategory;
 
 use super::frame;
 use super::pad::PadInput;
 use super::profile::Preferences;
 
-/// Under the World's effects, so a menu click never shouts over them.
+/// Quiet at full Interface volume, so a menu click never shouts over the World.
 const CLICK_GAIN: f32 = 0.35;
 const RUMBLE: Duration = Duration::from_millis(60);
 const RUMBLE_INTENSITY: GamepadRumbleIntensity = GamepadRumbleIntensity::weak_motor(0.4);
@@ -43,9 +42,9 @@ fn press(
     mut rumble: MessageWriter<GamepadRumbleRequest>,
     mut commands: Commands,
 ) {
-    let gain = preferences.map_or(1.0, |p| {
-        p.volumes.gain(SoundCategory::Effects, CLICK_GAIN, 1.0)
-    });
+    let gain = preferences
+        .as_ref()
+        .map_or(1.0, |p| p.volumes.interface_gain(CLICK_GAIN));
     if gain > 0.0 {
         commands.spawn((
             AudioPlayer(sound.0.clone()),
@@ -56,7 +55,8 @@ fn press(
             },
         ));
     }
-    if let (true, Some(gamepad)) = (event.pad, pad.and_then(|pad| pad.active)) {
+    let rumble_on = preferences.is_none_or(|p| p.pad.menu_rumble);
+    if let (true, true, Some(gamepad)) = (event.pad, rumble_on, pad.and_then(|pad| pad.active)) {
         rumble.write(GamepadRumbleRequest::Add {
             duration: RUMBLE,
             intensity: RUMBLE_INTENSITY,
@@ -201,20 +201,37 @@ mod tests {
     }
 
     #[test]
-    fn the_click_plays_at_the_players_effects_volume() {
+    fn the_click_follows_the_interface_volume_not_effects() {
         let (mut app, _) = app();
         press(&mut app, false);
         let full = clicks(&mut app)[0];
         assert!(full > 0.0);
-        app.world_mut().resource_mut::<Preferences>().volumes.master = 50;
-        app.world_mut()
-            .resource_mut::<Preferences>()
-            .volumes
-            .effects = 50;
+        let mut preferences = app.world_mut().resource_mut::<Preferences>();
+        preferences.volumes.effects = 0;
+        preferences.volumes.master = 50;
+        preferences.volumes.interface = 50;
         press(&mut app, false);
         let mut gains = clicks(&mut app);
         gains.sort_by(f32::total_cmp);
         assert!((gains[0] - full / 4.0).abs() < 1e-5, "{gains:?}");
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .volumes
+            .interface = 0;
+        press(&mut app, false);
+        assert_eq!(clicks(&mut app).len(), 2, "0 mutes it");
+    }
+
+    #[test]
+    fn rumble_on_menu_press_off_keeps_the_pad_still() {
+        let (mut app, _) = app();
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .pad
+            .menu_rumble = false;
+        press(&mut app, true);
+        assert_eq!(clicks(&mut app).len(), 1);
+        assert!(rumbles(&mut app).is_empty());
     }
 
     #[test]

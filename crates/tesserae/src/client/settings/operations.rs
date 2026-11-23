@@ -178,7 +178,6 @@ pub(super) fn run(
         Operation::KeepDisplay => settings.keep = None,
         Operation::RevertDisplay => revert(&mut settings, &mut preferences),
         Operation::Reference(on) => settings.show_reference = on,
-        Operation::EffectControls => settings.effects_open = !settings.effects_open,
         Operation::TouchControls => settings.touch_open = !settings.touch_open,
         Operation::Capture(device, action, slot) => {
             focus.clear();
@@ -246,6 +245,7 @@ pub(super) fn run(
             match preference {
                 Operation::PadInvert(on) => p.pad.invert_y = on,
                 Operation::PadCrouch(on) => p.pad.toggle_crouch = on,
+                Operation::PadMenuRumble(on) => p.pad.menu_rumble = on,
                 Operation::TouchInvert(on) => p.touch.invert_y = on,
                 Operation::TouchMirror(on) => p.touch.mirrored = on,
                 Operation::TouchSize(size) => p.touch.size = size,

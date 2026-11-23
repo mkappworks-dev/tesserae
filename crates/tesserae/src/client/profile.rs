@@ -69,6 +69,7 @@ pub(crate) struct PadPreferences {
     pub move_deadzone: f32,
     pub look_deadzone: f32,
     pub toggle_crouch: bool,
+    pub menu_rumble: bool,
 }
 impl Default for PadPreferences {
     fn default() -> Self {
@@ -78,6 +79,7 @@ impl Default for PadPreferences {
             move_deadzone: 0.15,
             look_deadzone: 0.15,
             toggle_crouch: true,
+            menu_rumble: true,
         }
     }
 }
@@ -790,8 +792,8 @@ mod tests {
         let (_, older) = decode(br#"{"version":3,"preferences":{"invert_y":true}}"#).unwrap();
         let v = older.volumes;
         assert_eq!(
-            (v.master, v.effects, v.ambient, v.music),
-            (100, 100, 70, 50)
+            (v.master, v.effects, v.ambient, v.music, v.interface),
+            (100, 100, 70, 50, 100)
         );
         let (_, partial) =
             decode(br#"{"version":3,"preferences":{"volumes":{"music":0}}}"#).unwrap();
@@ -805,6 +807,7 @@ mod tests {
 
         for bad in [
             r#"{"master":101}"#,
+            r#"{"interface":101}"#,
             r#"{"ambient":-1}"#,
             r#"{"music":0.5}"#,
             r#"{"detail":{"eating":101}}"#,

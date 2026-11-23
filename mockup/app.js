@@ -146,6 +146,7 @@ const modCatalog = [
   },
 ];
 const state = {
+  reading: {},
   screen: "home",
   step: 0,
   game: "Terra",
@@ -283,9 +284,39 @@ function startCreate(from) {
     selected: 0,
     trusted: false,
     dirty: false,
+    reading: {},
   });
   render();
 }
+/* The Client reads the Game's and Mods' Biomes off the main thread after Next (~0.3 s); the step
+   shows at once and the parts that need the read say so. */
+const READ_MS = 400;
+let readTimer;
+function startRead(...parts) {
+  parts.forEach((p) => (state.reading[p] = true));
+  clearTimeout(readTimer);
+  readTimer = setTimeout(finishRead, READ_MS);
+}
+function finishRead() {
+  if (state.holdReading) return;
+  state.reading = {};
+  if (state.screen !== "wizard") return;
+  if (state.step === 1) {
+    const climate = $("#climate-scale");
+    if (climate) climate.outerHTML = climateScale();
+    return;
+  }
+  if (state.step < 3) return;
+  const primary = document.activeElement?.matches(".sheet-actions .primary");
+  const y = $(".body")?.scrollTop;
+  render();
+  if ($(".body")) $(".body").scrollTop = y;
+  if (primary) $(".sheet-actions .primary")?.focus({ preventScroll: true });
+}
+function readingNote(words) {
+  return `<p class="reading-note muted">${words}</p>`;
+}
+const READING_BIOMES = "Reading the Biomes the Game and Mods declare…";
 function startEdit(id) {
   const w = worlds.find((x) => x.id === Number(id));
   if (!w) {
@@ -589,18 +620,23 @@ function wizard() {
     state.step === 0
       ? "It shapes the land, its biomes and what you can build."
       : "";
+  const reading = state.reading.game || state.reading.biomes;
+  const blocked = state.step === 4 && reading;
+  const hold = `<button class="sim-inline proto-tool reading-sim" data-action="sim-hold-reading" aria-pressed="${!!state.holdReading}">Prototype · ${state.holdReading ? "finish the read" : "hold “Reading…”"}</button>`;
   return frame({
     title: titles[state.step],
     subtitle,
     eyebrow: "",
-    body: [gameForm, worldForm, modsForm, biomesForm, reviewForm][state.step](),
+    body:
+      [gameForm, worldForm, modsForm, biomesForm, reviewForm][state.step]() +
+      hold,
     rail: rail(),
     prompts: [
       ["Enter", "Select"],
       [
         "Ctrl+Enter",
         state.step === 4 ? "Create" : "Next",
-        state.step === 4 ? "create" : "next",
+        blocked ? undefined : state.step === 4 ? "create" : "next",
       ],
       [
         "Esc",
@@ -613,7 +649,7 @@ function wizard() {
         ? "Create World"
         : `Next: ${["World", "Mods", "Biomes", "Review"][state.step]}`,
       state.step === 4 ? "create" : "next",
-      { primary: true },
+      { primary: true, disabled: blocked },
     ),
   });
 }
@@ -647,7 +683,13 @@ function worldForm() {
     { name: "randomize", label: "Randomize seed", icon: "shuffle" },
     { name: "copy-seed", label: "Copy seed", icon: "copy" },
   ];
-  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}${voxelPicks(state.voxel)}<div class="field-label"><span>Climate scale · fixed at creation</span><div class="two-col">${textField("Temperature (m)", "tempSize", state.tempSize, { type: "number", min: 1, max: 100000, step: 1 })}${textField("Humidity (m)", "humiditySize", state.humiditySize, { type: "number", min: 1, max: 100000, step: 1 })}</div></div></div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
+  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}${voxelPicks(state.voxel)}${climateScale()}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
+}
+function climateScale() {
+  const fields = state.reading.game
+    ? readingNote("Reading the Game…")
+    : `<div class="two-col">${textField("Temperature (m)", "tempSize", state.tempSize, { type: "number", min: 1, max: 100000, step: 1 })}${textField("Humidity (m)", "humiditySize", state.humiditySize, { type: "number", min: 1, max: 100000, step: 1 })}</div>`;
+  return `<div class="field-label" id="climate-scale"><span>Climate scale · fixed at creation</span>${fields}</div>`;
 }
 function required() {
   return games[state.game].required;
@@ -758,6 +800,8 @@ function refreshBiomes() {
   syncBulk();
 }
 function biomesForm() {
+  if (state.reading.biomes)
+    return `<div class="world-form"><div class="form-main">${readingNote(READING_BIOMES)}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this World")}</aside></div>`;
   const b = state.biomes[state.selected];
   const active = state.bFilter.length + (state.bCustom ? 1 : 0);
   const open = (name) => (state.pop === name ? " open" : "");
@@ -831,13 +875,19 @@ function reviewForm() {
       ["Game mode", state.mode],
       ["Seed", state.seed ? seedWithCopy(state.seed) : "Random on creation"],
       ["Voxel size", voxel],
-      ["Climate scale", `${state.tempSize} m · ${state.humiditySize} m`],
+      ...(state.reading.game
+        ? []
+        : [["Climate scale", `${state.tempSize} m · ${state.humiditySize} m`]]),
     ]),
   )}${section("Mods", 2, modPreviewList(mods, required()), String(mods.length))}${section(
     "Biomes",
     3,
-    `<ul class="review-biomes">${enabled.map(({ b, i }) => `<li>${biomeThumb(b, i)}<span>${esc(b.name)}${b.custom ? '<small class="muted">Customised</small>' : ""}</span></li>`).join("")}</ul>`,
-    `${enabled.length} of ${state.biomes.length}${custom ? ` · ${custom} customised` : ""}`,
+    state.reading.biomes
+      ? readingNote(READING_BIOMES)
+      : `<ul class="review-biomes">${enabled.map(({ b, i }) => `<li>${biomeThumb(b, i)}<span>${esc(b.name)}${b.custom ? '<small class="muted">Customised</small>' : ""}</span></li>`).join("")}</ul>`,
+    state.reading.biomes
+      ? ""
+      : `${enabled.length} of ${state.biomes.length}${custom ? ` · ${custom} customised` : ""}`,
   )}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this World")}<small class="muted review-note">Seed, voxel size and generation settings are fixed once the World is created.</small></aside></div>`;
 }
 function edit() {
@@ -1092,6 +1142,10 @@ function goStep(next) {
     render();
     trustDialog();
     return;
+  }
+  if (next > state.step) {
+    if (state.step === 0) startRead("game", "biomes");
+    else if (state.step <= 2 && next >= 3) startRead("biomes");
   }
   state.step = next;
   state.search = "";
@@ -1376,7 +1430,15 @@ function action(name, value) {
     navigate("worlds");
     return;
   }
+  if (name === "sim-hold-reading") {
+    state.holdReading = !state.holdReading;
+    if (state.holdReading) startRead("game", "biomes");
+    else finishRead();
+    render();
+    return;
+  }
   if (name === "create") {
+    if (state.reading.game || state.reading.biomes) return;
     if (state.name.length > 64) {
       state.step = 1;
       render();
