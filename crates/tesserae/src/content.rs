@@ -316,8 +316,8 @@ impl ContentCatalogue {
     }
 }
 
-/// sRGB in `[0, 1]`. Never sent in a World whose Biomes carry no colours; the Client holds no
-/// generator to work it out itself (ADR-0002).
+/// sRGB in `[0, 1]`. Never sent in a World with no Biomes; the Client holds no generator to work
+/// it out itself (ADR-0002).
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct SkyFogTarget {
     pub sky: [f32; 3],

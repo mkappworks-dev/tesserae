@@ -25,7 +25,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_systems(SessionTeardown, restore_haze);
 }
 
-/// `None` until the Server asks, which a World whose Biomes carry no colours never does.
+/// `None` until the Server asks, which a World with no Biomes never does.
 #[derive(Resource, Default)]
 struct Goal(Option<SkyFogTarget>);
 

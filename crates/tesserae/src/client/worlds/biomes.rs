@@ -171,19 +171,16 @@ pub(super) struct Look {
     pub(super) caves: f32,
 }
 
-/// A Biome that sets no sky or fog takes the Game's, which the declarations do not carry.
-const GAME_SKY: [u8; 3] = [126, 146, 168];
-const GAME_FOG: [u8; 3] = [136, 160, 190];
-
 pub(super) fn look(l: &Launcher, at: usize) -> Option<Look> {
     let draft = l.form.biomes.as_ref()?;
     let choice = draft.choices.get(at)?;
+    let sky_fog = choice.sky_fog.unwrap_or(SkyFog::DEFAULT);
     let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
     let source = l.terrain.as_ref().map(|(_, source)| source.as_ref());
     let colour = |name: Option<&String>| name.map_or([96, 88, 80], |n| material(source, n));
     Some(Look {
-        sky: choice.sky_fog.map_or(GAME_SKY, |s| s.sky),
-        fog: choice.sky_fog.map_or(GAME_FOG, |s| s.fog),
+        sky: sky_fog.sky,
+        fog: sky_fog.fog,
         surface: colour(ground.map(|g| &g.surface)),
         soil: colour(ground.map(|g| &g.soil)),
         rock: colour(ground.map(|g| &g.rock)),
