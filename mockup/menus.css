@@ -535,3 +535,16 @@
 .game .overlay:has(.details-dialog) {
   background: rgb(9 10 12 / 0.3);
 }
+
+/* The Client's `pages::Reading` note: a quiet line, no spinner — the read takes ~0.3 s. */
+.reading-note {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.reading-sim {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  margin: 0;
+  padding: 6px 8px;
+}
