@@ -318,7 +318,7 @@ function render() {
   setSelectValue($("#item-access-preview"), state.itemAccess || "creative");
   document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
     state.screen === "play"
-      ? `<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue ${state.mapForbidden ? "" : "<kbd>M</kbd> Map "}<kbd>L</kbd> Layout`
+      ? `<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue ${state.mapForbidden ? "" : "<kbd>M</kbd> Map "}${state.heldTool === "Place" ? "" : "<kbd>L</kbd> Layout"}`
       : state.screen === "death"
         ? "<kbd>Enter</kbd> Respawn <kbd>Tab</kbd> Navigate"
         : state.screen === "home" || state.screen === "pause"
