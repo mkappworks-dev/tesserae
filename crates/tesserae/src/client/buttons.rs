@@ -27,10 +27,6 @@ pub(super) enum ButtonStyle {
     Cinematic {
         kind: Kind,
     },
-    /// One of a set of Cinematic options.
-    Choice {
-        selected: bool,
-    },
     /// A Cinematic button among a card's or a row's other content.
     Small {
         kind: Kind,
@@ -61,16 +57,6 @@ pub(super) fn button(
             Look {
                 kind,
                 selected: false,
-            },
-            false,
-        ),
-        ButtonStyle::Choice { selected } => cinematic(
-            parent,
-            label,
-            act,
-            Look {
-                kind: Kind::Plain,
-                selected,
             },
             false,
         ),

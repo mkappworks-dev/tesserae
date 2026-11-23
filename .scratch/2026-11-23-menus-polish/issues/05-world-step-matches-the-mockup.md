@@ -1,6 +1,6 @@
 # 05: World step and Edit World match the mockup
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -12,8 +12,10 @@ Game mode becomes one Creative | Survival segmented control with one line descri
 
 ## Acceptance criteria
 
-- [ ] The World step shows every field including Voxel size and Climate scale without scrolling at 1280×720
-- [ ] Left and Right change Game mode and Voxel size
-- [ ] Edit World's Game mode matches the World step's
+- [x] The World step shows every field including Voxel size and Climate scale without scrolling at 1280×720
+- [x] Left and Right change Game mode and Voxel size
+- [x] Edit World's Game mode matches the World step's
 
 ## Comments
+
+Climate scale sits under the terrain preview, not in the fields column as in the mockup: there it is below the fold, and the criterion is no scrolling at 1280×720. The Game mode line still reads the Client's copy ("Placing is free"), not the mockup's.

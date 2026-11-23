@@ -275,6 +275,7 @@ function inventoryPrompts() {
     ["1–9", "To hotbar"],
     chest ? ["T", "Take all", "chest-take-all"] : null,
     ["S", "Sort", chest ? "chest-sort" : "storage-sort"],
+    chest ? null : ["/", "Search", "side-search"],
     ...close,
   ];
 }
@@ -368,10 +369,8 @@ function sideGrid() {
         .join("")
     : '<p class="quick-add-empty">No Materials match.</p>';
 }
-/* Search hides behind its icon until wanted, as a game's does; a query keeps it open. */
 function sideSearch(bind, value, label) {
-  const open = state.sideSearchOpen || value;
-  return `<div class="side-head-search">${open ? `<input class="input" data-bind="${bind}" value="${esc(value || "")}" placeholder="${label}…" aria-label="${label}">` : ""}<button class="field-action side-search-toggle" data-action="side-search" aria-label="${label}" aria-expanded="${!!open}" title="${label} (/)">${icon(open ? "close" : "search", 16)}</button></div>`;
+  return `<label class="side-search-field">${icon("search", 16)}<input class="input" data-bind="${bind}" value="${esc(value || "")}" placeholder="${label}…" aria-label="${label}" title="${label} (/)"></label>`;
 }
 function catalogueSide(strip = "") {
   const search = sideSearch(
@@ -381,12 +380,9 @@ function catalogueSide(strip = "") {
   );
   return `<aside class="catalogue-side" aria-label="Catalogue">${sideTop(strip, "Catalogue", search)}<div class="side-grid" id="side-grid">${sideGrid()}</div></aside>`;
 }
-/* The tab strip, when there is one, names the pane, so search sits beside it
-   instead of under a repeated heading. */
+/* The field sits under the tabs, always shown, so it is plain where to type. */
 function sideTop(strip, title, search) {
-  return strip
-    ? `<div class="side-head with-tabs">${strip}${search}</div>`
-    : `<header class="side-head">${title ? `<b>${title}</b>` : ""}${search}</header>`;
+  return `${strip ? `<div class="side-head with-tabs">${strip}</div>` : title ? `<header class="side-head"><b>${title}</b></header>` : ""}${search}`;
 }
 function giveToBag(id, count) {
   const item = catalogueItems.find((x) => x.id === id),
@@ -602,14 +598,7 @@ function inventoryAction(name, value) {
     return true;
   }
   if (name === "side-search") {
-    const query =
-      state.useTarget || state.sidePane === "crafting" || !creativeAccess()
-        ? "craftQuery"
-        : "quickAddQuery";
-    state.sideSearchOpen = !(state.sideSearchOpen || state[query]);
-    if (!state.sideSearchOpen) state[query] = "";
-    refreshInventory();
-    $(".side-head-search input")?.focus();
+    $(".side-search-field input")?.focus();
     return true;
   }
   if (name === "inventory-open") {
@@ -629,7 +618,6 @@ function inventoryAction(name, value) {
   if (name === "inventory-close") {
     state.useTarget = null;
     state.carriedFrom = null;
-    state.sideSearchOpen = false;
     state.tip = null;
     navigate("play");
     return true;

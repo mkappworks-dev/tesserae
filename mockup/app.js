@@ -371,6 +371,9 @@ function render() {
   } else if (state.screen === "structures") {
     screen.innerHTML = structuresPage();
     drawStructure();
+  } else if (state.screen === "place") {
+    screen.innerHTML = placePage();
+    drawStructure();
   }
   if (state.screen === "play") mapPlayMount();
   drawWorldPreviews();
@@ -757,11 +760,16 @@ function biomesForm() {
 function climateMap(b) {
   return `<div class="climate-plot"><div class="climate-map" data-climate-map aria-label="Climate: temperature left to right, humidity bottom to top"><span class="corner wet">Wet</span><span class="corner dry">Dry</span>${state.biomes.map((x, i) => (i === state.selected ? "" : `<button type="button" class="climate-dot ${x.enabled ? "" : "off"}" data-action="edit-biome" data-value="${i}" style="left:${x.t * 100}%;bottom:${x.h * 100}%;--swatch:${x.swatch}" aria-label="Edit ${esc(x.name)}" title="${esc(x.name)}"></button>`)).join("")}<button type="button" class="climate-dot current" data-climate-handle style="left:${b.t * 100}%;bottom:${b.h * 100}%;--swatch:${b.swatch}" aria-label="${esc(b.name)}: drag or use arrow keys to move"><span>${esc(b.name)}</span></button></div><div class="axis-x"><span>Cold</span><span>Temperature</span><span>Warm</span></div></div>`;
 }
+/* One line each: label, slider, value. A controller needs exact values the map cannot give. */
+function slideRow(label, key, value, { min, max, step, format }) {
+  return `<label class="slide-row"><span>${label}</span><input type="range" data-bind="${key}" min="${min}" max="${max}" step="${step}" value="${value}" aria-label="${label}"><output data-for="${key}">${format(value)}</output></label>`;
+}
 function biomeEditor() {
   const b = state.biomes[state.selected];
+  const fixed = (v) => Number(v).toFixed(2);
   const pick = (label, key, value, options) =>
-    `<div class="field-label"><span>${label}</span>${customSelect(label, key, value, options)}</div>`;
-  return `<section class="biome-panel" aria-label="Edit ${esc(b.name)}"><header class="panel-head"><div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${climateMap(b)}<div class="two-col">${rangeField("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01 })}${rangeField("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01 })}</div></div><div class="panel-section">${rangeField("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface, ["Grass", "Sand", "Snow", "Melon"])}${pick("Soil", "biome.soil", b.soil, ["Dirt", "Sand", "Mud", "Melon"])}${pick("Rock", "biome.rock", b.rock, ["Stone", "Melon"])}</div><div class="panel-section"><span class="form-label">Atmosphere</span>${[
+    `<div class="pick-row"><span>${label}</span>${customSelect(label, key, value, options)}</div>`;
+  return `<section class="biome-panel compact" aria-label="Edit ${esc(b.name)}"><header class="panel-head">${biomeThumb(b, state.selected)}<div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${slideRow("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}${climateMap(b)}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface, ["Grass", "Sand", "Snow", "Melon"])}${pick("Soil", "biome.soil", b.soil, ["Dirt", "Sand", "Mud", "Melon"])}${pick("Rock", "biome.rock", b.rock, ["Stone", "Melon"])}</div><div class="panel-section"><span class="form-label">Atmosphere</span><div class="color-pair">${[
     ["Sky", "sky"],
     ["Fog", "fog"],
   ]
@@ -771,7 +779,7 @@ function biomeEditor() {
     )
     .join(
       "",
-    )}</div></div><footer class="panel-foot">${button("Reset", "reset-biome", { small: true, ghost: true, disabled: !b.custom })}${button("Done", "close-biome", { primary: true })}</footer></section>`;
+    )}</div></div></div><footer class="panel-foot">${button("Reset", "reset-biome", { small: true, ghost: true, disabled: !b.custom })}${button("Done", "close-biome", { primary: true })}</footer></section>`;
 }
 function reviewForm() {
   const enabled = state.biomes
@@ -835,13 +843,23 @@ function edit() {
       ["D", "New World with these settings", "duplicate", w.id],
       ["F", "Show folder", "show-folder"],
       ["Del", "Delete", "delete", w.id],
-      ["Esc", "Cancel", "worlds"],
+      ["Esc", "Cancel", "cancel-edit"],
     ],
     secondary: button("New World with these settings", "duplicate", {
       value: w.id,
     }),
     primary: button("Save changes", "save-edit", { primary: true }),
   });
+}
+function editUnsaved() {
+  const w = worlds.find((x) => x.id === state.editId);
+  return (
+    state.screen === "edit" &&
+    !!w &&
+    (state.name.trim() !== w.name ||
+      state.mode !== w.mode ||
+      state.playerMode !== w.playerMode)
+  );
 }
 function trustItems() {
   const g = state.game || "Terra";
@@ -1007,15 +1025,40 @@ function modsLibrary() {
   });
 }
 
+/* The engine's host limits and allowances, as `tesserae_mods::trust_prompt` states them. */
+const TRUST_TERMS = [
+  [
+    "Can",
+    "Add Materials and Shapes. A Game can change World generation and view distance. Place and remove Voxels in loaded Chunks, in batches.",
+  ],
+  ["Cannot", "Access files, the network or the environment."],
+  ["Time", "200,000,000 fuel per call · yields every 10,000,000 · 250 ms"],
+  [
+    "Memory",
+    "64 MiB per memory · 10,000 table elements · 4 instances, memories and tables",
+  ],
+  ["Commands", "1,024 per batch · 65,536 Voxels per call · 32,768 per fill"],
+  [
+    "Content",
+    "248 Materials and 252 Shapes in all · 128 of either per Mod · 32-byte names",
+  ],
+];
+/* Closed by default so the modal fits the window; the terms scroll inside it when open. */
+function trustDetails(items) {
+  const code = items.filter((m) => m.code),
+    data = items.filter((m) => !m.code);
+  return `<button type="button" class="trust-toggle" data-action="trust-details" aria-expanded="false" aria-controls="trust-details">${icon("chevron", 14)}<span>Details</span><small>Permissions and limits</small></button><div class="trust-details" id="trust-details" tabindex="0" aria-label="Permissions and limits" hidden>${code.map((m) => `<section><h4>${esc(m.name)} 0.1.0 <small>runs code</small></h4><dl>${TRUST_TERMS.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></section>`).join("")}${data.length ? `<p class="muted">${data.map((m) => esc(m.name)).join(", ")}: data only. ${data.length > 1 ? "They run" : "It runs"} no code, so no limits apply.</p>` : ""}</div>`;
+}
 function trustDialog() {
   const items = trustItems();
   const n = items.length;
   dialog(
     n > 1 ? `Trust ${n} items to continue?` : "Trust this item to continue?",
-    `<p>The next step reads what these items declare, which runs them. Only trust ones you know.</p><ul class="trust-list">${items.map((m) => `<li><span><b>${esc(m.name)} 0.1.0</b><small>Build ${m.build}</small></span><span class="pill">${m.code ? "Runs code" : "Data only"}</span></li>`).join("")}</ul>`,
+    `<p>The next step reads what these items declare, which runs them. Only trust ones you know.</p><ul class="trust-list">${items.map((m) => `<li><span><b>${esc(m.name)} 0.1.0</b><small>Build ${m.build}</small></span><span class="pill">${m.code ? "Runs code" : "Data only"}</span></li>`).join("")}</ul>${trustDetails(items)}`,
     button("Cancel", "close-dialog", { ghost: true }) +
       button(`Trust all ${n} and continue`, "trust-mods", { primary: true }),
   );
+  $('#dialog-root [data-action="close-dialog"]').focus();
 }
 function goStep(next) {
   if (next > state.step && !validateStep(state.step)) return;
@@ -1053,6 +1096,7 @@ function action(name, value) {
   if (mapAction(name, value)) return;
   if (layoutAction(name, value)) return;
   if (structuresAction(name, value)) return;
+  if (placeAction(name, value)) return;
   if (craftingAction(name, value)) return;
   if (inventoryAction(name, value)) return;
   if (name.startsWith("settings-") && settingsAction(name, value)) return;
@@ -1088,12 +1132,7 @@ function action(name, value) {
   }
   if (name === "duplicate") {
     const w = worlds.find((x) => x.id === Number(value));
-    const unsaved =
-      state.screen === "edit" &&
-      (state.name.trim() !== w.name ||
-        state.mode !== w.mode ||
-        state.playerMode !== w.playerMode);
-    if (unsaved) {
+    if (editUnsaved()) {
       dialog(
         "Save changes first?",
         `<p>You changed this World's name or mode.</p>`,
@@ -1106,6 +1145,20 @@ function action(name, value) {
       return;
     }
     action("duplicate-go", value);
+    return;
+  }
+  // Keep editing comes first, so it takes focus and Enter never discards.
+  if (name === "cancel-edit") {
+    if (!editUnsaved()) {
+      navigate("worlds");
+      return;
+    }
+    dialog(
+      "Discard changes?",
+      "<p>You changed this World's name or mode. Leaving now throws those changes away.</p>",
+      button("Keep editing", "close-dialog", { ghost: true }) +
+        button("Discard", "discard", { danger: true }),
+    );
     return;
   }
   if (name === "duplicate-save") {
@@ -1376,6 +1429,13 @@ function action(name, value) {
     toast("World removed from the prototype.");
     return;
   }
+  if (name === "trust-details") {
+    const toggle = $('[data-action="trust-details"]'),
+      open = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", open);
+    $("#trust-details").hidden = !open;
+    return;
+  }
   if (name === "trust-mods") {
     closeDialog();
     state.trusted = true;
@@ -1623,7 +1683,7 @@ function markCustom() {
     list.innerHTML = biomeList();
     syncBulk();
   }
-  const status = $("[data-biome-status]");
+  const status = $("small[data-biome-status]");
   if (status) status.textContent = "Customised";
   const reset = $('[data-action="reset-biome"]');
   if (reset) reset.disabled = false;
@@ -1794,7 +1854,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (state.screen === "edit") {
-    navigate("worlds");
+    action("cancel-edit");
     return;
   }
   navigate("home");
@@ -1977,6 +2037,7 @@ const prototypeScreens = [
   { value: "station", label: "Workbench (Station)" },
   { value: "container", label: "Chest (Container)" },
   { value: "layout", label: "Quick layout overlay" },
+  { value: "place", label: "Place Tool overlay" },
   { value: "play", label: "Gameplay HUD" },
   { value: "death", label: "Death screen" },
   { value: "pause", label: "In-game menu" },
@@ -1985,6 +2046,7 @@ const prototypeScreens = [
   { value: "plants", label: "Plants (step 18)" },
   { value: "vegetation", label: "Vegetation (step 18b)" },
   { value: "map", label: "Map (step 19)" },
+  { value: "structures", label: "Structures" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",

@@ -92,11 +92,9 @@ pub(super) const CARD_BAR: f32 = 3.0;
 /// Card fills under the pointer: the prototype's `brightness(1.15)`.
 pub(super) const CARD_HOVER: Color = Color::srgb_u8(0x1d, 0x1d, 0x20);
 pub(super) const CARD_CHOSEN_HOVER: Color = Color::srgb_u8(0x2f, 0x2f, 0x35);
-/// The game mode cards.
-pub(super) const MODE: Color = Color::srgb_u8(0x15, 0x16, 0x1a);
-pub(super) const MODE_HOVER_EDGE: Color = Color::srgb_u8(0x6c, 0x70, 0x76);
-pub(super) const MODE_CHOSEN: Color = Color::srgb_u8(0x1d, 0x20, 0x1c);
-pub(super) const MODE_CHOSEN_EDGE: Color = Color::srgb_u8(0xe9, 0xee, 0xe0);
+/// The Game mode control's track, and an unchosen half under the pointer.
+pub(super) const MODE: Color = Color::srgb_u8(0x1d, 0x1f, 0x22);
+pub(super) const MODE_HOVER: Color = Color::srgb_u8(0x29, 0x2b, 0x2f);
 /// A slider's reading.
 pub(super) const VALUE_INK: Color = Color::srgb_u8(0xe6, 0xeb, 0xdf);
 /// The climate map: cold to warm left to right, wet to dry top to bottom.
@@ -138,8 +136,6 @@ pub(super) const TEXT_HEADING: f32 = 19.0;
 pub(super) const TEXT_BODY: f32 = 16.0;
 pub(super) const TEXT_SMALL: f32 = 14.0;
 pub(super) const TEXT_CAPTION: f32 = 13.0;
-pub(super) const TEXT_MODE_NAME: f32 = 15.0;
-pub(super) const TEXT_MODE_ABOUT: f32 = 12.5;
 pub(super) const TEXT_EYEBROW: f32 = 12.0;
 pub(super) const TEXT_TAG: f32 = 11.0;
 pub(super) const TEXT_KEY: f32 = 10.0;

@@ -54,9 +54,10 @@ Direct URLs include `/worlds`, `/worlds/new` (Game), `/worlds/new/world`,
 `/worlds/new/mods`, `/worlds/new/biomes`, `/worlds/new/review`,
 `/worlds/1/edit`, `/mods`, `/menu`, `/settings/behavior`,
 `/settings/key-bindings`, `/settings/controller`, `/settings/display`,
-`/settings/distance`, `/settings/audio` and `/settings/accessibility`. Browser
-Back and Forward navigate between screens while retaining the draft. Reloading
-restores the screen and the session draft.
+`/settings/distance`, `/settings/audio`, `/settings/accessibility`, `/layout`,
+`/structures` and `/place` (the Place Tool overlay). Browser Back and Forward
+navigate between screens while retaining the draft. Reloading restores the
+screen and the session draft.
 
 Cinematic refinements include keyboard arrows, simulated controller D-pad/A/B
 and shoulder handling, persistent field validation, modal focus isolation and
