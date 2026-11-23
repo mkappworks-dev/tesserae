@@ -30,6 +30,22 @@ pub(super) struct PointerOnly;
 #[derive(Component)]
 pub(super) struct Autofocus;
 
+/// A menu's popup, drawn over its screen by its `GlobalZIndex`. A press
+/// anywhere outside it sends [`Dismiss`] to it and reaches nothing else.
+#[derive(Component)]
+pub(super) struct Popup;
+
+/// A press landed outside this [`Popup`]; its screen closes it.
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub(super) struct Dismiss {
+    pub entity: Entity,
+}
+
+/// Covers the screen just under its popup, so the press that closes the popup
+/// cannot also press a control under it.
+#[derive(Component)]
+struct Scrim(Entity);
+
 /// Sent once for every press of a control in a [`Frame`], by key, click or
 /// controller, as the action runs; the click sound and rumble hang off it.
 #[derive(Event, Clone, Copy, Debug)]
@@ -203,6 +219,9 @@ impl Plugin for FramePlugin {
             .init_resource::<InputFocusVisible>()
             .init_resource::<Labels>()
             .add_observer(press)
+            .add_observer(cover)
+            .add_observer(uncover)
+            .add_observer(dismiss)
             .add_systems(First, unsqueeze)
             .add_systems(
                 PreUpdate,
@@ -212,6 +231,43 @@ impl Plugin for FramePlugin {
             )
             .add_systems(Update, (hover_focus, show_caps, paint_items))
             .add_systems(PostUpdate, (focus_first, squeeze));
+    }
+}
+
+fn cover(add: On<Add<Popup>>, layers: Query<&GlobalZIndex>, mut commands: Commands) {
+    let popup = add.entity;
+    let Ok(&GlobalZIndex(z)) = layers.get(popup) else {
+        warn!("popup {popup} has no GlobalZIndex, so nothing covers the screen under it");
+        return;
+    };
+    commands.spawn((
+        Scrim(popup),
+        GlobalZIndex(z - 1),
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            ..default()
+        },
+    ));
+}
+
+fn uncover(remove: On<Remove<Popup>>, scrims: Query<(Entity, &Scrim)>, mut commands: Commands) {
+    for (scrim, &Scrim(popup)) in &scrims {
+        if popup == remove.entity {
+            commands.entity(scrim).try_despawn();
+        }
+    }
+}
+
+fn dismiss(
+    mut press: On<bevy::picking::events::PointerPress>,
+    scrims: Query<&Scrim>,
+    mut commands: Commands,
+) {
+    if let Ok(&Scrim(popup)) = scrims.get(press.entity) {
+        press.propagate(false);
+        commands.trigger(Dismiss { entity: popup });
     }
 }
 
@@ -813,6 +869,38 @@ pub(super) mod testing {
             .is_some_and(|t| t.scale.x < 1.0)
     }
 
+    /// Presses outside every open [`Popup`], where the pointer meets its scrim.
+    pub(in crate::client) fn click_outside(app: &mut App) {
+        use bevy::picking::backend::HitData;
+        use bevy::picking::events::{Pointer, PointerPress};
+        use bevy::picking::pointer::{Location, PointerButton, PointerId};
+        let scrims: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Scrim>>()
+            .iter(app.world())
+            .collect();
+        assert!(!scrims.is_empty(), "no popup is open");
+        for scrim in scrims {
+            app.world_mut().trigger(PointerPress {
+                entity: scrim,
+                pointer: Pointer::new(
+                    PointerId::Mouse,
+                    Location {
+                        target: bevy::camera::NormalizedRenderTarget::None {
+                            width: 800,
+                            height: 600,
+                        },
+                        position: Vec2::ZERO,
+                    },
+                ),
+                button: PointerButton::Primary,
+                hit: HitData::new(scrim, 0.0, None, None),
+                count: 1,
+            });
+        }
+        app.update();
+    }
+
     /// What a [`Frame`] needs besides itself, in a headless test App.
     pub(in crate::client) fn support(app: &mut App) {
         app.init_resource::<AccumulatedMouseMotion>()
@@ -1099,6 +1187,48 @@ mod tests {
         assert_eq!(
             focused(&app).and_then(|f| app.world().get::<Act>(f)),
             Some(&Act::Other)
+        );
+    }
+
+    #[test]
+    fn a_press_outside_a_popup_closes_it_and_reaches_nothing_under_it() {
+        #[derive(Resource, Default)]
+        struct Dismissed(Vec<Entity>);
+        let mut app = app();
+        app.init_resource::<Dismissed>()
+            .add_observer(|e: On<Dismiss>, mut d: ResMut<Dismissed>| d.0.push(e.entity));
+        screen(&mut app, false);
+        let popup = app
+            .world_mut()
+            .spawn((Popup, GlobalZIndex(10), Node::default()))
+            .id();
+        app.update();
+        let (z, node, pickable) = app
+            .world_mut()
+            .query_filtered::<(&GlobalZIndex, &Node, Option<&Pickable>), With<Scrim>>()
+            .single(app.world())
+            .map(|(z, n, p)| (z.0, n.clone(), p.cloned()))
+            .unwrap();
+        assert_eq!(z, 9, "just under the popup, over the screen");
+        assert_eq!(node.position_type, PositionType::Absolute);
+        assert_eq!(
+            (node.width, node.height),
+            (Val::Percent(100.0), Val::Percent(100.0))
+        );
+        assert!(pickable.is_none_or(|p| p.should_block_lower && p.is_hoverable));
+        click_outside(&mut app);
+        assert_eq!(app.world().resource::<Dismissed>().0, [popup]);
+        assert!(app.world().resource::<Fired>().0.is_empty());
+        assert!(app.world().resource::<Presses>().0.is_empty());
+        app.world_mut().entity_mut(popup).despawn();
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<(), With<Scrim>>()
+                .iter(app.world())
+                .count(),
+            0,
+            "the scrim goes with its popup"
         );
     }
 }
