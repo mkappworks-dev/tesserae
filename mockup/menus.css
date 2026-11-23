@@ -524,10 +524,14 @@
   }
 }
 
-/* World details reads as the pause screen's own sheet: the same fill, no frame. */
+/* World details is lighter than the sheet's 0.9 because it sits on an already-dimmed pause screen. */
 .game .dialog:has(.details-dialog) {
-  background: linear-gradient(90deg, rgb(10 11 12 / 0.9), rgb(10 11 12 / 0.78));
+  background: linear-gradient(90deg, rgb(10 11 12 / 0.62), rgb(10 11 12 / 0.5));
+  background-color: transparent;
   backdrop-filter: blur(6px);
   border: 0;
   box-shadow: none;
+}
+.game .overlay:has(.details-dialog) {
+  background: rgb(9 10 12 / 0.3);
 }
