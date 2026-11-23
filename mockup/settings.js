@@ -915,7 +915,19 @@ function showSettingsHelp(row) {
   const [name, text, noteText] = strip.children;
   name.textContent = title;
   text.textContent = help;
-  noteText.textContent = note || "";
+  const [value, rest] = splitNote(note || "");
+  noteText.replaceChildren();
+  if (value)
+    noteText.append(
+      Object.assign(document.createElement("b"), { textContent: value }),
+      rest,
+    );
+}
+
+// "Walk: no sprint." → ["Walk", ": no sprint."], so the value can be bold.
+function splitNote(note) {
+  const at = note.indexOf(": ");
+  return at < 0 ? [note, ""] : [note.slice(0, at), note.slice(at)];
 }
 document.addEventListener("focusin", (e) =>
   showSettingsHelp(e.target.closest?.(SETTING_ROW)),
