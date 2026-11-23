@@ -549,6 +549,7 @@ pub(in crate::client) enum Scalar {
     EffectsVolume,
     AmbientVolume,
     MusicVolume,
+    InterfaceVolume,
     Mouse,
     Scroll,
     PadLook,
@@ -568,7 +569,8 @@ impl Scalar {
             | Self::MasterVolume
             | Self::EffectsVolume
             | Self::AmbientVolume
-            | Self::MusicVolume => 0.0..=100.0,
+            | Self::MusicVolume
+            | Self::InterfaceVolume => 0.0..=100.0,
             Self::Mouse | Self::Scroll => 0.25..=3.0,
             Self::PadLook | Self::TouchLook => crate::client::profile::PAD_SENSITIVITY,
             Self::TouchOpacity => crate::client::profile::TOUCH_OPACITY,
@@ -586,6 +588,7 @@ impl Scalar {
             | Self::EffectsVolume
             | Self::AmbientVolume
             | Self::MusicVolume
+            | Self::InterfaceVolume
             | Self::Reach(_)
             | Self::Detail(_) => 1.0,
             Self::MoveDeadzone | Self::LookDeadzone | Self::TouchOpacity => 0.01,
@@ -753,6 +756,7 @@ pub(super) fn scalar_changed(
         Scalar::EffectsVolume => preferences.volumes.effects = value.round() as u8,
         Scalar::AmbientVolume => preferences.volumes.ambient = value.round() as u8,
         Scalar::MusicVolume => preferences.volumes.music = value.round() as u8,
+        Scalar::InterfaceVolume => preferences.volumes.interface = value.round() as u8,
         Scalar::Mouse => preferences.sensitivity = value * 0.003,
         Scalar::Scroll => preferences.scroll_sensitivity = value,
         Scalar::PadLook => preferences.pad.look_sensitivity = value,
@@ -812,6 +816,16 @@ pub(super) fn group(
     title: &str,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
+    noted_group(parent, title, None, content);
+}
+
+/// A [`group`] with a muted line under its heading that applies to every row.
+pub(super) fn noted_group(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    note: Option<&str>,
+    content: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     parent
         .spawn(Node {
             width: Val::Percent(100.0),
@@ -833,6 +847,18 @@ pub(super) fn group(
                 },
                 Pickable::IGNORE,
             ));
+            if let Some(note) = note {
+                section.spawn((
+                    Text::new(note),
+                    theme::font(theme::TEXT_CAPTION),
+                    TextColor(theme::muted()),
+                    Node {
+                        margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(-6.0), Val::Px(12.0)),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
             content(section);
         });
 }

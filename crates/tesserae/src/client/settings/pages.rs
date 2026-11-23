@@ -330,7 +330,7 @@ pub(super) fn page(
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
         Tab::Display => display(list, p, map_allowed),
         Tab::Distance => distance(list, p, (game, &world)),
-        Tab::Audio => audio(list, settings, p),
+        Tab::Audio => audio(list, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, map_allowed),
         Tab::Controller => controller(list, settings, bindings, p, labels, map_allowed),
         Tab::Accessibility => accessibility(list, p),
@@ -883,6 +883,12 @@ pub(super) fn controller(
             ],
             Operation::PadCrouch,
         );
+        setting_row(
+            card,
+            "Rumble on menu press",
+            "A short rumble when a controller button presses something in a menu.",
+            |row| toggle(row, pad.menu_rumble, Operation::PadMenuRumble),
+        );
         disclosure(
             card,
             "Touch controls",
@@ -1038,7 +1044,7 @@ pub(super) fn binding_display(value: String) -> String {
         .replace("BracketRight", "]")
 }
 
-fn audio(list: &mut ChildSpawnerCommands, settings: &Settings, p: &Preferences) {
+fn audio(list: &mut ChildSpawnerCommands, p: &Preferences) {
     group(list, "Sound mix", |card| {
         for (name, hint, kind, value) in [
             (
@@ -1049,7 +1055,7 @@ fn audio(list: &mut ChildSpawnerCommands, settings: &Settings, p: &Preferences) 
             ),
             (
                 "Effects",
-                "All action sounds. Each sound below is relative to this; set one to 0 to mute it.",
+                "All action sounds in the World. Each Sound effects row is relative to this.",
                 Scalar::EffectsVolume,
                 p.volumes.effects,
             ),
@@ -1065,15 +1071,20 @@ fn audio(list: &mut ChildSpawnerCommands, settings: &Settings, p: &Preferences) 
                 Scalar::MusicVolume,
                 p.volumes.music,
             ),
+            (
+                "Interface",
+                "Menu clicks and other menu sounds, apart from Effects. 0 mutes them.",
+                Scalar::InterfaceVolume,
+                p.volumes.interface,
+            ),
         ] {
             setting_row(card, name, hint, |row| slider(row, kind, f32::from(value)));
         }
     });
-    disclosure(
+    noted_group(
         list,
-        "Fine-tune sound effects",
-        settings.effects_open,
-        Operation::EffectControls,
+        "Sound effects",
+        Some("Each is relative to Effects; 0 mutes it."),
         |card| {
             use tesserae_core::audio::EffectGroup::*;
             for (name, hint, group) in [

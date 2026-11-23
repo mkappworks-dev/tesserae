@@ -36,7 +36,6 @@ pub(super) struct Settings {
     show_reference: bool,
     /// Whether Controller's Touch controls are expanded.
     touch_open: bool,
-    effects_open: bool,
     resetting: bool,
     category: Category,
     notice: String,
@@ -129,7 +128,6 @@ pub(super) enum Operation {
     RevertDisplay,
     Reference(bool),
     TouchControls,
-    EffectControls,
     ResetAction(Action),
     Capture(Device, Action, usize),
     Clear(Device, Action, usize),
@@ -145,6 +143,7 @@ pub(super) enum Operation {
     Invert(bool),
     PadInvert(bool),
     PadCrouch(bool),
+    PadMenuRumble(bool),
     TouchInvert(bool),
     TouchMirror(bool),
     TouchSize(super::profile::TouchSize),
