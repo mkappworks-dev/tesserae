@@ -1,6 +1,6 @@
 # 17: Click sound and controller rumble
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [02: Menu frame and prompt bar, on the title
 screen](./02-menu-frame-and-prompt-bar.md)
@@ -16,9 +16,16 @@ event as the shrink-and-darken, so no screen wires them by hand.
 
 ## Acceptance criteria
 
-- [ ] A click sound plays on every press, by key, click or controller
-- [ ] A controller press also rumbles the controller briefly; a key or mouse
+- [x] A click sound plays on every press, by key, click or controller
+- [x] A controller press also rumbles the controller briefly; a key or mouse
       press does not
-- [ ] Neither delays the action
+- [x] Neither delays the action
 
 ## Comments
+
+- The click is synthesised in `client/click.rs` (a 40 ms decaying 1.8 kHz
+  tone), so there is no audio file to ship or licence. It plays at the Effects
+  volume, ignoring the in-game menu duck that silences World sounds.
+- Rumble is 60 ms on the weak motor of `PadInput.active`; it still rumbles when
+  the volume is muted.
+- Only unit-tested at the `frame::Press` seam; not heard or felt on hardware.

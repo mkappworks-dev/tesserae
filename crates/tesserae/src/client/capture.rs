@@ -442,8 +442,8 @@ fn drops_fixture(
 }
 
 /// `TESSERAE_SCREENSHOT_MAP_STATE` drives the Map window into one state before the shutter:
-/// `default`, `add` (add mode), `add-popover`, `edit`, `death`, `explore` or `tooltip` (the add
-/// button focused). `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` types into the popover's name field.
+/// `default`, `add` (add mode), `add-popover`, `edit`, `death` or `explore`.
+/// `TESSERAE_SCREENSHOT_MAP_FIELD=<text>` types into the popover's name field.
 /// The Waypoints come from `waypoint_fixture`; `death` adds a death marker to the list shown.
 #[allow(clippy::too_many_arguments)]
 fn map_state_fixture(
@@ -456,11 +456,6 @@ fn map_state_fixture(
         ResMut<super::waypoints::Draft>,
     ),
     mut lists: MessageWriter<crate::server::waypoint::WaypointsChanged>,
-    (mut focus, mut visible): (
-        Option<ResMut<bevy::input_focus::InputFocus>>,
-        Option<ResMut<bevy::input_focus::InputFocusVisible>>,
-    ),
-    adds: Query<(Entity, &super::map_window::Control)>,
     mut fields: Query<&mut bevy::text::EditableText, With<super::map_pop::NameField>>,
     mut step: Local<u8>,
 ) {
@@ -495,16 +490,6 @@ fn map_state_fixture(
             super::map_pop::open_edit(&mut window, &mut marks, &mut draft, first.id, eye)
         }
         ("explore", 0) => window.tab = super::waypoint_panel::PanelTab::Explore,
-        ("tooltip", 0) => {
-            if let (Some(focus), Some(visible)) = (focus.as_mut(), visible.as_mut())
-                && let Some((button, _)) = adds
-                    .iter()
-                    .find(|(_, c)| **c == super::map_window::Control::AddMode)
-            {
-                focus.set(button, bevy::input_focus::FocusCause::Navigated);
-                visible.0 = true;
-            }
-        }
         ("death", 0) => {
             let kinds = marks.kinds();
             let Some(kind) = kinds
