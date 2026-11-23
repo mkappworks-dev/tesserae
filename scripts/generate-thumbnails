@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Writes the 512 by 288 menu thumbnails of the demo Games and of the Mods listed in MODS, each as
-thumbnail.png beside its mod.toml.
+"""Writes the 512 by 288 menu thumbnails of the demo Games and of the Mods listed in MODS and
+CHARACTERS, each as thumbnail.png beside its mod.toml.
 
 A Mod's thumbnail draws its own Materials as Voxels, textured from the art that
-scripts/generate-mod-art wrote, so run that first. A Game's thumbnail is a small seeded island
+scripts/generate-mod-art wrote, so run that first; a Character Mod's draws its figure from its
+skin.png. A Game's thumbnail is a small seeded island
 drawn in the Game's colours. The images are original and generated here, so they are CC0 and their
 source is this file. Output is deterministic, so a re-run changes no file.
 """
 
+import math
 import pathlib
 import struct
 import zlib
@@ -15,13 +17,37 @@ import zlib
 WIDTH, HEIGHT = 512, 288
 repo = pathlib.Path(__file__).resolve().parent.parent
 
-# Mod id -> its textures, left to right.
+# Mod id -> what stands in its row, left to right: a texture name is a Voxel of that texture, an
+# RGBA colour a plain Voxel (for a Material with no texture, as its appearance row gives it), and ("plant", texture, ground) the plant's
+# sprite standing on a Voxel of `ground`, a "mod/texture" path.
 MODS = {
     "timber": ["planks", "thatch"],
     "crystals": ["amethyst", "citrine", "aquamarine"],
     "hearth": ["ash", "lava"],
     "frost": ["snow", "ice", "packed_ice"],
+    "strata": ["turf", "soil", "sand", "stone"],
+    "waters": [(26, 82, 158, 166), "obsidian"],
+    "bog": ["peat", (92, 70, 44, 224), (24, 22, 28, 255)],
+    "brickwork": ["brick", "cobble", "tile"],
+    "glassworks": ["glass", "frosted_glass", "lantern"],
+    "lamps": ["glowstone", "amberlight", "moonlight"],
+    "wool": ["wool_red", "wool_yellow", "wool_green", "wool_blue"],
+    "flora": ["wood", "leaves", ("plant", "poppy", "strata/turf"), ("plant", "fern", "strata/turf")],
+    "crops": [
+        ("plant", "wheat_ripe", "strata/soil"),
+        ("plant", "carrot_ripe", "strata/soil"),
+        ("plant", "berry_ripe", "strata/turf"),
+    ],
+    "aquatic": [
+        ("plant", "kelp", "strata/sand"),
+        ("plant", "seagrass", "strata/sand"),
+        ("plant", "red_weed", "strata/sand"),
+    ],
 }
+
+# Character Mods, drawn as their figure from their own skin.png.
+CHARACTERS = ["sprite", "wanderer", "golem"]
+BACKDROP = ((54, 56, 60), (30, 31, 34))
 
 # Game id -> sky (top, bottom), water, shore, ground bands from low to high, side soil and rock,
 # sea level (0..1), and what stands on the ground.
@@ -121,7 +147,7 @@ class Canvas:
             self.px += row * WIDTH
 
     def put(self, x, y, colour):
-        if 0 <= x < WIDTH and 0 <= y < HEIGHT:
+        if colour is not None and 0 <= x < WIDTH and 0 <= y < HEIGHT:
             at = (y * WIDTH + x) * 3
             self.px[at : at + 3] = bytes(colour)
 
@@ -148,7 +174,14 @@ class Canvas:
                 s = (dx * v[1] - dy * v[0]) / det
                 t = (u[0] * dy - u[1] * dx) / det
                 if 0 <= s < 1 and 0 <= t < 1:
+                    self.at = (x, y)
                     self.put(x, y, paint(s, t))
+
+    def under(self):
+        """The pixel parallelogram() is painting, before it is painted."""
+        x, y = self.at
+        at = (y * WIDTH + x) * 3
+        return tuple(self.px[at : at + 3])
 
     def box(self, top, a, h, paint_top, paint_left, paint_right):
         """An isometric box whose top face's back corner is `top`; half-width a, height h."""
@@ -176,8 +209,8 @@ class Canvas:
         )
 
 
-def read_texture(path):
-    """The three 16 by 16 faces (top, side, bottom) of a texture scripts/generate-mod-art wrote."""
+def read_png(path):
+    """Rows of RGBA pixels of an unfiltered 8-bit RGBA PNG, as scripts/generate-mod-art writes."""
     data = path.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n", path
     at, idat = 8, b""
@@ -197,43 +230,175 @@ def read_texture(path):
         row = raw[y * stride : (y + 1) * stride]
         assert row[0] == 0, f"{path}: a filtered row; generate-mod-art writes none"
         pixels.append([tuple(row[1 + x * 4 : 5 + x * 4]) for x in range(width)])
-    edge = height
+    return pixels
+
+
+def read_texture(path):
+    """The three 16 by 16 faces (top, side, bottom) of a texture scripts/generate-mod-art wrote."""
+    pixels = read_png(path)
+    edge = len(pixels)
     return [[r[f * edge : (f + 1) * edge] for r in pixels] for f in range(3)]
 
 
-def textured(face, light):
+def textured(face, light, canvas=None):
+    """Paints a face; a see-through pixel is blended over the canvas when one is given (glass),
+    and is otherwise a dark cut-out hole."""
     edge = len(face)
 
     def paint(s, t):
         r, g, b, a = face[min(edge - 1, int(t * edge))][min(edge - 1, int(s * edge))]
-        if a < 128:
+        if canvas is not None and a < 255:
+            k = a / 255
+            under = canvas.under()
+            r, g, b = (int(c * k + u * (1 - k)) for c, u in zip((r, g, b), under))
+        elif a < 128:
             r, g, b = (r // 3, g // 3, b // 3)
         return shade((r, g, b), light)
 
     return paint
 
 
-def mod_thumbnail(mod, textures):
-    canvas = Canvas((54, 56, 60), (30, 31, 34))
-    a = 70 if len(textures) < 3 else 60
+def plain(rgba, light, canvas):
+    """A colour with a little grain, blended over the canvas by its alpha."""
+    *colour, a = rgba
+
+    def paint(s, t):
+        grain = int(hash01(5, int(s * 16), int(t * 16)) * 12) - 6
+        k = a / 255
+        mixed = (int(c * k + u * (1 - k)) for c, u in zip(colour, canvas.under()))
+        return shade(tuple(mixed), light, grain)
+
+    return paint
+
+
+def texture(mod, name):
+    if "/" in name:
+        mod, name = name.split("/")
+    return read_texture(repo / "mods" / mod / "art" / f"{name}.png")
+
+
+def sprite(canvas, face, left, top, size):
+    """A plant's side face, upright and facing the viewer; its clear pixels are left out."""
+    edge = len(face)
+    for y in range(int(top), int(top + size)):
+        for x in range(int(left), int(left + size)):
+            fx = int((x - left) / size * edge)
+            fy = int((y - top) / size * edge)
+            r, g, b, a = face[min(edge - 1, fy)][min(edge - 1, fx)]
+            if a >= 128:
+                canvas.put(x, y, (r, g, b))
+
+
+def mod_thumbnail(mod, items):
+    canvas = Canvas(*BACKDROP)
     gap = 30
-    span = len(textures) * 2 * a + (len(textures) - 1) * gap
+    a = min(70 if len(items) < 3 else 60, (WIDTH - 40 - (len(items) - 1) * gap) / (2 * len(items)))
+    span = len(items) * 2 * a + (len(items) - 1) * gap
     left = (WIDTH - span) / 2
-    for i, name in enumerate(textures):
-        top, side, _ = read_texture(repo / "mods" / mod / "art" / f"{name}.png")
+    plants = any(isinstance(item, tuple) and item[0] == "plant" for item in items)
+    for i, item in enumerate(items):
         cx = left + a + i * (2 * a + gap)
         # Middle Voxels sit a little higher, so a row reads as a group, not a shelf.
-        lift = 10 if 0 < i < len(textures) - 1 else 0
-        cy = (HEIGHT - 2 * a) / 2 - lift
+        lift = 10 if 0 < i < len(items) - 1 else 0
+        # A row with plants sits lower, so the sprites above it stay in the frame.
+        cy = (HEIGHT - 2 * a) / 2 - lift + (a * 0.45 if plants else 0)
         canvas.ellipse(cx, cy + 1.5 * a + lift + 6, a * 1.2, a * 0.58, 0.5)
-        canvas.box(
-            (cx, cy),
-            a,
-            a,
-            textured(top, 1.0),
-            textured(side, 0.82),
-            textured(side, 0.64),
-        )
+        plant = None
+        if isinstance(item, tuple) and item[0] == "plant":
+            _, plant, item = item
+        if isinstance(item, tuple):
+            faces = [plain(item, k, canvas) for k in (1.0, 0.82, 0.64)]
+        else:
+            top, side, _ = texture(mod, item)
+            glass = any(p[3] < 255 for row in top for p in row) and min(
+                p[3] for row in top for p in row
+            ) > 0
+            under = canvas if glass else None
+            faces = [textured(top, 1.0, under), textured(side, 0.82, under), textured(side, 0.64, under)]
+        canvas.box((cx, cy), a, a, *faces)
+        if plant:
+            _, side, _ = texture(mod, plant)
+            size = 1.5 * a
+            sprite(canvas, side, cx - size / 2, cy + a / 2 - size + a * 0.1, size)
+    return canvas.png()
+
+
+def rotate_x(p, pivot, angle):
+    y, z = p[1] - pivot[1], p[2] - pivot[2]
+    c, s = math.cos(angle), math.sin(angle)
+    return (p[0], pivot[1] + y * c - z * s, pivot[2] + y * s + z * c)
+
+
+def character_thumbnail(mod):
+    """The Mod's six-bone figure in a mid-stride three-quarter view, each face textured from its
+    skin with the same box layout as the Client's avatar (client/avatar.rs, cube_mesh)."""
+    skin = read_png(repo / "mods" / mod / "skin.png")
+    canvas = Canvas(*BACKDROP)
+    # (skin uv, origin, size, pivot, swing forward in radians), as every Character Mod declares.
+    bones = [
+        ((16, 16), (-4, 12, -2), (8, 12, 4), (0, 12, 0), 0.0),
+        ((0, 0), (-4, 24, -4), (8, 8, 8), (0, 24, 0), 0.0),
+        ((40, 16), (4, 12, -2), (4, 12, 4), (6, 22, 0), 0.45),
+        ((32, 48), (-8, 12, -2), (4, 12, 4), (-6, 22, 0), -0.45),
+        ((0, 16), (0, 0, -2), (4, 12, 4), (2, 12, 0), -0.4),
+        ((16, 48), (-4, 0, -2), (4, 12, 4), (-2, 12, 0), 0.4),
+    ]
+    yaw, pitch, scale = math.radians(-32), math.radians(14), 7.4
+    cy_, sy_ = math.cos(yaw), math.sin(yaw)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+
+    def view(p):
+        x, y, z = p
+        x, z = x * cy_ + z * sy_, -x * sy_ + z * cy_
+        # The viewer faces +Z, so the figure's own right (+X) lands on screen left.
+        depth = -y * sp + z * cp
+        up = y * cp + z * sp
+        return (WIDTH / 2 - x * scale, HEIGHT - 26 - (up - (-2 * sp)) * scale, depth)
+
+    light = (-0.45, 0.75, -0.5)
+    norm = math.sqrt(sum(c * c for c in light))
+    light = tuple(c / norm for c in light)
+    zbuf = [math.inf] * (WIDTH * HEIGHT)
+    canvas.ellipse(WIDTH / 2, HEIGHT - 26, 62, 15, 0.55)
+    for (u, v), lo, (w, h, d), pivot, swing in bones:
+        x0, y0, z0 = lo
+        x1, y1, z1 = x0 + w, y0 + h, z0 + d
+        faces = [
+            ([(x1, y1, z1), (x0, y1, z1), (x1, y1, z0)], (u + d, v, w, d), (0, 1, 0)),
+            ([(x1, y1, z1), (x1, y1, z0), (x1, y0, z1)], (u, v + d, d, h), (1, 0, 0)),
+            ([(x1, y1, z0), (x0, y1, z0), (x1, y0, z0)], (u + d, v + d, w, h), (0, 0, -1)),
+            ([(x0, y1, z0), (x0, y1, z1), (x0, y0, z0)], (u + d + w, v + d, d, h), (-1, 0, 0)),
+            ([(x0, y1, z1), (x1, y1, z1), (x0, y0, z1)], (u + 2 * d + w, v + d, w, h), (0, 0, 1)),
+        ]
+        for corners, (fu, fv, fw, fh), normal in faces:
+            corners = [rotate_x(c, pivot, -swing) for c in corners]
+            n = rotate_x(normal, (0, 0, 0), -swing)
+            nx, nz = n[0] * cy_ + n[2] * sy_, -n[0] * sy_ + n[2] * cy_
+            if -n[1] * sp + nz * cp >= 0:
+                continue
+            k = 0.5 + 0.5 * max(0.0, nx * -light[0] * -1 + n[1] * light[1] + nz * light[2])
+            o, a_, b_ = (view(c) for c in corners)
+            ux, uy, ud = a_[0] - o[0], a_[1] - o[1], a_[2] - o[2]
+            vx, vy, vd = b_[0] - o[0], b_[1] - o[1], b_[2] - o[2]
+            det = ux * vy - uy * vx
+            xs = [o[0], a_[0], b_[0], a_[0] + vx]
+            ys = [o[1], a_[1], b_[1], a_[1] + vy]
+            for py in range(max(0, int(min(ys))), min(HEIGHT, int(max(ys)) + 1)):
+                for px in range(max(0, int(min(xs))), min(WIDTH, int(max(xs)) + 1)):
+                    dx, dy = px + 0.5 - o[0], py + 0.5 - o[1]
+                    s = (dx * vy - dy * vx) / det
+                    t = (ux * dy - uy * dx) / det
+                    if not (0 <= s < 1 and 0 <= t < 1):
+                        continue
+                    depth = o[2] + s * ud + t * vd
+                    at = py * WIDTH + px
+                    if depth >= zbuf[at]:
+                        continue
+                    r, g, b, alpha = skin[int(fv + t * fh)][int(fu + s * fw)]
+                    if alpha < 128:
+                        continue
+                    zbuf[at] = depth
+                    canvas.put(px, py, shade((r, g, b), k))
     return canvas.png()
 
 
@@ -330,7 +495,9 @@ def draw_prop(canvas, look, top, a):
         block((190, 150, 255) if x % 2 else (120, 230, 240), 3, 12, 10)
 
 
-for mod, textures in MODS.items():
-    (repo / "mods" / mod / "thumbnail.png").write_bytes(mod_thumbnail(mod, textures))
+for mod, items in MODS.items():
+    (repo / "mods" / mod / "thumbnail.png").write_bytes(mod_thumbnail(mod, items))
+for mod in CHARACTERS:
+    (repo / "mods" / mod / "thumbnail.png").write_bytes(character_thumbnail(mod))
 for game, look in GAMES.items():
     (repo / "games" / game / "thumbnail.png").write_bytes(game_thumbnail(game, look))
