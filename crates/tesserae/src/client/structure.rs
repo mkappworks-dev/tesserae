@@ -9,10 +9,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::template::Turn;
 
@@ -606,54 +604,17 @@ impl Ghost {
 pub(super) struct GhostMesh(usize);
 
 const GHOST_INSET: f32 = 0.01;
-/// How solid the ghost's own colours stand: the World shows through.
-const GHOST_ALPHA: f32 = 0.7;
+/// How solid the ghost's own colours stand: low enough that the World under it
+/// reads through on bright sand and dark rock alike.
+const GHOST_ALPHA: f32 = 0.45;
 /// Wide enough to keep its depth apart from the face under it at 0.25 m.
 const GHOST_OUTSET: f32 = 0.02;
 
-/// Texels across a cell face, and how many of them its edge line takes.
-const EDGE_TEXELS: u32 = 32;
-const EDGE_LINE: u32 = 2;
-/// The prototype's cell edge.
-const EDGE: [u8; 4] = [0x10, 0x14, 0x10, 0xff];
-
 /// The prototype's opacity for a face looking along each axis, as a share of
-/// the top's: the sides read apart without light.
+/// the top's: the sides read apart without light or edge lines.
 const FACE_SHARE: [f32; 3] = [0.6, 1.0, 0.8];
 
-/// White with a dark rim, which the tint multiplies: every cell drawn with its
-/// edges, as the prototype's ghost is.
-fn edge_image() -> Image {
-    let mut data = Vec::with_capacity((EDGE_TEXELS * EDGE_TEXELS * 4) as usize);
-    for y in 0..EDGE_TEXELS {
-        for x in 0..EDGE_TEXELS {
-            let rim = [x, y]
-                .iter()
-                .any(|&t| !(EDGE_LINE..EDGE_TEXELS - EDGE_LINE).contains(&t));
-            data.extend(if rim { EDGE } else { [0xff; 4] });
-        }
-    }
-    let mut image = Image::new(
-        Extent3d {
-            width: EDGE_TEXELS,
-            height: EDGE_TEXELS,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
-    );
-    image.sampler = ImageSampler::linear();
-    image
-}
-
-fn spawn_meshes(
-    mut commands: Commands,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    let edges = images.add(edge_image());
+fn spawn_meshes(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     // The Template's own colours ride on each cell; a refused cell keeps its tint.
     let looks = Tint::ALL.map(|tint| {
         let base_color = match tint {
@@ -662,7 +623,6 @@ fn spawn_meshes(
         };
         materials.add(StandardMaterial {
             base_color,
-            base_color_texture: Some(edges.clone()),
             alpha_mode: AlphaMode::Blend,
             unlit: true,
             ..default()
@@ -688,7 +648,7 @@ fn hull(cells: &[([i32; 3], [f32; 3])], voxel_size: f32, grown: f32) -> Option<M
     }
     let present: HashSet<[i32; 3]> = cells.iter().map(|&(at, _)| at).collect();
     let (mut positions, mut normals, mut indices) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut uvs, mut shares) = (Vec::new(), Vec::new());
+    let mut shares = Vec::new();
     for &(cell, [r, g, b]) in cells {
         for axis in 0..3 {
             for up in [false, true] {
@@ -719,7 +679,6 @@ fn hull(cells: &[([i32; 3], [f32; 3])], voxel_size: f32, grown: f32) -> Option<M
                 let mut normal = [0.0; 3];
                 normal[axis] = if up { 1.0 } else { -1.0 };
                 normals.extend([normal; 4]);
-                uvs.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
                 shares.extend([[r, g, b, FACE_SHARE[axis]]; 4]);
                 // u × v points along +axis, so the far side winds the other way.
                 if up {
@@ -737,7 +696,6 @@ fn hull(cells: &[([i32; 3], [f32; 3])], voxel_size: f32, grown: f32) -> Option<M
         )
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, shares)
         .with_inserted_indices(Indices::U32(indices)),
     )
@@ -1402,6 +1360,38 @@ mod tests {
     }
 
     #[test]
+    fn ghost_faces_are_see_through_and_unrimmed() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.init_resource::<Assets<StandardMaterial>>();
+        app.world_mut().run_system_once(spawn_meshes).unwrap();
+        let looks: Vec<StandardMaterial> = app
+            .world_mut()
+            .query::<(&GhostMesh, &MeshMaterial3d<StandardMaterial>)>()
+            .iter(app.world())
+            .map(|(_, look)| {
+                app.world()
+                    .resource::<Assets<StandardMaterial>>()
+                    .get(&look.0)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        assert_eq!(looks.len(), Tint::ALL.len());
+        for look in &looks {
+            assert!(look.base_color_texture.is_none(), "no dark rim on a face");
+            assert_eq!(look.alpha_mode, AlphaMode::Blend);
+        }
+        let alphas: Vec<f32> = looks.iter().map(|l| l.base_color.alpha()).collect();
+        assert!(
+            alphas
+                .iter()
+                .all(|&a| a <= 0.5 || a == Tint::Blocked.color().alpha())
+        );
+        assert!(alphas.contains(&Tint::Blocked.color().alpha()));
+    }
+
+    #[test]
     fn cells_that_replace_something_stand_proud_of_its_faces() {
         use bevy::ecs::system::RunSystemOnce;
         for voxel_size in [1.0, 0.5, 0.25] {
@@ -1412,7 +1402,6 @@ mod tests {
             })
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
-            .init_resource::<Assets<Image>>()
             .add_systems(Update, build.after(track));
             app.world_mut().run_system_once(spawn_meshes).unwrap();
             answer(

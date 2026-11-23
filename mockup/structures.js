@@ -1890,7 +1890,7 @@ function structureSvg() {
       continue;
     }
     const fill = st === "blocked" ? color : look(c),
-      seen = st === "blocked" ? op : 0.78;
+      seen = st === "blocked" ? op : 0.45;
     face(
       [
         P(x, y, z + 1),
@@ -1900,7 +1900,7 @@ function structureSvg() {
       ],
       fill,
       seen * 0.8,
-      "#101410",
+      "none",
     );
     face(
       [
@@ -1911,7 +1911,7 @@ function structureSvg() {
       ],
       fill,
       seen * 0.6,
-      "#101410",
+      "none",
     );
     face(
       [
@@ -1922,7 +1922,7 @@ function structureSvg() {
       ],
       fill,
       seen,
-      "#101410",
+      "none",
     );
   }
   const xs = coords.map((p) => p[0]),
