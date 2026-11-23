@@ -4,11 +4,13 @@
 
 mod create;
 mod edit_world;
+mod mods;
 mod open;
 pub(super) mod pages;
 
 use create::*;
 use edit_world::*;
+use mods::{Bulk, ModSort, ModView, Pop, on_mods};
 use open::*;
 
 use std::path::{Path, PathBuf};
@@ -143,8 +145,8 @@ impl Step {
     }
 }
 
-/// What runs once every Mod it needs is trusted. Create World's Mods step asks for Trust inline
-/// instead, see [`Launcher::trust_asked`].
+/// What runs once every Mod it needs is trusted. Create World's steps ask in a
+/// [`Screen::StepTrust`] dialog instead.
 #[derive(Clone, Debug, PartialEq)]
 enum Next {
     Open(PathBuf),
@@ -358,17 +360,15 @@ struct Launcher {
     /// Edit World's choice of modes.
     modes: Modes,
     search: String,
-    /// The Mods step's search and category tab; `None` shows every category.
     mod_search: String,
-    mod_tab: Option<String>,
+    mod_view: ModView,
+    /// The control the last act came from, focused again when its page is rebuilt.
+    refocus: Option<Act>,
     /// Disclosure rows the player has flipped from how they start.
     flipped: std::collections::BTreeSet<Disclosure>,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
-    /// The Mods step shows its Trust panel: leaving it runs the chosen Game and Mods to read their
-    /// Biomes. Cleared by every screen change and by every change to the picks it lists.
-    trust_asked: bool,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
@@ -420,7 +420,8 @@ impl Launcher {
     fn show(&mut self, screen: Screen) {
         self.screen = screen;
         self.problem = None;
-        self.trust_asked = false;
+        self.mod_view.pop = None;
+        self.refocus = None;
         self.version += 1;
     }
 
@@ -486,13 +487,18 @@ pub(super) enum Act {
     SaveName,
     ConfirmDelete,
     Trust,
-    /// The Mods step's primary button: trusts what the panel lists, then shows the Biomes.
-    TrustMods,
     /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
     TrustStep,
     Dismiss,
     Disclose(Disclosure),
-    ModTab(Option<String>),
+    /// Opens or closes a popup beside the Mods search.
+    ModPop(Pop),
+    ModCategory(String),
+    ModSelectedOnly,
+    ModFilterReset,
+    ModSort(ModSort),
+    /// The Mods step's tri-state box: ticks every Mod shown, or clears them.
+    SelectShownMods,
 }
 
 #[derive(Resource, Default)]
@@ -632,6 +638,9 @@ fn review_capture(
                 "back" => Act::Back,
                 "randomize" => Act::Randomize,
                 "reset" => Act::ResetBiomes,
+                "filter" => Act::ModPop(Pop::Filter),
+                "sort" => Act::ModPop(Pop::Sort),
+                "all" => Act::SelectShownMods,
                 // The Opening card stays up: no World is handed to the loader.
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {
@@ -702,6 +711,7 @@ fn logic(app: &mut App) {
                 render,
                 show_filter,
                 filter,
+                pages::paint_bulk,
                 placeholders,
                 opening,
                 (
@@ -832,12 +842,12 @@ fn start(
         modes: Modes::default(),
         search: String::new(),
         mod_search: String::new(),
-        mod_tab: None,
+        mod_view: ModView::default(),
+        refocus: None,
         flipped: Default::default(),
         problem: None,
         clashes: Default::default(),
         version: 0,
-        trust_asked: false,
         from_list: false,
         opening_frames: 0,
     };
@@ -1104,6 +1114,14 @@ fn handle(
     };
     for act in std::mem::take(&mut queue.0) {
         let l = &mut *l;
+        l.refocus = None;
+        let popup = matches!(
+            act,
+            Act::ModPop(..) | Act::ModCategory(..) | Act::ModSelectedOnly | Act::ModFilterReset
+        );
+        if !popup && act != Act::Back && l.mod_view.pop.take().is_some() {
+            l.version += 1;
+        }
         match act {
             Act::Continue | Act::Play(..) | Act::Trust => on_open(l, &mut cx, act),
             Act::Edit(..)
@@ -1136,7 +1154,6 @@ fn handle(
             | Act::DiscardSetup
             | Act::Voxel(..)
             | Act::Mode(..)
-            | Act::TrustMods
             | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
             Act::Home
@@ -1146,8 +1163,13 @@ fn handle(
             | Act::Quit
             | Act::Back
             | Act::Dismiss
-            | Act::Disclose(..)
-            | Act::ModTab(..) => navigate(l, &mut cx, act),
+            | Act::Disclose(..) => navigate(l, &mut cx, act),
+            Act::ModPop(..)
+            | Act::ModCategory(..)
+            | Act::ModSelectedOnly
+            | Act::ModFilterReset
+            | Act::ModSort(..)
+            | Act::SelectShownMods => on_mods(l, cx.installed, act),
         }
     }
 }
@@ -1184,8 +1206,8 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             l.version += 1;
         }
-        Act::ModTab(tab) => {
-            l.mod_tab = tab;
+        Act::Back if l.mod_view.pop.is_some() => {
+            l.refocus = l.mod_view.pop.take().map(Act::ModPop);
             l.version += 1;
         }
         // Escape answers the reset dialog rather than leaving the step under it.
@@ -1264,6 +1286,18 @@ fn render(
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
+                focus.set(entity, FocusCause::Auto);
+            }
+        });
+    }
+    if let Some(act) = l.refocus.clone() {
+        commands.queue(move |world: &mut World| {
+            let again = world
+                .query::<(Entity, &Act)>()
+                .iter(world)
+                .find_map(|(e, a)| (*a == act).then_some(e));
+            if let (Some(entity), Some(mut focus)) = (again, world.get_resource_mut::<InputFocus>())
+            {
                 focus.set(entity, FocusCause::Auto);
             }
         });
