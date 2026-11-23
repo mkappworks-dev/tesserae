@@ -86,13 +86,13 @@ function layoutPreviewSvg() {
     .join("")}</g></svg>`;
 }
 // A HUD card holds nothing clickable: in play the mouse aims, so the card only
-// names the keys. Esc is the in-game menu there, so leaving is Backspace.
+// names the keys.
 function layoutStatus() {
   ensureLayout();
   const s = layoutSummary();
   return `<aside class="layout-status"><span>${icon("layout", 18)} Layout ready</span><b>${s.kind} · ${s.count}</b><small>${s.dimensions.join(" × ")} m</small><div class="layout-keys">${[
     ["L", "Edit"],
-    ["⌫", "Exit"],
+    ["Esc", "Exit"],
     ["RMB", "Place"],
   ]
     .map(([k, l]) => `<span><kbd>${k}</kbd> ${l}</span>`)
@@ -267,9 +267,11 @@ document.addEventListener("keydown", (e) => {
     e.target.matches?.("input,textarea,select")
   )
     return;
+  // Quick layout and the place Tool are two ways to place; one at a time.
   if (
     e.key.toLowerCase() === "l" &&
-    ["play", "layout"].includes(state.screen)
+    ["play", "layout"].includes(state.screen) &&
+    state.heldTool !== "Place"
   ) {
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -282,8 +284,11 @@ document.addEventListener("keydown", (e) => {
     action("layout-exit");
     return;
   }
+  // In play Esc leaves layout mode before it opens the menu, but a held place
+  // Tool is put away first; structures.js handles that press.
   if (
-    e.key === "Backspace" &&
+    (e.key === "Backspace" ||
+      (e.key === "Escape" && state.heldTool !== "Place")) &&
     ["play", "layout"].includes(state.screen) &&
     state.quickLayout?.active
   ) {

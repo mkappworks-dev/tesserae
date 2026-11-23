@@ -318,7 +318,7 @@ function render() {
   setSelectValue($("#item-access-preview"), state.itemAccess || "creative");
   document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
     state.screen === "play"
-      ? `<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue ${state.mapForbidden ? "" : "<kbd>M</kbd> Map "}<kbd>L</kbd> Layout`
+      ? `<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue ${state.mapForbidden ? "" : "<kbd>M</kbd> Map "}${state.heldTool === "Place" ? "" : "<kbd>L</kbd> Layout"}`
       : state.screen === "death"
         ? "<kbd>Enter</kbd> Respawn <kbd>Tab</kbd> Navigate"
         : state.screen === "home" || state.screen === "pause"
@@ -787,17 +787,17 @@ function biomeEditor() {
   }));
   const pick = (label, key, value) =>
     `<div class="pick-row"><span>${label}</span>${customSelect(label, key, value, materials, "", { search: "Search Materials" })}</div>`;
-  return `<section class="biome-panel compact" aria-label="Edit ${esc(b.name)}"><header class="panel-head">${biomeThumb(b, state.selected)}<div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${climateMap(b)}${slideRow("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface)}${pick("Soil", "biome.soil", b.soil)}${pick("Rock", "biome.rock", b.rock)}</div><div class="panel-section"><span class="form-label">Atmosphere</span><div class="color-stack">${[
+  return `<section class="biome-panel compact" aria-label="Edit ${esc(b.name)}"><header class="panel-head">${biomeThumb(b, state.selected)}<div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${climateMap(b)}${slideRow("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface)}${pick("Soil", "biome.soil", b.soil)}${pick("Rock", "biome.rock", b.rock)}</div><div class="panel-section"><span class="form-label">Atmosphere</span>${[
     ["Sky", "sky"],
     ["Fog", "fog"],
   ]
     .map(
       ([label, key]) =>
-        `<label class="color-row"><span>${label}</span><input type="color" class="color-swatch" data-bind="biome.${key}" value="${esc(b[key])}" aria-label="${label} colour"></label>`,
+        `<div class="pick-row"><span>${label}</span>${colourField(`${label} colour`, `biome.${key}`, b[key])}</div>`,
     )
     .join(
       "",
-    )}</div></div></div><footer class="panel-foot">${button("Reset", "reset-biome", { small: true, ghost: true, disabled: !b.custom })}${button("Done", "close-biome", { primary: true })}</footer></section>`;
+    )}</div></div><footer class="panel-foot">${button("Reset", "reset-biome", { small: true, ghost: true, disabled: !b.custom })}${button("Done", "close-biome", { primary: true })}</footer></section>`;
 }
 function reviewForm() {
   const enabled = state.biomes
@@ -1568,6 +1568,7 @@ document.addEventListener(
       e.key === "Escape" &&
       !state.pop &&
       !openSelect &&
+      !openColour &&
       state.biomeEdit != null &&
       !$("#dialog-root").children.length
     ) {
