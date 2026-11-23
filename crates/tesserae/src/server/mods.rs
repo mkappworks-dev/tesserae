@@ -468,6 +468,19 @@ pub(crate) fn preview(
             .filter(|(id, _)| loaded.tables.materials.def(*id as MaterialId).solid)
             .map(|(_, name)| name.to_owned())
             .collect(),
+        source: Some(std::sync::Arc::new(
+            tesserae_core::terrain_preview::Source {
+                params,
+                materials: loaded
+                    .registry
+                    .names(Kind::Material)
+                    .map(|(id, name)| (name.to_owned(), id as MaterialId))
+                    .collect(),
+                colours: loaded.appearance.clone(),
+                templates: loaded.tables.templates.clone(),
+                settlements: loaded.tables.settlements.clone(),
+            },
+        )),
     })
 }
 
@@ -1133,6 +1146,30 @@ pub(in crate::server) mod demo_games;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terras_preview_is_drawn_around_the_spawn_the_server_finds() {
+        use tesserae_core::terrain_preview::Frame;
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/terra/dist/mods");
+        let scan = tesserae_mods::scan(&path).unwrap();
+        // Terra and the Mods it requires, which are all the Mods its dist folder holds.
+        let terra = scan.games.into_iter().filter(|g| g.manifest.id == "terra");
+        let found = terra.chain(scan.mods).collect();
+        let declared = preview(found, &path.join("unused-trust.json"), false).unwrap();
+        let source = declared.source.expect("Terra draws a preview");
+        let image = source.render(42, 1.0, None, &Frame::CREATE).unwrap();
+        let loaded = terra_for_save(
+            &super::super::persistence::Opening::ephemeral(),
+            &WorldSettings::default(),
+        );
+        let server =
+            tesserae_core::Worldgen::new(42, 1.0, super::super::worldgen_params(loaded.world))
+                .with_templates(&loaded.tables.templates)
+                .with_settlements(&loaded.tables.settlements);
+        assert_eq!(image.centre_m, server.spawn_m());
+        let colours: std::collections::BTreeSet<_> = image.rgba.chunks(4).collect();
+        assert!(colours.len() > 16, "Terra's ground and water show");
+    }
     use crate::render::chunk_material::ChunkMaterialExtension;
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
