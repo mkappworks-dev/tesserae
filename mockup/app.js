@@ -321,7 +321,9 @@ function render() {
       ? `<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue ${state.mapForbidden ? "" : "<kbd>M</kbd> Map "}<kbd>L</kbd> Layout`
       : state.screen === "death"
         ? "<kbd>Enter</kbd> Respawn <kbd>Tab</kbd> Navigate"
-        : "<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back";
+        : state.screen === "home" || state.screen === "pause"
+          ? `<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back <button type="button" class="prompt" data-action="${state.screen === "home" ? "quit" : "save-quit"}" data-key="Q"><kbd>Q</kbd> ${state.screen === "home" ? "Quit" : "Save &amp; Quit"}</button>`
+          : "<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back";
   const screen = $("#screen");
   const hadFocus = screen.contains(document.activeElement);
   screenPrompts = null;
