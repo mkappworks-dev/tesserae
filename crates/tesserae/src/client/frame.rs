@@ -506,6 +506,21 @@ pub(super) fn sheet_with_actions(
 }
 
 /// The sheet with `foot` spawned edge to edge under the scrolling body.
+/// A menu sheet's fill: darker at its left edge, lighter at its right.
+pub(super) fn sheet_fill() -> BackgroundGradient {
+    left_to_right(theme::sheet_shade(), theme::sheet_shade_far())
+}
+
+pub(super) fn left_to_right(near: Color, far: Color) -> BackgroundGradient {
+    BackgroundGradient(vec![
+        LinearGradient::to_right(vec![
+            ColorStop::new(near, Val::Percent(0.0)),
+            ColorStop::new(far, Val::Percent(100.0)),
+        ])
+        .into(),
+    ])
+}
+
 pub(super) fn sheet_with_foot(
     main: &mut ChildSpawnerCommands,
     title: &str,
@@ -516,13 +531,7 @@ pub(super) fn sheet_with_foot(
     foot: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     main.spawn((
-        BackgroundGradient(vec![
-            LinearGradient::to_right(vec![
-                ColorStop::new(theme::sheet_shade(), Val::Percent(0.0)),
-                ColorStop::new(theme::sheet_shade_far(), Val::Percent(100.0)),
-            ])
-            .into(),
-        ]),
+        sheet_fill(),
         Node {
             flex_grow: 1.0,
             max_width: Val::Px(1180.0),
