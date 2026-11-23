@@ -349,29 +349,110 @@ fn key_bindings_show_a_cap_per_input_with_mouse_buttons_short() {
     assert!(texts.iter().any(|t| t == "Press a key…"), "the row waits");
 }
 
-#[test]
-fn the_help_panel_explains_the_row_that_holds_focus() {
-    let mut app = page_app(Tab::Display);
-    let help = |app: &mut App| -> String {
-        app.world_mut()
-            .query_filtered::<&Text, With<HelpText>>()
+/// The help strip's name, explanation and value note.
+fn strip(app: &mut App) -> [String; 3] {
+    fn read<M: Component>(app: &mut App) -> String {
+        let (text, children) = app
+            .world_mut()
+            .query_filtered::<(&Text, Option<&Children>), With<M>>()
             .single(app.world())
-            .unwrap()
-            .0
-            .clone()
-    };
-    let aa = app
-        .world_mut()
+            .unwrap();
+        let spans: Vec<Entity> = children.map(|c| c.to_vec()).unwrap_or_default();
+        let mut out = text.0.clone();
+        for span in spans {
+            if let Some(span) = app.world().get::<TextSpan>(span) {
+                out.push_str(&span.0);
+            }
+        }
+        out
+    }
+    [
+        read::<HelpTitle>(app),
+        read::<HelpText>(app),
+        read::<HelpNote>(app),
+    ]
+}
+fn focus_on(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .resource_mut::<bevy::input_focus::InputFocus>()
+        .set(entity, bevy::input_focus::FocusCause::Navigated);
+    app.world_mut()
+        .insert_resource(bevy::input_focus::InputFocusVisible(true));
+    app.update();
+}
+fn choice_for(app: &mut App, wanted: fn(&Operation) -> bool) -> Entity {
+    app.world_mut()
         .query::<(Entity, &Choice)>()
         .iter(app.world())
-        .find(|(_, c)| matches!(c.next(1, true), Some(Operation::AntiAliasing(_))))
+        .find(|(_, c)| c.next(1, true).is_some_and(|o| wanted(&o)))
+        .unwrap()
+        .0
+}
+
+#[test]
+fn the_help_strip_explains_the_focused_row_and_notes_its_value() {
+    let mut app = page_app(Tab::Display);
+    app.world_mut().resource_mut::<Preferences>().anti_aliasing =
+        crate::client::anti_alias::AntiAliasing::Off;
+    app.world_mut().resource_mut::<Settings>().dirty = true;
+    app.update();
+    let aa = choice_for(&mut app, |o| matches!(o, Operation::AntiAliasing(_)));
+    focus_on(&mut app, aa);
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Anti-aliasing".to_owned(),
+            "Smooth voxel edges. MSAA costs more.".to_owned(),
+            "Off: sharpest and cheapest; edges shimmer.".to_owned(),
+        ]
+    );
+    let window = choice_for(&mut app, |o| matches!(o, Operation::WindowMode(_)));
+    focus_on(&mut app, window);
+    assert_eq!(strip(&mut app)[0], "Window mode");
+    assert_eq!(strip(&mut app)[2], "", "Windowed has no note");
+}
+
+#[test]
+fn the_help_strip_describes_the_category_while_no_row_is_focused() {
+    let mut app = page_app(Tab::Behavior);
+    app.world_mut()
+        .insert_resource(bevy::input_focus::InputFocusVisible(false));
+    app.update();
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Behavior".to_owned(),
+            "How moving, building and the mouse feel.".to_owned(),
+            String::new(),
+        ]
+    );
+}
+
+#[test]
+fn the_help_strip_follows_the_row_under_the_pointer() {
+    let mut app = page_app(Tab::Behavior);
+    let row = app
+        .world_mut()
+        .query::<(Entity, &RowHelp)>()
+        .iter(app.world())
+        .find(|(_, help)| help.title == "Removal activation")
         .unwrap()
         .0;
     app.world_mut()
-        .resource_mut::<bevy::input_focus::InputFocus>()
-        .set(aa, bevy::input_focus::FocusCause::Navigated);
+        .entity_mut(row)
+        .insert(bevy::picking::hover::Hovered(true));
     app.update();
-    assert_eq!(help(&mut app), "Smooth voxel edges. MSAA costs more.");
+    assert_eq!(
+        strip(&mut app),
+        [
+            "Removal activation".to_owned(),
+            "How Remove starts breaking a Voxel.".to_owned(),
+            "Hold: keep the binding down until the Voxel breaks.".to_owned(),
+        ]
+    );
+    let ghost = choice_for(&mut app, |o| matches!(o, Operation::Ghost(_)));
+    focus_on(&mut app, ghost);
+    assert_eq!(strip(&mut app)[0], "Placement ghost", "a later focus wins");
 }
 
 #[test]

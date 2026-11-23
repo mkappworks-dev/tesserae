@@ -490,6 +490,29 @@ pub(super) fn sheet_with_actions(
     body: impl FnOnce(&mut ChildSpawnerCommands),
     actions: Option<impl FnOnce(&mut ChildSpawnerCommands)>,
 ) {
+    sheet_with_foot(main, title, subtitle, height, scroll, body, |s| {
+        if let Some(actions) = actions {
+            s.spawn(Node {
+                justify_content: JustifyContent::FlexEnd,
+                padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(0.0), Val::Px(24.0)),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(actions);
+        }
+    });
+}
+
+/// The sheet with `foot` spawned edge to edge under the scrolling body.
+pub(super) fn sheet_with_foot(
+    main: &mut ChildSpawnerCommands,
+    title: &str,
+    subtitle: Option<&str>,
+    height: SheetHeight,
+    scroll: impl Bundle,
+    body: impl FnOnce(&mut ChildSpawnerCommands),
+    foot: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     main.spawn((
         BackgroundGradient(vec![
             LinearGradient::to_right(vec![
@@ -543,15 +566,7 @@ pub(super) fn sheet_with_actions(
             },
         ))
         .with_children(body);
-        if let Some(actions) = actions {
-            s.spawn(Node {
-                justify_content: JustifyContent::FlexEnd,
-                padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(0.0), Val::Px(24.0)),
-                flex_shrink: 0.0,
-                ..default()
-            })
-            .with_children(actions);
-        }
+        foot(s);
     });
 }
 

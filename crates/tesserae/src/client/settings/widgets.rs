@@ -1,16 +1,20 @@
 //! The controls a Settings page is built from: rows, ◀ value ▶ selectors,
-//! On/Off toggles, sliders, key caps, the help panel and the dialogs.
+//! On/Off toggles, sliders, key caps, the help strip and the dialogs.
 
 use super::*;
+use crate::client::menu_ui::Tab;
 use crate::client::theme;
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::picking::hover::Hovered;
 
-/// What the help panel says while focus is in this row.
+/// What the help strip says while this row holds focus or the pointer.
 #[derive(Component, Clone, PartialEq)]
+#[require(Hovered)]
 pub(super) struct RowHelp {
     pub title: String,
     pub text: String,
+    /// On the current value, as "Value: what it does.", or empty.
+    pub note: &'static str,
 }
 
 pub(super) fn setting_row(
@@ -19,11 +23,23 @@ pub(super) fn setting_row(
     help: &str,
     control: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
+    noted_row(parent, title, help, None, control);
+}
+
+/// A [`setting_row`] whose current value has a note in the help strip.
+pub(super) fn noted_row(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    help: &str,
+    note: Option<&'static str>,
+    control: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     parent
         .spawn((
             RowHelp {
                 title: title.into(),
                 text: help.into(),
+                note: note.unwrap_or_default(),
             },
             Node {
                 align_items: AlignItems::Center,
@@ -376,72 +392,168 @@ pub(super) fn cap_text(label: String) -> String {
 pub(super) struct HelpTitle;
 #[derive(Component)]
 pub(super) struct HelpText;
+/// The value note: the value itself in bold, the rest in a span after it.
+#[derive(Component)]
+pub(super) struct HelpNote;
 
-/// The one panel that explains the highlighted row.
-pub(super) fn help_panel(parent: &mut ChildSpawnerCommands, help: &RowHelp) {
-    parent
+/// What the strip says while no row holds focus or the pointer.
+pub(super) fn category_help(tab: Tab) -> &'static str {
+    match tab {
+        Tab::Behavior => "How moving, building and the mouse feel.",
+        Tab::Bindings => {
+            "The keys and buttons for every action. Select a key cap, then press the new key. \
+             Esc cancels; Delete clears it."
+        }
+        Tab::Controller => "Sticks, touch controls and controller buttons.",
+        Tab::Display => "The window, frame presentation and image quality.",
+        Tab::Distance => "How far and how sharply distant terrain is drawn.",
+        Tab::Audio => "The volume of each kind of sound.",
+        Tab::Accessibility => "Motion, contrast and text size.",
+        Tab::Catalogue | Tab::Recipes => "",
+    }
+}
+
+const STRIP_TEXT: f32 = 13.0;
+const STRIP_LINE: bevy::text::LineHeight = bevy::text::LineHeight::RelativeToFont(1.45);
+
+/// The band along the sheet's foot, in the rail's tone, that explains the
+/// highlighted row. It outlives page rebuilds; [`show_help`] fills it.
+pub(in crate::client) fn help_strip(sheet: &mut ChildSpawnerCommands) {
+    sheet
         .spawn((
-            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.04)),
-            BorderColor::all(theme::SAGE),
+            BackgroundColor(theme::sheet_shade()),
+            BorderColor::all(theme::edge()),
             Node {
-                width: Val::Px(240.0),
                 flex_shrink: 0.0,
-                align_self: AlignSelf::FlexStart,
-                min_height: Val::Px(96.0),
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(14.0)),
-                border: UiRect::left(Val::Px(2.0)),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
+                min_height: Val::Px(99.0),
+                padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(17.0), Val::Px(18.0)),
+                border: UiRect::top(Val::Px(theme::RULE)),
                 ..default()
             },
+            Pickable::IGNORE,
         ))
-        .with_children(|panel| {
-            panel.spawn((
+        .with_children(|strip| {
+            strip.spawn((
                 HelpTitle,
-                Text::new(help.title.clone()),
-                theme::weighted(14.0, theme::STRONG),
+                Text::default(),
+                theme::weighted(15.0, theme::BOLD),
+                STRIP_LINE,
                 TextColor(theme::INK),
                 Pickable::IGNORE,
             ));
-            panel.spawn((
+            // About 90 characters, so a long explanation wraps at a readable measure.
+            let measure = Node {
+                max_width: Val::Px(650.0),
+                margin: UiRect::top(Val::Px(2.0)),
+                ..default()
+            };
+            strip.spawn((
                 HelpText,
-                Text::new(help.text.clone()),
-                theme::font(13.0),
-                bevy::text::LineHeight::RelativeToFont(1.55),
+                Text::default(),
+                theme::font(STRIP_TEXT),
+                STRIP_LINE,
                 TextColor(theme::muted()),
+                measure.clone(),
                 Pickable::IGNORE,
             ));
+            strip
+                .spawn((
+                    HelpNote,
+                    Text::default(),
+                    theme::weighted(STRIP_TEXT, theme::BOLD),
+                    STRIP_LINE,
+                    TextColor(theme::SAGE),
+                    Node {
+                        display: bevy::ui::Display::None,
+                        ..measure
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_child((
+                    TextSpan::default(),
+                    theme::font(STRIP_TEXT),
+                    STRIP_LINE,
+                    TextColor(theme::SAGE),
+                ));
         });
 }
 
-/// Points the help panel at the row that holds focus, or at the page's first
-/// row while focus is elsewhere.
+type StripTexts<'w, 's> = (
+    Query<'w, 's, &'static mut Text, (With<HelpTitle>, Without<HelpText>, Without<HelpNote>)>,
+    Query<'w, 's, &'static mut Text, (With<HelpText>, Without<HelpTitle>, Without<HelpNote>)>,
+    Query<
+        'w,
+        's,
+        (&'static mut Text, &'static mut Node, &'static Children),
+        (With<HelpNote>, Without<HelpTitle>, Without<HelpText>),
+    >,
+    Query<'w, 's, &'static mut TextSpan>,
+);
+/// The rows last under the pointer and in focus, and the one the strip shows.
+type Shown<'s> = Local<'s, (Option<Entity>, Option<Entity>, Option<Entity>)>;
+
+/// Fills the help strip from the latest of hover and visible focus to land on
+/// a row; with neither on one, the category speaks.
 pub(super) fn show_help(
-    focus: Res<bevy::input_focus::InputFocus>,
-    (rows, pages): (Query<&RowHelp>, Query<Entity, With<Page>>),
-    (parents, children): (Query<&ChildOf>, Query<&Children>),
-    mut titles: Query<&mut Text, (With<HelpTitle>, Without<HelpText>)>,
-    mut texts: Query<&mut Text, (With<HelpText>, Without<HelpTitle>)>,
+    (focus, visible, settings): (
+        Res<bevy::input_focus::InputFocus>,
+        Option<Res<bevy::input_focus::InputFocusVisible>>,
+        Res<Settings>,
+    ),
+    rows: Query<(Entity, &RowHelp, &Hovered)>,
+    parents: Query<&ChildOf>,
+    (mut titles, mut texts, mut notes, mut spans): StripTexts,
+    mut shown: Shown,
 ) {
-    let focused = focus.get().and_then(|focused| {
-        std::iter::once(focused)
-            .chain(parents.iter_ancestors(focused))
-            .find_map(|e| rows.get(e).ok())
-    });
-    let Some(help) = focused.or_else(|| {
-        pages.iter().next().and_then(|page| {
-            children
-                .iter_descendants_depth_first(page)
-                .find_map(|e| rows.get(e).ok())
-        })
-    }) else {
-        return;
-    };
-    for mut title in &mut titles {
-        title.set_if_neq(Text::new(help.title.clone()));
+    // A focus the Player cannot see, as after a click or on opening a page,
+    // is not theirs to have explained.
+    let focused = crate::client::menu_ui::visible_focus(Some(&focus), visible.as_deref()).and_then(
+        |focused| {
+            std::iter::once(focused)
+                .chain(parents.iter_ancestors(focused))
+                .find(|e| rows.contains(*e))
+        },
+    );
+    let hovered = rows
+        .iter()
+        .find(|(.., hovered)| hovered.0)
+        .map(|(entity, ..)| entity);
+    let (last_hovered, last_focused, row) = &mut *shown;
+    if hovered != *last_hovered {
+        *row = hovered.or(focused);
     }
-    for mut text in &mut texts {
-        text.set_if_neq(Text::new(help.text.clone()));
+    if focused != *last_focused {
+        *row = focused;
+    }
+    (*last_hovered, *last_focused) = (hovered, focused);
+    let (title, text, note) = match row.and_then(|row| rows.get(row).ok()) {
+        Some((_, help, _)) => (help.title.as_str(), help.text.as_str(), help.note),
+        None => (settings.tab.label(), category_help(settings.tab), ""),
+    };
+    for mut shown in &mut titles {
+        shown.set_if_neq(Text::new(title));
+    }
+    for mut shown in &mut texts {
+        shown.set_if_neq(Text::new(text));
+    }
+    // "Walk: no sprint." shows "Walk" bold, then ": no sprint.".
+    let (value, rest) = note.find(": ").map_or((note, ""), |at| note.split_at(at));
+    for (mut shown, mut node, children) in &mut notes {
+        shown.set_if_neq(Text::new(value));
+        let display = if note.is_empty() {
+            bevy::ui::Display::None
+        } else {
+            bevy::ui::Display::Flex
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        if let Some(mut span) = children.first().and_then(|c| spans.get_mut(*c).ok())
+            && span.0 != rest
+        {
+            span.0 = rest.into();
+        }
     }
 }
 
