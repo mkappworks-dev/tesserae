@@ -2,7 +2,7 @@
 //! space, through the generator's public query.
 
 use tesserae_core::{
-    Biome, BiomeName, BiomeTable, ClimateParams, SkyFog, Worldgen, WorldgenParams,
+    Biome, BiomeName, BiomeSelectors, BiomeTable, ClimateParams, SkyFog, Worldgen, WorldgenParams,
 };
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
@@ -92,23 +92,43 @@ fn biomes_that_declare_no_colours_give_the_default_everywhere() {
 }
 
 #[test]
-fn a_colourless_biome_beside_a_coloured_one_takes_the_default_not_its_neighbours() {
-    let g = generator(&[
+fn a_biome_without_colours_does_not_dilute_the_ones_that_have_them() {
+    let mixed = [
         biome("dry", 0.8, 0.2, Some(DRY)),
-        biome("plain", 0.1, 0.6, None),
-    ]);
-    let plain: Vec<_> = grid()
-        .filter(|&(x, z)| g.biome_at(x, z).map(|id| id.index()) == Some(1))
-        .map(|(x, z)| bytes(g.sky_fog_at(x, z).unwrap().sky))
-        .collect();
-    assert!(!plain.is_empty());
-    // Blue runs 120 (dry) to 235 (default); only the soft border may lean dry.
-    let defaulted = plain.iter().filter(|sky| sky[2] > 177.5).count();
-    assert!(
-        defaulted * 10 > plain.len() * 8,
-        "{defaulted}/{}",
-        plain.len()
+        biome("bare", 0.1, 0.6, None),
+    ];
+    let g = generator(&mixed);
+    for (x, z) in grid() {
+        let got = g.sky_fog_at(x, z).unwrap();
+        assert_eq!(bytes(got.sky).map(f32::round), DRY.sky.map(f32::from));
+    }
+}
+
+#[test]
+fn a_colourless_landform_biome_carries_on_the_sky_around_it() {
+    let everywhere = BiomeSelectors {
+        altitude_m: Some([-1.0e6, 1.0e6]),
+        ..Default::default()
+    };
+    let table = BiomeTable::new(&[
+        biome("dry", 0.8, 0.2, Some(DRY)),
+        biome("mountain", 0.5, 0.5, None),
+    ])
+    .unwrap()
+    .with_selectors(&[BiomeSelectors::default(), everywhere])
+    .unwrap();
+    let g = Worldgen::new(
+        SEED,
+        1.0,
+        WorldgenParams {
+            biomes: table,
+            ..WorldgenParams::default()
+        },
     );
+    for (x, z) in grid() {
+        let got = g.sky_fog_at(x, z).unwrap();
+        assert_eq!(bytes(got.sky).map(f32::round), DRY.sky.map(f32::from));
+    }
 }
 
 #[test]

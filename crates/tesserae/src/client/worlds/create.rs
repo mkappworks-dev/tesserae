@@ -124,11 +124,11 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             edit_biomes(l, BiomesDraft::reset);
         }
         Act::KeepBiomes => edit_biomes(l, |d| d.resetting = false),
-        Act::KeepEditing => {
-            if let Screen::Discard(step) = l.screen {
-                l.show(Screen::Create(step));
-            }
-        }
+        Act::KeepEditing => match l.screen.clone() {
+            Screen::Discard(step) => l.show(Screen::Create(step)),
+            Screen::DiscardEdits(path) => l.show(Screen::Edit(path)),
+            _ => {}
+        },
         Act::DiscardSetup => {
             if matches!(l.screen, Screen::Discard(_)) {
                 l.show(Screen::Worlds);

@@ -1003,3 +1003,53 @@ fn choosing_a_preset_changes_the_rings_the_server_streams() {
     let rings = crate::server::LevelRings::new(high, 32.0, 1);
     assert_eq!(rings.mesh.outer.horizontal, 12);
 }
+
+#[test]
+fn the_window_mode_applies_at_once_steps_and_reverts_unless_kept() {
+    use crate::client::presentation::WindowMode;
+    let mut app = app();
+    app.add_plugins(super::super::actions::test_plugin)
+        .add_systems(PostUpdate, crate::client::presentation::policy);
+    let window = app
+        .world_mut()
+        .spawn((Window::default(), bevy::window::PrimaryWindow))
+        .id();
+    let mode = |app: &App| app.world().get::<Window>(window).unwrap().mode;
+    activate_operation(&mut app, Operation::Navigate(Tab::Display));
+    let selector = spawn_choice(&mut app, |row| {
+        pages::select(
+            row,
+            WindowMode::Windowed,
+            WindowMode::ALL.map(|m| (m, m.label().to_owned())),
+            Operation::WindowMode,
+        )
+    });
+    step_by(&mut app, selector, 1);
+    assert_eq!(
+        app.world().resource::<Preferences>().window_mode,
+        WindowMode::Borderless
+    );
+    assert!(app.world().resource::<Settings>().modal(), "asks to keep");
+    app.update();
+    assert_eq!(
+        mode(&app),
+        bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current),
+        "applied at once"
+    );
+    wait(&mut app, 10.5);
+    assert_eq!(
+        app.world().resource::<Preferences>().window_mode,
+        WindowMode::Windowed,
+        "reverted"
+    );
+    assert_eq!(mode(&app), bevy::window::WindowMode::Windowed);
+
+    activate_operation(&mut app, Operation::WindowMode(WindowMode::Fullscreen));
+    activate_operation(&mut app, Operation::KeepDisplay);
+    wait(&mut app, 11.0);
+    assert_eq!(
+        saved(&mut app).window_mode,
+        WindowMode::Fullscreen,
+        "kept and saved"
+    );
+}
