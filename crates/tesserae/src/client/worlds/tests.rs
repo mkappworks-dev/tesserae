@@ -668,15 +668,6 @@ fn the_prompt_bar_shows_controller_buttons_after_controller_input_and_keys_after
     );
 }
 
-fn resolved(app: &mut App) -> String {
-    app.world_mut()
-        .query_filtered::<&Text, With<Resolved>>()
-        .single(app.world())
-        .unwrap()
-        .0
-        .clone()
-}
-
 #[test]
 fn a_new_form_opens_with_its_random_seed_in_the_field() {
     let worlds = Directory::new();
@@ -685,35 +676,22 @@ fn a_new_form_opens_with_its_random_seed_in_the_field() {
     new_world(&mut app);
     let form = &launcher(&app).form;
     assert_eq!(form.seed, form.random_seed.to_string());
-    let random = form.random_seed;
-    assert_eq!(resolved(&mut app), format!("Seed: {random}"));
     act(&mut app, Act::Back);
     act(&mut app, Act::Back);
     assert!(
         matches!(launcher(&app).screen, Screen::Worlds),
         "an untouched form leaves without asking"
     );
-    new_world(&mut app);
-    type_into(&mut app, Field::Seed, "ridge");
-    assert!(resolved(&mut app).starts_with("Seed from these words: "));
 }
 
 #[test]
-fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
+fn a_blank_seed_creates_the_world_with_the_random_seed() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     new_world(&mut app);
     type_into(&mut app, Field::Seed, "");
-    let shown = app
-        .world_mut()
-        .query_filtered::<&Text, With<Resolved>>()
-        .single(app.world())
-        .unwrap()
-        .0
-        .clone();
     let random = launcher(&app).form.random_seed;
-    assert_eq!(shown, format!("Random seed: {random}"));
     finish(&mut app);
     let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
         panic!("no World to open");
@@ -3641,4 +3619,24 @@ fn voxel_size_is_one_selector_that_left_right_and_enter_step_through() {
     assert_eq!(launcher(&app).form.voxel_size_m, 1.0, "it wraps");
     step(&mut app, Act::VoxelStep(1), -1);
     assert_eq!(launcher(&app).form.voxel_size_m, 0.25);
+}
+
+#[test]
+fn the_world_step_says_only_what_the_chosen_mode_means() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    for gone in [
+        "Give it a name",
+        "Every Player starts",
+        "Seed: ",
+        "Gather what you place",
+    ] {
+        assert!(!shown(&mut app, gone), "{gone}");
+    }
+    assert!(shown(&mut app, "Take any Material from the Catalogue"));
+    act(&mut app, Act::Mode(GameMode::Survival));
+    assert!(shown(&mut app, "Gather what you place"));
+    assert!(!shown(&mut app, "Take any Material from the Catalogue"));
 }

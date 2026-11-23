@@ -875,7 +875,7 @@ fn edit(
                                 "World name",
                                 Field::Rename,
                                 &l.rename,
-                                "Renaming keeps your terrain and progress.",
+                                "",
                                 "",
                             ));
                             let Some(d) = details else {
@@ -1288,29 +1288,13 @@ fn form(
 
 /// The World step's fields; returns the name field, which takes the focus.
 fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
-    let name = field(
-        col,
-        "World name",
-        Field::Name,
-        &f.name,
-        "Give it a name you\u{2019}ll want to come back to.",
-        "New World",
-    );
+    let name = field(col, "World name", Field::Name, &f.name, "", "New World");
     gap(col, 24.0);
     mode_picks(col, f.game_mode, Act::Mode, None);
     gap(col, 24.0);
     label(col, "World seed");
     gap(col, 8.0);
     seed_field(col, &f.seed);
-    gap(col, 6.0);
-    col.spawn((
-        Resolved,
-        Text::new(f.seed_label()),
-        ui::font(theme::TEXT_SMALL),
-        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-        TextColor(theme::muted()),
-        Pickable::IGNORE,
-    ));
     gap(col, 24.0);
     label(col, "Voxel size \u{00b7} fixed at creation");
     gap(col, 8.0);
@@ -1327,13 +1311,6 @@ fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
                 field(cols, title, field_id, &climate.sizes[at], "", "");
             }
         });
-        gap(col, 6.0);
-        ui::paragraph(
-            col,
-            "Larger values create broader climate regions.",
-            theme::TEXT_SMALL,
-            theme::muted(),
-        );
     }
     name
 }

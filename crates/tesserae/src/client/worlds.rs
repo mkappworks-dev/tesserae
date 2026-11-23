@@ -596,9 +596,6 @@ enum Field {
 }
 
 #[derive(Component)]
-struct Resolved;
-
-#[derive(Component)]
 struct Root;
 
 /// The page's own scrolling column, whose position survives a rebuild of the same page.
@@ -1059,7 +1056,6 @@ fn keys(
 fn sync_fields(
     fields: Query<(&Field, &EditableText), Changed<EditableText>>,
     launcher: Option<ResMut<Launcher>>,
-    mut resolved: Query<&mut Text, With<Resolved>>,
 ) {
     let Some(mut launcher) = launcher else {
         return;
@@ -1087,12 +1083,6 @@ fn sync_fields(
             Field::Search => launcher.bypass_change_detection().search = value,
             Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
             Field::BiomeSearch => launcher.bypass_change_detection().biome_search = value,
-        }
-    }
-    for mut text in &mut resolved {
-        let wanted = launcher.form.seed_label();
-        if text.0 != wanted {
-            text.0 = wanted;
         }
     }
 }
@@ -1188,15 +1178,6 @@ impl Form {
         tesserae_core::seed::resolve(&self.seed)
             .map(|seed| seed.unwrap_or(self.random_seed))
             .map_err(|e| format!("Seed {e}"))
-    }
-
-    fn seed_label(&self) -> String {
-        match self.seed() {
-            Ok(seed) if self.seed.trim().is_empty() => format!("Random seed: {seed}"),
-            Ok(seed) if self.seed.trim().parse::<i128>().is_ok() => format!("Seed: {seed}"),
-            Ok(seed) => format!("Seed from these words: {seed}"),
-            Err(e) => e,
-        }
     }
 }
 
