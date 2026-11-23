@@ -372,7 +372,6 @@ function render() {
   if (state.screen === "play") mapPlayMount();
   drawWorldPreviews();
   syncBulk();
-  padUnderToolbar();
   if (screenPrompts)
     document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
       promptBar(screenPrompts);
@@ -1752,13 +1751,6 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
   setClimate(b.t + move[0], b.h + move[1]);
 });
-// Focus moving through a list scrolls the row clear of the sticky toolbar, not under it.
-function padUnderToolbar() {
-  const bar = $(".list-toolbar");
-  const list =
-    bar?.closest(".world-form.editing .form-main") || bar?.closest(".body");
-  if (list) list.style.scrollPaddingTop = bar.offsetHeight + "px";
-}
 function syncBulk() {
   document.querySelectorAll("[data-bulk]").forEach((box) => {
     box.checked = box.dataset.state === "all";

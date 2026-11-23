@@ -333,24 +333,38 @@
   background: #cf4538;
   border-color: #cf4538;
 }
-/* A list's toolbar stays put while the list scrolls under it. */
-/* Opaque, in the sheet's tone over the scenery: the translucent sheet would let rows show through. */
+/* A list's toolbar stays put because only the list below it scrolls; no backing
+   fill is needed, so the toolbar shares the translucent sheet's tone. */
+.game .menu-sheet .body:has(> .list-toolbar),
+.game .menu-sheet .body:has(> .world-form > .form-main > .list-toolbar) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.game .menu-sheet .body > .world-form:has(> .form-main > .list-toolbar) {
+  flex: 1;
+  min-height: 0;
+}
+.game .menu-sheet .body .form-main:has(> .list-toolbar) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.game .menu-sheet .body .form-main:has(> .list-toolbar) + .form-aside {
+  min-height: 0;
+  overflow: auto;
+}
 .list-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  background: rgb(21 24 24);
+  flex: none;
 }
-/* Sticky offsets count from the scroller's padding edge; reach over the 16px pad so rows don't show above. */
-.game .menu-sheet .body .list-toolbar {
-  top: -16px;
-  margin-top: -16px;
-  padding-top: 16px;
-}
-.game .menu-sheet .body .world-form.editing .list-toolbar {
-  top: 0;
-  margin-top: 0;
-  padding-top: 0;
+.list-toolbar + #mod-results,
+.list-toolbar + #biome-results,
+.list-toolbar + #world-results,
+.list-toolbar + .list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 .list-toolbar .bulk-bar {
   margin: 0;
