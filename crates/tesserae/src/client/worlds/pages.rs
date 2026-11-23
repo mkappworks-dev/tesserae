@@ -2728,7 +2728,7 @@ fn trust_details(
                                 );
                                 caption(head, "runs code");
                             });
-                        for (term, value) in trust_terms(&item.prompt) {
+                        for (term, value) in trust_terms(item.limits) {
                             section
                                 .spawn(Node {
                                     column_gap: Val::Px(12.0),
@@ -2809,61 +2809,27 @@ fn caption(parent: &mut ChildSpawnerCommands, text: impl Into<String>) {
     ));
 }
 
-/// A Trust prompt's permissions and limits as `(term, value)` rows: what an item can and cannot
-/// do, then one row per kind of limit. The header and the closing question are left out.
-pub(super) fn trust_terms(prompt: &str) -> Vec<(String, String)> {
-    let mut can = Vec::new();
-    let mut rows = Vec::new();
-    for line in prompt.split("\n\n").skip(1).flat_map(str::lines) {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with("Trust this exact build") {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("Cannot ") {
-            rows.push(("Cannot".to_owned(), sentence(rest)));
-        } else if let Some((term, value)) = line.split_once(": ") {
-            let term = if term == "Limits" { "Time" } else { term };
-            rows.push((
-                term.to_owned(),
-                grouped(&value.trim_end_matches('.').replace("; ", " \u{b7} ")),
-            ));
-        } else {
-            can.push(sentence(line.strip_prefix("Can ").unwrap_or(line)));
-        }
-    }
-    if !can.is_empty() {
-        rows.insert(0, ("Can".to_owned(), can.join(" ")));
+/// What an item can and cannot do, then one row per kind of limit, as `(term, value)` rows.
+pub(super) fn trust_terms(limits: tesserae_mods::ModLimits) -> Vec<(String, String)> {
+    let can: Vec<String> = tesserae_mods::ABILITIES
+        .iter()
+        .map(|(subject, ability)| match subject {
+            Some(subject) => format!("{subject} can {ability}."),
+            None => sentence(ability) + ".",
+        })
+        .collect();
+    let mut rows = vec![
+        ("Can".to_owned(), can.join(" ")),
+        (
+            "Cannot".to_owned(),
+            sentence(tesserae_mods::INABILITY) + ".",
+        ),
+    ];
+    for row in tesserae_mods::limit_rows(limits) {
+        let parts = row.parts(ui::grouped).join(" \u{b7} ");
+        rows.push((row.name.to_owned(), parts));
     }
     rows
-}
-
-/// `200000000` as `200,000,000`; runs of up to three digits are left alone.
-fn grouped(s: &str) -> String {
-    let mut out = String::new();
-    let mut digits = String::new();
-    let flush = |digits: &mut String, out: &mut String| {
-        if digits.len() > 3 {
-            for (i, c) in digits.chars().enumerate() {
-                if i > 0 && (digits.len() - i).is_multiple_of(3) {
-                    out.push(',');
-                }
-                out.push(c);
-            }
-        } else {
-            out.push_str(digits);
-        }
-        digits.clear();
-    };
-    for c in s.chars() {
-        if c.is_ascii_digit() {
-            digits.push(c);
-        } else {
-            flush(&mut digits, &mut out);
-            out.push(c);
-        }
-    }
-    flush(&mut digits, &mut out);
-    out
 }
 
 fn sentence(s: &str) -> String {

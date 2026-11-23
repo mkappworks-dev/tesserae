@@ -4293,9 +4293,8 @@ fn the_trust_page_shows_limits_only_under_details() {
 }
 
 #[test]
-fn trust_terms_read_what_an_item_can_do_and_each_kind_of_limit_from_its_prompt() {
-    let prompt = &Installed::fake(None, &["terra"]).untrusted[0].prompt;
-    let terms = pages::trust_terms(prompt);
+fn trust_terms_list_what_an_item_can_do_and_each_kind_of_limit() {
+    let terms = pages::trust_terms(tesserae_mods::ModLimits::HOST);
     let names: Vec<&str> = terms.iter().map(|(t, _)| t.as_str()).collect();
     assert_eq!(
         names,

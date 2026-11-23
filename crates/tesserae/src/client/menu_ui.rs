@@ -81,6 +81,19 @@ pub(super) fn declared_title(name: &str) -> String {
     title(&name.rsplit(':').next().unwrap_or(name).replace('_', " "))
 }
 
+/// A count with its thousands set apart, as the prototype writes them.
+pub(super) fn grouped(count: u64) -> String {
+    let digits = count.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 pub(super) fn matches(query: &str, text: &str) -> bool {
     let text = text.to_lowercase();
     query
@@ -1464,6 +1477,19 @@ fn dashed_border_colors(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn counts_set_their_thousands_apart() {
+        for (n, text) in [
+            (0, "0"),
+            (999, "999"),
+            (1000, "1,000"),
+            (1234567, "1,234,567"),
+        ] {
+            assert_eq!(grouped(n), text);
+        }
+    }
+
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)

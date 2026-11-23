@@ -119,7 +119,10 @@ pub(super) enum Outcome {
 impl Outcome {
     pub(super) fn text(self) -> String {
         match self {
-            Outcome::Whole(count) => format!("{} Voxels, placed whole, free.", grouped(count)),
+            Outcome::Whole(count) => format!(
+                "{} Voxels, placed whole, free.",
+                super::menu_ui::grouped(count as u64)
+            ),
             Outcome::Waiting => "Waiting for Chunks to load…".to_owned(),
             // The shared reason speaks of single Voxels placed without an Item.
             Outcome::Refused(RejectReason::CreativeOnly) => {
@@ -128,19 +131,6 @@ impl Outcome {
             Outcome::Refused(reason) => reason.message().to_owned(),
         }
     }
-}
-
-/// A count with its thousands set apart, as the prototype writes them.
-pub(super) fn grouped(count: usize) -> String {
-    let digits = count.to_string();
-    let mut out = String::new();
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
 }
 
 /// The Tool's choices: which Template, how turned, and whether the list is up.
@@ -1417,17 +1407,5 @@ mod tests {
         assert_eq!(turned_size_m(cottage, Turn::NONE), [7.0, 8.0, 5.0]);
         assert_eq!(turned_size_m(cottage, Turn::new(1)), [5.0, 8.0, 7.0]);
         assert_eq!(turned_size_m(cottage, Turn::new(2)), [7.0, 8.0, 5.0]);
-    }
-
-    #[test]
-    fn counts_set_their_thousands_apart() {
-        for (n, text) in [
-            (0, "0"),
-            (999, "999"),
-            (1000, "1,000"),
-            (1234567, "1,234,567"),
-        ] {
-            assert_eq!(grouped(n), text);
-        }
     }
 }

@@ -109,18 +109,6 @@ pub(super) fn metres(m: f32) -> String {
     }
 }
 
-fn thousands(n: usize) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
 // The mockup's translucent whites over the sheet, made opaque: Bevy blends alpha in linear
 // space, which would draw them several times brighter.
 const TABLE_EDGE: Color = Color::srgb_u8(0x23, 0x23, 0x24);
@@ -189,7 +177,9 @@ fn table(list: &mut ChildSpawnerCommands, levels: &[Level], reach_m: f32) {
                         format!("{} coarse levels to {}", coarse.len(), metres(reach_m)),
                     )
                 });
-            cell(cells, 3, |c| bold(c, thousands(total_chunks)));
+            cell(cells, 3, |c| {
+                bold(c, crate::client::menu_ui::grouped(total_chunks as u64))
+            });
             cell(cells, 4, |c| bold(c, format!("{total_mb:.0} MB")));
         });
     });
@@ -262,7 +252,9 @@ fn level_row(table: &mut ChildSpawnerCommands, level: &Level, reach_m: f32) {
             cell(cells, 3, full_detail);
             cell(cells, 4, |c| plain(c, "—"));
         } else {
-            cell(cells, 3, |c| plain(c, thousands(level.chunks)));
+            cell(cells, 3, |c| {
+                plain(c, crate::client::menu_ui::grouped(level.chunks as u64))
+            });
             cell(cells, 4, |c| plain(c, format!("{:.1} MB", level.mb)));
         }
     });
@@ -361,8 +353,5 @@ mod tests {
         assert_eq!(metres(160.0), "160 m");
         assert_eq!(metres(3000.0), "3 km");
         assert_eq!(metres(1536.0), "1.5 km");
-        assert_eq!(thousands(7), "7");
-        assert_eq!(thousands(1234), "1,234");
-        assert_eq!(thousands(123_456), "123,456");
     }
 }
