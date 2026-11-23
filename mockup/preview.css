@@ -863,7 +863,7 @@
   margin-top: 4px;
 }
 .biome-panel.compact .climate-plot .climate-map {
-  aspect-ratio: 3 / 1;
+  aspect-ratio: 2 / 1;
 }
 .biome-panel.compact .axis-x {
   margin-top: 4px;

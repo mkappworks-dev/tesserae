@@ -57,3 +57,15 @@ states set from the browser console where there is no route):
   line each; the panel's body scrolls at 1280×720 while Reset and Done stay
   fixed. The selected Biome row takes the selected background and border, not
   only its left edge.
+
+- Biomes panel Ground, after review: the climate map is 2:1. Surface, Soil and
+  Rock are dropdowns whose field and options show the Material's colour swatch;
+  the open list has a search field that keeps focus and filters as you type
+  (arrows move, Enter picks, Esc closes the list only). The mock lists 16
+  Materials (`GROUND` in `mockup/preview.js`, which the dioramas also read).
+  `customSelect(…, { search })` adds the search; a swatch comes from an option's
+  `swatch`. Esc with any dropdown open no longer also closes the Biome panel.
+- A Biome's default Sky is `#87ceeb` and Fog `#ffffff`. A Game's Biome that
+  declares its own keeps them (Tidewater, Ember, Lumen, Meadow palettes);
+  Terra's declare none, so Terra shows the defaults, and Reset and Reset all
+  restore them.
