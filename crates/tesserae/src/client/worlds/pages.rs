@@ -897,15 +897,11 @@ fn edit(
                                 .with_children(|picks| {
                                     mode_picks(
                                         picks,
-                                        "Game mode",
-                                        if waiting {
-                                            "Mode changes take effect when the World next opens."
-                                        } else {
-                                            "Switching to Survival keeps what you carry. Health and hunger start full."
-                                        },
                                         l.modes.own,
                                         Act::EditMode,
-                                        true,
+                                        waiting.then_some(
+                                            "Mode changes take effect when the World next opens.",
+                                        ),
                                     );
                                 });
                             for line in &installed.unmet(d) {
@@ -1045,114 +1041,91 @@ fn columns(
         .with_children(children);
 }
 
-/// Creative and Survival as two cards, each with what it means unless `compact`.
+/// What each Game mode means, in the one line under the control.
+const MODES: [(GameMode, &str, &str); 2] = [
+    (
+        GameMode::Creative,
+        "Creative",
+        "Take any Material from the Catalogue. Placing is free. No damage or hunger.",
+    ),
+    (
+        GameMode::Survival,
+        "Survival",
+        "Gather what you place. Health and hunger matter, and the Catalogue is closed.",
+    ),
+];
+
+/// Creative | Survival as one segmented control, Left and Right moving between the halves, with
+/// `note` under it, or else what the chosen mode means.
 fn mode_picks(
     parent: &mut ChildSpawnerCommands,
-    legend: &str,
-    hint: &str,
     chosen: GameMode,
     act: fn(GameMode) -> Act,
-    compact: bool,
+    note: Option<&str>,
 ) {
+    label(parent, "Game mode");
+    gap(parent, 8.0);
     parent
-        .spawn(Node {
-            margin: UiRect::bottom(Val::Px(8.0)),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|l| label(l, legend));
-    parent
-        .spawn(Node {
-            display: Display::Grid,
-            grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(1.0)],
-            column_gap: Val::Px(10.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|grid| {
-            for (mode, name, about) in [
-                (
-                    GameMode::Creative,
-                    "Creative",
-                    "Take any Material from the Catalogue. Placing is free. No damage or hunger.",
-                ),
-                (
-                    GameMode::Survival,
-                    "Survival",
-                    "Gather what you place. Health and hunger matter, and the Catalogue is closed.",
-                ),
-            ] {
+        .spawn((
+            BackgroundColor(theme::MODE),
+            BorderColor::all(theme::edge()),
+            Node {
+                display: Display::Grid,
+                grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(1.0)],
+                column_gap: Val::Px(2.0),
+                padding: UiRect::all(Val::Px(3.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|segments| {
+            for (mode, name, _) in MODES {
                 let selected = chosen == mode;
-                let (face, edge) = if selected {
-                    (theme::MODE_CHOSEN, theme::MODE_CHOSEN_EDGE)
+                let (fill, ink) = if selected {
+                    (theme::SAGE, theme::SAGE_INK)
                 } else {
-                    (theme::MODE, theme::edge())
+                    (Color::NONE, theme::muted())
                 };
-                grid.spawn((
+                let mut half = segments.spawn((
                     bevy::ui_widgets::Button,
-                    TabIndex(0),
+                    super::super::pad::Stepper,
                     act(mode),
                     Pick {
-                        fill: face,
-                        edge,
-                        hover: (!selected).then_some((face, theme::MODE_HOVER_EDGE)),
+                        fill,
+                        edge: Color::NONE,
+                        hover: (!selected).then_some((theme::MODE_HOVER, Color::NONE)),
                     },
-                    BackgroundColor(face),
-                    BorderColor::all(edge),
+                    BackgroundColor(fill),
                     Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(5.0),
-                        padding: if compact {
-                            UiRect::axes(Val::Px(16.0), Val::Px(10.0))
-                        } else {
-                            UiRect::axes(Val::Px(16.0), Val::Px(14.0))
-                        },
-                        border: UiRect::all(Val::Px(theme::RULE)),
-                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
+                        min_height: Val::Px(34.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
-                ))
-                .with_children(|card| {
-                    if selected {
-                        // The prototype's inset ring, which doubles the edge.
-                        card.spawn((
-                            BorderColor::all(theme::MODE_CHOSEN_EDGE),
-                            Node {
-                                border: UiRect::all(Val::Px(theme::RULE)),
-                                border_radius: BorderRadius::all(Val::Px(
-                                    theme::RADIUS_PANEL - theme::RULE,
-                                )),
-                                ..fill()
-                            },
-                            Pickable::IGNORE,
-                        ));
-                    }
-                    ui::weighted_text(
-                        card,
-                        if selected {
-                            format!("{name} \u{2713}")
-                        } else {
-                            name.to_owned()
-                        },
-                        theme::TEXT_MODE_NAME,
-                        theme::SEMIBOLD,
-                        theme::INK,
-                    );
-                    if !compact {
-                        card.spawn((
-                            Text::new(about),
-                            theme::font(theme::TEXT_MODE_ABOUT),
-                            bevy::text::LineHeight::RelativeToFont(1.45),
-                            TextColor(theme::muted()),
-                            Pickable::IGNORE,
-                        ));
-                    }
+                ));
+                // As a radio group: Tab reaches the chosen half only, and Left and Right the other.
+                if selected {
+                    half.insert(TabIndex(0));
+                }
+                half.with_children(|h| {
+                    ui::weighted_text(h, name, 13.0, theme::SEMIBOLD, ink);
                 });
             }
         });
     gap(parent, 8.0);
-    ui::paragraph(parent, hint, theme::TEXT_SMALL, theme::muted());
-    gap(parent, 6.0);
+    let about = MODES
+        .iter()
+        .find(|(mode, ..)| *mode == chosen)
+        .map_or("", |(.., about)| about);
+    ui::paragraph(
+        parent,
+        note.unwrap_or(about),
+        theme::TEXT_SMALL,
+        theme::muted(),
+    );
 }
 
 fn problem(parent: &mut ChildSpawnerCommands, message: Option<&String>) {
@@ -1324,14 +1297,7 @@ fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
         "New World",
     );
     gap(col, 24.0);
-    mode_picks(
-        col,
-        "Game mode",
-        "Every Player starts in this mode. You can change it later in Edit World.",
-        f.game_mode,
-        Act::Mode,
-        false,
-    );
+    mode_picks(col, f.game_mode, Act::Mode, None);
     gap(col, 24.0);
     label(col, "World seed");
     gap(col, 8.0);

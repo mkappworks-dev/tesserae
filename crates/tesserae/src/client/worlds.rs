@@ -560,6 +560,22 @@ pub(super) enum Act {
     SelectShownBiomes,
 }
 
+impl Act {
+    /// What Left (`by` -1) or Right (+1) does on a [`super::pad::Stepper`] that carries this act.
+    fn stepped(&self, by: i32) -> Option<Act> {
+        let mode = if by < 0 {
+            GameMode::Creative
+        } else {
+            GameMode::Survival
+        };
+        match self {
+            Act::Mode(_) => Some(Act::Mode(mode)),
+            Act::EditMode(_) => Some(Act::EditMode(mode)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub(super) struct Queue(pub(super) Vec<Act>);
 
@@ -765,6 +781,7 @@ fn logic(app: &mut App) {
         .init_resource::<Thumbnails>()
         .init_resource::<terrain::TerrainPreview>()
         .add_observer(activate)
+        .add_observer(step)
         .add_observer(slide)
         .add_observer(biomes::press_map)
         .add_observer(biomes::drag_map)
@@ -952,6 +969,16 @@ const NO_GAME: &str = "Install a Game in the Mods folder to create a World.";
 fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     if let Ok(act) = acts.get(event.entity) {
         queue.0.push(act.clone());
+    }
+}
+
+fn step(event: On<super::pad::Step>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
+    if let Some(act) = acts
+        .get(event.entity)
+        .ok()
+        .and_then(|a| a.stepped(event.by))
+    {
+        queue.0.push(act);
     }
 }
 

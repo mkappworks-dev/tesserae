@@ -53,6 +53,7 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 default: mode,
                 own: mode,
             };
+            l.refocus = Some(Act::EditMode(mode));
             l.version += 1;
         }
         Act::SaveName => {

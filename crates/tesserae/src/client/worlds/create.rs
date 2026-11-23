@@ -140,6 +140,7 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
         }
         Act::Mode(mode) => {
             l.form.game_mode = mode;
+            l.refocus = Some(Act::Mode(mode));
             l.version += 1;
         }
         Act::Create => {

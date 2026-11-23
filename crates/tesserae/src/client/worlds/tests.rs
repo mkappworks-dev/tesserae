@@ -3586,3 +3586,36 @@ fn a_mods_summary_line_names_each_kind_it_adds_and_leaves_out_none() {
     );
     assert_eq!(pages::adds(&summary(0, 0, 0)), None);
 }
+
+/// Left (`by` -1) or Right (+1) on the control that carries `on`, as `pad::navigate` sends it.
+fn step(app: &mut App, on: Act, by: i32) {
+    let entity = app
+        .world_mut()
+        .query::<(Entity, &Act)>()
+        .iter(app.world())
+        .find_map(|(e, a)| (*a == on).then_some(e))
+        .unwrap_or_else(|| panic!("no {on:?} control on screen"));
+    app.world_mut()
+        .trigger(super::super::pad::Step { entity, by });
+    app.update();
+}
+
+#[test]
+fn left_and_right_change_the_game_mode_and_keep_the_focus_on_it() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    step(&mut app, Act::Mode(GameMode::Creative), 1);
+    assert_eq!(launcher(&app).form.game_mode, GameMode::Survival);
+    assert_eq!(focused_act(&app), Some(Act::Mode(GameMode::Survival)));
+    step(&mut app, Act::Mode(GameMode::Survival), 1);
+    assert_eq!(
+        launcher(&app).form.game_mode,
+        GameMode::Survival,
+        "Right stays on the last"
+    );
+    step(&mut app, Act::Mode(GameMode::Survival), -1);
+    assert_eq!(launcher(&app).form.game_mode, GameMode::Creative);
+    assert_eq!(focused_act(&app), Some(Act::Mode(GameMode::Creative)));
+}
