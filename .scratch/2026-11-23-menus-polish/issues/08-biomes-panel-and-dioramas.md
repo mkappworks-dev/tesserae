@@ -19,4 +19,4 @@ The Biomes side panel matches the approved mockup (compact, with the sliders and
 
 ## Comments
 
-A Ground dropdown's open list keeps its full height while search filters it (user decision), so a list opening upward stays attached to its field.
+A Ground dropdown's open list shrinks to its search results (user decision); a list that opens above its field hangs from its bottom edge so it stays attached.
