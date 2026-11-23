@@ -90,7 +90,13 @@ function layoutPreviewSvg() {
 function layoutStatus() {
   ensureLayout();
   const s = layoutSummary();
-  return `<aside class="layout-status"><span>${icon("layout", 18)} Layout ready</span><b>${s.kind} · ${s.count}</b><small>${s.dimensions.join(" × ")} m</small><div class="layout-keys">${[["L", "Edit"], ["⌫", "Exit"], ["RMB", "Place"]].map(([k, l]) => `<span><kbd>${k}</kbd> ${l}</span>`).join("")}</div></aside>`;
+  return `<aside class="layout-status"><span>${icon("layout", 18)} Layout ready</span><b>${s.kind} · ${s.count}</b><small>${s.dimensions.join(" × ")} m</small><div class="layout-keys">${[
+    ["L", "Edit"],
+    ["⌫", "Exit"],
+    ["RMB", "Place"],
+  ]
+    .map(([k, l]) => `<span><kbd>${k}</kbd> ${l}</span>`)
+    .join("")}</div></aside>`;
 }
 const LAYOUT_AXES = [
   ["X", ["East", "West"]],

@@ -2270,12 +2270,11 @@ function structureList() {
     })
     .join("");
 }
-function structuresPage() {
+function structureStage({ views = true } = {}) {
   ensureStructure();
   const s = state.structure,
     tally = structureTally(),
     tpl = TEMPLATES[s.template],
-    [tone, text] = structureOutcome(),
     has = storeysOf(tally.t),
     seg = (items, key, action, cls = "") =>
       `<div class="layout-method ${cls}" aria-label="${key}">${Object.entries(
@@ -2298,11 +2297,28 @@ function structuresPage() {
     s.view === "placing"
       ? `<div class="layout-ghost">${structureSvg()}</div>`
       : `<div class="layout-ghost"><canvas id="structure-canvas" class="structure-canvas" role="img" aria-label="${tpl.name} from ${s.view}, facing ${FACING[s.turn]}"></canvas></div>`;
+  return `<div class="layout-stage"><div class="layout-stage-label"><span class="item-eyebrow">${s.view === "placing" ? "WORLD PREVIEW" : `${tpl.game.toUpperCase()} TEMPLATE`}</span><h1>${tpl.name}</h1><p>${tally.size.map((n) => n.toFixed(1)).join(" × ")} metres · facing ${FACING[s.turn]} · ${structureNumber(tally.total)} Voxels</p>${views ? seg(VIEWS, "view", "structure-view", "structure-views") : ""}${s.view === "inside" ? seg(floors, "floor", "structure-floor", "structure-views") : ""}</div>${stage}<div class="layout-preview-caption">${s.view === "placing" ? "Illustrative preview · no terrain is edited" : `Drawn with ${tpl.game}'s exported textures · its glass, doors, chests, lamps and Stations are its own`}</div></div>`;
+}
+function structuresPage() {
+  ensureStructure();
+  const s = state.structure,
+    tally = structureTally(),
+    tpl = TEMPLATES[s.template],
+    [tone, text] = structureOutcome(),
+    seg = (items, key, action, cls = "") =>
+      `<div class="layout-method ${cls}" aria-label="${key}">${Object.entries(
+        items,
+      )
+        .map(
+          ([v, label]) =>
+            `<button class="${s[key] === v ? "active" : ""}" data-action="${action}" data-value="${v}" aria-pressed="${s[key] === v}">${label}</button>`,
+        )
+        .join("")}</div>`;
   const games = Object.keys(GAME_TEMPLATES).reduce(
     (o, g) => ({ ...o, [g]: g }),
     {},
   );
-  return `<div class="layout-workspace"><div class="layout-stage"><div class="layout-stage-label"><span class="item-eyebrow">${s.view === "placing" ? "WORLD PREVIEW" : `${tpl.game.toUpperCase()} TEMPLATE`}</span><h1>${tpl.name}</h1><p>${tally.size.map((n) => n.toFixed(1)).join(" × ")} metres · facing ${FACING[s.turn]} · ${structureNumber(tally.total)} Voxels</p>${seg(VIEWS, "view", "structure-view", "structure-views")}${s.view === "inside" ? seg(floors, "floor", "structure-floor", "structure-views") : ""}</div>${stage}<div class="layout-preview-caption">${s.view === "placing" ? "Illustrative preview · no terrain is edited" : `Drawn with ${tpl.game}'s exported textures · its glass, doors, chests, lamps and Stations are its own`}</div></div><section class="layout-panel" aria-label="Place Tool"><header><div><p class="item-eyebrow">PLACE TOOL</p><h2>Structures</h2></div><button class="item-close" data-action="structure-close" aria-label="Close Structures">${icon("close")}</button></header><div class="layout-scroll" tabindex="0"><p class="item-eyebrow">EXAMPLE GAME</p>${seg(games, "game", "structure-game", "structure-games")}<p class="item-eyebrow">TEMPLATES · ${structureGame().toUpperCase()} · ${GAME_TEMPLATES[structureGame()].length}</p><div class="structure-list">${structureList()}</div><p class="item-eyebrow">TURN</p><div class="structure-turn"><button data-action="structure-turn" aria-label="Turn a quarter">${icon("reverse", 16)} Turn · R</button><span>Facing <b>${FACING[s.turn]}</b></span></div>${
+  return `<div class="layout-workspace">${structureStage()}<section class="layout-panel" aria-label="Place Tool"><header><div><p class="item-eyebrow">PLACE TOOL</p><h2>Structures</h2></div><button class="item-close" data-action="structure-close" aria-label="Close Structures">${icon("close")}</button></header><div class="layout-scroll" tabindex="0"><p class="item-eyebrow">EXAMPLE GAME</p>${seg(games, "game", "structure-game", "structure-games")}<p class="item-eyebrow">TEMPLATES · ${structureGame().toUpperCase()} · ${GAME_TEMPLATES[structureGame()].length}</p><div class="structure-list">${structureList()}</div><p class="item-eyebrow">TURN</p><div class="structure-turn"><button data-action="structure-turn" aria-label="Turn a quarter">${icon("reverse", 16)} Turn · R</button><span>Facing <b>${FACING[s.turn]}</b></span></div>${
     s.view === "placing"
       ? `<p class="item-eyebrow">WHAT PLACING DOES</p><div class="structure-keys">${structureLegend(tally)}</div>`
       : `<p class="item-eyebrow">MATERIALS · ALL OBTAINABLE IN ${tpl.game.toUpperCase()}</p><div class="structure-keys">${structureMaterials()}</div>`

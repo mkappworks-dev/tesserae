@@ -700,3 +700,60 @@ button.lp-dir:hover {
 .lp-total.over b {
   color: #e9aaa1;
 }
+.place-side .segmented button {
+  flex: 1;
+}
+.pt-templates {
+  min-height: 0;
+  flex: 0 1 auto;
+}
+.pt-list {
+  display: grid;
+  gap: 4px;
+  max-height: 264px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.pt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 4px 8px 4px 4px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pt-row:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+.pt-row.on {
+  border-color: #c1cdb5;
+  background: rgb(193 205 181 / 0.12);
+}
+.pt-row .structure-thumb {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+.pt-row b {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pt-row small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.lp-row.pt-turn {
+  grid-template-columns: 44px 1fr 30px 30px;
+}
+.place-side .structure-outcome {
+  margin-top: 14px;
+}

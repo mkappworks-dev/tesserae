@@ -371,6 +371,9 @@ function render() {
   } else if (state.screen === "structures") {
     screen.innerHTML = structuresPage();
     drawStructure();
+  } else if (state.screen === "place") {
+    screen.innerHTML = placePage();
+    drawStructure();
   }
   if (state.screen === "play") mapPlayMount();
   drawWorldPreviews();
@@ -1030,9 +1033,15 @@ const TRUST_TERMS = [
   ],
   ["Cannot", "Access files, the network or the environment."],
   ["Time", "200,000,000 fuel per call · yields every 10,000,000 · 250 ms"],
-  ["Memory", "64 MiB per memory · 10,000 table elements · 4 instances, memories and tables"],
+  [
+    "Memory",
+    "64 MiB per memory · 10,000 table elements · 4 instances, memories and tables",
+  ],
   ["Commands", "1,024 per batch · 65,536 Voxels per call · 32,768 per fill"],
-  ["Content", "248 Materials and 252 Shapes in all · 128 of either per Mod · 32-byte names"],
+  [
+    "Content",
+    "248 Materials and 252 Shapes in all · 128 of either per Mod · 32-byte names",
+  ],
 ];
 /* Closed by default so the modal fits the window; the terms scroll inside it when open. */
 function trustDetails(items) {
@@ -1087,6 +1096,7 @@ function action(name, value) {
   if (mapAction(name, value)) return;
   if (layoutAction(name, value)) return;
   if (structuresAction(name, value)) return;
+  if (placeAction(name, value)) return;
   if (craftingAction(name, value)) return;
   if (inventoryAction(name, value)) return;
   if (name.startsWith("settings-") && settingsAction(name, value)) return;
@@ -2027,6 +2037,7 @@ const prototypeScreens = [
   { value: "station", label: "Workbench (Station)" },
   { value: "container", label: "Chest (Container)" },
   { value: "layout", label: "Quick layout overlay" },
+  { value: "place", label: "Place Tool overlay" },
   { value: "play", label: "Gameplay HUD" },
   { value: "death", label: "Death screen" },
   { value: "pause", label: "In-game menu" },
