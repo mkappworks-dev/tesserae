@@ -437,6 +437,8 @@ pub(super) struct MenuSheet<'a> {
     pub title: &'a str,
     pub subtitle: Option<&'a str>,
     pub height: SheetHeight,
+    /// Up to the window's width rather than the reading width, for a grid of tiles.
+    pub wide: bool,
 }
 
 /// How tall a sheet stands in its row.
@@ -511,12 +513,16 @@ pub(super) fn left_to_right(near: Color, far: Color) -> BackgroundGradient {
     ])
 }
 
+const SHEET: f32 = 1180.0;
+const WIDE_SHEET: f32 = 1280.0;
+
 pub(super) fn sheet_with_foot(
     main: &mut ChildSpawnerCommands,
     MenuSheet {
         title,
         subtitle,
         height,
+        wide,
     }: MenuSheet,
     scroll: impl Bundle,
     body: impl FnOnce(&mut ChildSpawnerCommands),
@@ -526,7 +532,7 @@ pub(super) fn sheet_with_foot(
         sheet_fill(),
         Node {
             flex_grow: 1.0,
-            max_width: Val::Px(1180.0),
+            max_width: Val::Px(if wide { WIDE_SHEET } else { SHEET }),
             min_height: Val::Px(0.0),
             max_height: Val::Percent(100.0),
             align_self: match height {
@@ -1275,6 +1281,7 @@ mod tests {
                         title: "Choose a Game",
                         subtitle: Some("It shapes the land."),
                         height: SheetHeight::Steps,
+                        wide: false,
                     },
                     Some(("Next", Act::Play)),
                     (),
