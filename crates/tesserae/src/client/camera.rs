@@ -136,8 +136,10 @@ fn show_hint(
     labels: Res<super::actions::Labels>,
     touch: Res<super::touch::TouchFrame>,
     covers: super::menu::Covers,
-    dead: Option<Res<super::death::Dead>>,
-    layout: Option<Res<super::layout_menu::LayoutMenu>>,
+    (dead, layout): (
+        Option<Res<super::death::Dead>>,
+        Option<Res<super::layout_menu::LayoutMenu>>,
+    ),
 ) {
     // Covering screens and the death screen free the cursor too, but say where to go themselves;
     // Quick layout's prompt bar takes the corner the hint sits in.
