@@ -91,7 +91,7 @@ pub(super) fn spawn(
                     title(main, l, installed, logo);
                     None
                 }
-                Screen::Worlds => worlds(main, l, installed),
+                Screen::Worlds => worlds(main, l, installed, thumbnails),
                 Screen::Library => library_page(main, installed, thumbnails, scroll),
                 Screen::Create(Step::Game) => game_page(main, l, installed, thumbnails, scroll),
                 Screen::Create(Step::World) => form(main, l, installed, scroll),
@@ -489,7 +489,12 @@ fn page_scroll(scroll: Vec2) -> impl Bundle {
 const SEARCH_FROM: usize = 8;
 
 /// The Worlds as save-slot tiles, New World first; returns the slot to focus.
-fn worlds(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
+fn worlds(
+    main: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    thumbnails: &Thumbnails,
+) -> Option<Entity> {
     let mut focus = None;
     let sheet = frame::MenuSheet::<()> {
         title: "Worlds",
@@ -538,7 +543,7 @@ fn worlds(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) 
                 focus = Some(fresh);
             }
             for entry in &l.entries {
-                let slot = world_slot(grid, entry, installed);
+                let slot = world_slot(grid, entry, installed, thumbnails);
                 if focus.is_none() || l.selected.as_deref() == Some(entry.path.as_path()) {
                     focus = Some(slot);
                 }
@@ -644,13 +649,18 @@ fn slot_name(tile: &mut ChildSpawnerCommands, name: &str) {
     ));
 }
 
-/// Where the saved World's thumbnail goes (ticket 07); until then a neutral landscape.
+/// The World's saved thumbnail, or a neutral landscape for a World saved without one.
 #[derive(Component)]
 pub(super) struct SlotPicture;
 
 /// One World: its picture, name, Game and when it was played, with Edit and
 /// Delete icons that show while the slot is lit. Enter or a click plays it.
-fn world_slot(grid: &mut ChildSpawnerCommands, entry: &Entry, installed: &Installed) -> Entity {
+fn world_slot(
+    grid: &mut ChildSpawnerCommands,
+    entry: &Entry,
+    installed: &Installed,
+    thumbnails: &Thumbnails,
+) -> Entity {
     let name = entry.name().unwrap_or(UNNAMED);
     let unmet = entry
         .details()
@@ -671,15 +681,25 @@ fn world_slot(grid: &mut ChildSpawnerCommands, entry: &Entry, installed: &Instal
         words,
     );
     tile.with_children(|t| {
-        let picture = thumbnail(
-            t,
-            Node {
-                width: Val::Percent(100.0),
-                aspect_ratio: Some(16.0 / 9.0),
-                ..default()
-            },
-        );
-        t.commands().entity(picture).insert(SlotPicture);
+        let node = Node {
+            width: Val::Percent(100.0),
+            aspect_ratio: Some(16.0 / 9.0),
+            ..default()
+        };
+        match thumbnails.world(&entry.path) {
+            Some(saved) => {
+                t.spawn((
+                    SlotPicture,
+                    ImageNode::new(saved.clone()),
+                    node,
+                    Pickable::IGNORE,
+                ));
+            }
+            None => {
+                let picture = thumbnail(t, node);
+                t.commands().entity(picture).insert(SlotPicture);
+            }
+        }
         slot_name(t, name);
         let small = |t: &mut ChildSpawnerCommands, value: String, colour: Color| {
             t.spawn((

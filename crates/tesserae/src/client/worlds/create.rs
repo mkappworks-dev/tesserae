@@ -519,6 +519,9 @@ pub(super) fn create(
     };
     match library::create(worlds, &sidecar) {
         Ok(path) => {
+            if let Some((_, source)) = &l.terrain {
+                saved::draw(path.clone(), std::sync::Arc::clone(source), &sidecar);
+            }
             relaunch.0 = Some(Target::World(path));
             l.show(Screen::Opening(name));
         }

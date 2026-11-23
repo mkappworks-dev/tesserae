@@ -1703,6 +1703,61 @@ fn the_world_step_draws_the_terrain_preview_and_redraws_it_off_the_main_thread_f
     );
 }
 
+/// The picture on the World's save slot, `None` while it shows the neutral landscape.
+fn slot_picture(app: &mut App, path: &Path) -> Option<Vec<u8>> {
+    let slot = app
+        .world_mut()
+        .query::<(Entity, &Slot)>()
+        .iter(app.world())
+        .find_map(|(e, s)| (s.0.as_deref() == Some(path)).then_some(e))
+        .expect("the World has a slot");
+    let handle = app
+        .world_mut()
+        .query_filtered::<(&ImageNode, &ChildOf), With<pages::SlotPicture>>()
+        .iter(app.world())
+        .find_map(|(image, parent)| (parent.parent() == slot).then(|| image.image.clone()))?;
+    app.world()
+        .resource::<Assets<Image>>()
+        .get(&handle)?
+        .data
+        .clone()
+}
+
+/// Waits for the thumbnail creation renders on another thread.
+fn saved_thumbnail(path: &Path) {
+    let file = path.join(library::THUMBNAIL);
+    let start = std::time::Instant::now();
+    while !file.exists() {
+        assert!(start.elapsed().as_secs() < 120, "no thumbnail was saved");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_new_worlds_slot_shows_the_terrain_it_was_created_with_without_drawing_it_again() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    app.insert_resource(Previewer(fake_terrain));
+    app.update();
+    new_world(&mut app);
+    type_into(&mut app, Field::Seed, "7");
+    drawn(&mut app);
+    let preview = terrain_shown(&mut app).expect("a preview is shown");
+    finish(&mut app);
+    let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
+        panic!("no World to open");
+    };
+    saved_thumbnail(&path);
+
+    // A later visit has no Generator to draw with: the slot can only show what was saved.
+    let mut later = self::app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    later.init_resource::<Assets<Image>>();
+    later.update();
+    act(&mut later, Act::Worlds);
+    assert_eq!(slot_picture(&mut later, &path), Some(preview));
+}
+
 #[test]
 fn reset_restores_the_declared_biomes_and_untouched_biomes_store_nothing() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));

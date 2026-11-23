@@ -120,7 +120,7 @@ pub(super) fn draw(
     preview.drawing = Some((wanted, task));
 }
 
-fn image(picture: Picture) -> Image {
+pub(super) fn image(picture: Picture) -> Image {
     Image::new(
         Extent3d {
             width: picture.width,

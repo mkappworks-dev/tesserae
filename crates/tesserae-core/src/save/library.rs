@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use super::{Error, WorldId};
 
 pub const SIDECAR: &str = "world.json";
+/// The terrain drawn when the World was created; display data, absent in older Worlds.
+pub const THUMBNAIL: &str = "thumbnail.png";
 pub const MAX_NAME_CHARS: usize = 64;
 pub const DEFAULT_NAME: &str = "New World";
 
