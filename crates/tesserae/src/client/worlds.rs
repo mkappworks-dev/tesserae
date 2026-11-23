@@ -3,6 +3,7 @@
 //! opening one hands it to the loader.
 
 mod biomes;
+mod colour;
 mod create;
 mod diorama;
 mod edit_world;
@@ -196,8 +197,6 @@ struct BiomesDraft {
     /// Whether the edit panel shows the selected Biome, in place of the terrain preview.
     editing: bool,
     resetting: bool,
-    /// Typed text, kept while it does not parse: sky, then fog.
-    colours: [String; 2],
 }
 
 /// The World step's Climate sizes: the Game's, and the player's typed text.
@@ -258,7 +257,6 @@ impl BiomesDraft {
             selected: 0,
             editing: false,
             resetting: false,
-            colours: Default::default(),
         };
         draft.reset();
         draft
@@ -282,14 +280,6 @@ impl BiomesDraft {
 
     fn select(&mut self, at: usize) {
         self.selected = at.min(self.choices.len().saturating_sub(1));
-        let own = self.choices.get(self.selected).and_then(|c| c.sky_fog);
-        self.colours = match (own, self.land_around(self.selected)) {
-            (None, Some(_)) => Default::default(),
-            (own, _) => {
-                let sky_fog = own.unwrap_or(SkyFog::DEFAULT);
-                [hex(sky_fog.sky), hex(sky_fog.fog)]
-            }
-        };
     }
 
     /// The sky and fog the World gives Biome `at` where it declares none: the blend of the other
@@ -357,28 +347,8 @@ impl BiomesDraft {
         if !self.choices.is_empty() && self.choices.iter().all(|c| !c.enabled) {
             return Some("Turn on at least one Biome to continue.".into());
         }
-        if self
-            .colours
-            .iter()
-            .any(|t| !t.trim().is_empty() && colour(t).is_none())
-        {
-            return Some("Write colours as #rrggbb.".into());
-        }
         None
     }
-}
-
-fn hex(rgb: [u8; 3]) -> String {
-    format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
-}
-
-fn colour(text: &str) -> Option<[u8; 3]> {
-    let digits = text.trim().trim_start_matches('#');
-    if digits.len() != 6 {
-        return None;
-    }
-    let byte = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
-    Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
 /// A Biome's value the player sets on a slider.
@@ -502,6 +472,7 @@ impl Launcher {
         self.mod_view.pop = None;
         self.biome_view.pop = None;
         self.biome_view.ground = None;
+        self.biome_view.colour = None;
         self.refocus = None;
         self.trust_details = false;
         self.version += 1;
@@ -561,6 +532,12 @@ pub(super) enum Act {
     /// Opens or closes a ground layer's Material dropdown in the edit panel.
     GroundPop(Layer),
     PickGround(Layer, String),
+    /// Opens or closes the Sky or Fog colour picker.
+    ColourPop(colour::Air),
+    /// Picks one of the colour picker's presets, and closes it.
+    Preset(usize),
+    /// Closes the colour picker, keeping its colour.
+    ColourDone,
     /// The edit panel's Done: back to the terrain preview.
     CloseBiome,
     /// Restores the Biome in the edit panel.
@@ -632,8 +609,8 @@ enum Field {
     BiomeSearch,
     /// The open Ground dropdown's search.
     GroundSearch,
-    Sky,
-    Fog,
+    /// The open colour picker's hex.
+    ColourHex,
     TemperatureSize,
     HumiditySize,
 }
@@ -769,6 +746,8 @@ fn review_capture(
                 "biome-sort" => Act::BiomePop(Pop::Sort),
                 "ground" => Act::GroundPop(Layer::Surface),
                 "ground-rock" => Act::GroundPop(Layer::Rock),
+                "sky" => Act::ColourPop(colour::Air::Sky),
+                "fog" => Act::ColourPop(colour::Air::Fog),
                 // The Opening card stays up: no World is handed to the loader.
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {
@@ -840,13 +819,16 @@ fn logic(app: &mut App) {
         .add_observer(slide)
         .add_observer(biomes::press_map)
         .add_observer(biomes::drag_map)
+        .add_observer(colour::nudge)
+        .add_observer(colour::press)
+        .add_observer(colour::drag)
         .add_observer(open_settings)
         .add_observer(dismiss)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(
             Update,
             (
-                keys,
+                (keys, colour::keys),
                 biomes::nudge,
                 sync_fields,
                 highlight,
@@ -862,7 +844,12 @@ fn logic(app: &mut App) {
                 pages::paint_bulk,
                 pages::paint_biomes,
                 diorama::draw,
-                pages::hang_ground_list,
+                (
+                    pages::hang_ground_list,
+                    colour::paint_controls,
+                    colour::paint_picker,
+                    colour::hang,
+                ),
                 placeholders,
                 opening,
                 (
@@ -1062,7 +1049,8 @@ fn step(event: On<super::pad::Step>, acts: Query<&Act>, mut queue: ResMut<Queue>
 fn close_pop(l: &mut Launcher) {
     let icon = (l.mod_view.pop.take().map(Act::ModPop))
         .or_else(|| l.biome_view.pop.take().map(Act::BiomePop))
-        .or_else(|| l.biome_view.ground.take().map(Act::GroundPop));
+        .or_else(|| l.biome_view.ground.take().map(Act::GroundPop))
+        .or_else(|| (l.biome_view.colour.take()).map(|p| Act::ColourPop(p.air)));
     if icon.is_some() {
         l.refocus = icon;
         l.version += 1;
@@ -1087,7 +1075,7 @@ fn keys(
     settings: Option<Res<super::settings::Settings>>,
     launcher: Option<Res<Launcher>>,
     focus: Res<InputFocus>,
-    fields: Query<&Field>,
+    (fields, texts): (Query<&Field>, Query<&EditableText>),
     pad: Option<Res<super::pad::PadInput>>,
     mut queue: ResMut<Queue>,
 ) {
@@ -1135,18 +1123,21 @@ fn keys(
         && let Some(field) = focus.get().and_then(|e| fields.get(e).ok())
     {
         match field {
-            Field::Name
-            | Field::Seed
-            | Field::Sky
-            | Field::Fog
-            | Field::TemperatureSize
-            | Field::HumiditySize => queue.0.push(Act::Next),
+            Field::Name | Field::Seed | Field::TemperatureSize | Field::HumiditySize => {
+                queue.0.push(Act::Next)
+            }
             Field::Rename => queue.0.push(Act::SaveName),
             Field::GroundSearch => {
                 if let Some(layer) = launcher.biome_view.ground
                     && let Some(first) = biomes::ground_matches(&launcher).into_iter().next()
                 {
                     queue.0.push(Act::PickGround(layer, first));
+                }
+            }
+            Field::ColourHex => {
+                let typed = focus.get().and_then(|e| texts.get(e).ok());
+                if typed.is_some_and(|t| colour::parse(&t.value().to_string()).is_some()) {
+                    queue.0.push(Act::ColourDone);
                 }
             }
             Field::Search | Field::ModSearch | Field::BiomeSearch => {}
@@ -1167,11 +1158,13 @@ fn sync_fields(
             Field::Name => launcher.form.name = value,
             Field::Seed => launcher.form.seed = value,
             Field::Rename => launcher.rename = value,
-            Field::Sky | Field::Fog => {
-                // The page keeps the field; rebuilding it would take the focus.
-                let launcher = launcher.bypass_change_detection();
-                if let Some(draft) = launcher.form.biomes.as_mut() {
-                    typed(draft, *field, value);
+            Field::ColourHex => {
+                // The picker keeps the field; rebuilding it would take the focus. Its own refresh
+                // to a colour picked elsewhere is pending, and the old text must not win.
+                let refreshing = (text.pending_edits.iter())
+                    .any(|e| matches!(e, bevy::text::TextEdit::Insert(_)));
+                if !refreshing && let Some(rgb) = colour::parse(&value) {
+                    colour::set_rgb(launcher.bypass_change_detection(), rgb);
                 }
             }
             Field::TemperatureSize | Field::HumiditySize => {
@@ -1247,23 +1240,6 @@ fn placeholders(
     }
 }
 
-/// What typing in one of the Biomes step's colour fields changes.
-fn typed(draft: &mut BiomesDraft, field: Field, value: String) {
-    let at = usize::from(field == Field::Fog);
-    let parsed = colour(&value);
-    draft.colours[at] = value;
-    let selected = draft.selected;
-    let mut pair = draft.shown_sky_fog(selected);
-    if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
-        if at == 0 {
-            pair.sky = rgb;
-        } else {
-            pair.fog = rgb;
-        }
-        choice.sky_fog = Some(pair);
-    }
-}
-
 impl Form {
     /// What the World keeps of the Biomes and Climate steps, or `None` for one made as declared.
     fn edits(&self) -> Option<BiomeEdits> {
@@ -1322,12 +1298,16 @@ fn handle(
                 | Act::BiomeCustomised
                 | Act::BiomeFilterReset
                 | Act::GroundPop(..)
+                | Act::ColourPop(..)
+                | Act::Preset(..)
+                | Act::ColourDone
         );
         if !popup
             && act != Act::Back
             && (l.mod_view.pop.take().is_some()
                 | l.biome_view.pop.take().is_some()
-                | l.biome_view.ground.take().is_some())
+                | l.biome_view.ground.take().is_some()
+                | l.biome_view.colour.take().is_some())
         {
             l.version += 1;
         }
@@ -1389,6 +1369,7 @@ fn handle(
             | Act::BiomeSort(..)
             | Act::SelectShownBiomes
             | Act::GroundPop(..) => on_biomes(l, act),
+            Act::ColourPop(..) | Act::Preset(..) | Act::ColourDone => colour::on_colour(l, act),
         }
     }
 }
@@ -1417,6 +1398,10 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
         Act::Quit => {
             cx.relaunch.0 = None;
             cx.exit.write(AppExit::Success);
+        }
+        Act::Back if l.biome_view.colour.is_some() => {
+            colour::revert(l);
+            close_pop(l);
         }
         Act::Back
             if l.mod_view.pop.is_some()
