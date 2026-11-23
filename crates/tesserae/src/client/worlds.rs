@@ -760,7 +760,13 @@ fn review_capture(
                     }
                     continue;
                 }
-                other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
+                other => match (other.strip_prefix("game"), other.strip_prefix("biome")) {
+                    (Some(n), _) if n.parse::<usize>().is_ok() => Act::PickGame(n.parse().unwrap()),
+                    (_, Some(n)) if n.parse::<usize>().is_ok() => {
+                        Act::SelectBiome(n.parse().unwrap())
+                    }
+                    _ => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
+                },
             });
         }
     }
