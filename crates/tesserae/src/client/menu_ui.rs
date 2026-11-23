@@ -514,7 +514,7 @@ pub(super) struct RailEntry;
 fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
     workspace
         .spawn((
-            BackgroundColor(theme::SHEET_SHADE),
+            BackgroundColor(theme::sheet_shade()),
             BorderColor::all(theme::edge()),
             Node {
                 width: Val::Px(theme::RAIL_WIDTH),

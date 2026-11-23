@@ -172,10 +172,21 @@ function paintTerrain(canvas, spec) {
   ctx.putImageData(image, 0, 0);
 }
 const GROUND = {
-  Stone: "#6d7076",
+  Grass: "#6f9a48",
+  Moss: "#4f7a3e",
   Dirt: "#7a5a3c",
-  Sand: "#cdb882",
   Mud: "#5a4a3a",
+  Clay: "#a8705a",
+  Sand: "#cdb882",
+  "Red sand": "#b8643a",
+  Gravel: "#8a8580",
+  Snow: "#e6edf0",
+  Ice: "#a9cfe0",
+  Ash: "#55525a",
+  Stone: "#6d7076",
+  Granite: "#9a7f78",
+  Basalt: "#3c3d42",
+  Sandstone: "#c7a26a",
   Melon: "#c46a7a",
 };
 // Per-biome scenery for the voxel dioramas, keyed by the Game's biome names;

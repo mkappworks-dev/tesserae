@@ -18,3 +18,5 @@ The Biomes side panel matches the approved mockup (compact, with the sliders and
 - [ ] Surface, Soil and Rock are dropdowns with swatches and search, usable by controller
 
 ## Comments
+
+A Ground dropdown's open list shrinks to its search results (user decision); a list that opens above its field hangs from its bottom edge so it stays attached.

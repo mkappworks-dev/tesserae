@@ -493,8 +493,8 @@ pub(super) fn sheet_with_actions(
     main.spawn((
         BackgroundGradient(vec![
             LinearGradient::to_right(vec![
-                ColorStop::new(theme::SHEET_SHADE, Val::Percent(0.0)),
-                ColorStop::new(theme::SHEET_SHADE_FAR, Val::Percent(100.0)),
+                ColorStop::new(theme::sheet_shade(), Val::Percent(0.0)),
+                ColorStop::new(theme::sheet_shade_far(), Val::Percent(100.0)),
             ])
             .into(),
         ]),
@@ -623,7 +623,7 @@ fn paint_items(
     for (entity, disabled, mut fill, mut outline, children) in &mut items {
         let lit = focus.get() == Some(entity);
         fill.set_if_neq(BackgroundColor(if lit {
-            theme::SHEET_SHADE
+            theme::LIT_ITEM
         } else {
             Color::NONE
         }));

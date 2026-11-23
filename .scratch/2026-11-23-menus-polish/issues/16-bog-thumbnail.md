@@ -1,6 +1,6 @@
 # 16: Bog thumbnail with textured mud and tar
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -12,7 +12,9 @@ Spec: [Menus polish](../spec.md).
 
 ## Acceptance criteria
 
-- [ ] Bog's thumbnail shows textured mud and tar
-- [ ] The thumbnail still validates (512×288 PNG)
+- [x] Bog's thumbnail shows textured mud and tar
+- [x] The thumbnail still validates (512×288 PNG)
 
 ## Comments
+
+The noise is a new `("noise", RGBA, seed)` item kind in `MODS`; Waters keeps its plain water Voxel, as this ticket names Bog only.

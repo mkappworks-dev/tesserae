@@ -57,3 +57,27 @@ states set from the browser console where there is no route):
   line each; the panel's body scrolls at 1280×720 while Reset and Done stay
   fixed. The selected Biome row takes the selected background and border, not
   only its left edge.
+
+- Biomes panel Ground, after review: the climate map is 2:1. Surface, Soil and
+  Rock are dropdowns whose field and options show the Material's colour swatch;
+  the open list has a search field that keeps focus and filters as you type
+  (arrows move, Enter picks, Esc closes the list only). The mock lists 16
+  Materials (`GROUND` in `mockup/preview.js`, which the dioramas also read).
+  `customSelect(…, { search })` adds the search; a swatch comes from an option's
+  `swatch`. Esc with any dropdown open no longer also closes the Biome panel.
+- A Biome's default Sky is `#87ceeb` and Fog `#ffffff`. A Game's Biome that
+  declares its own keeps them (Tidewater, Ember, Lumen, Meadow palettes);
+  Terra's declare none, so Terra shows the defaults, and Reset and Reset all
+  restore them.
+
+- Settings › Display opens with a Window group: Window mode cycles Windowed,
+  Borderless fullscreen and Fullscreen (default Windowed) and, as a display
+  change, opens the keep-or-revert prompt (ticket 21).
+- Sticky list toolbars (ticket 19): the search line and the select-all row sit
+  in one `.list-toolbar` that stays at the top of the scrolling list, opaque so
+  rows never show through. Pages: the Mods step (`/worlds/new/mods`), the Biomes
+  step (`/worlds/new/biomes`, also beside the open Biome panel), the Worlds
+  search (shown past 8 Worlds), and the Map legend's Waypoints/Explored tabs
+  (`/map`). `/mods` has no toolbar and the `/inventory` catalogue grid already
+  scrolls under its search. Focus scrolls a row clear of the toolbar
+  (`scroll-padding-top`).
