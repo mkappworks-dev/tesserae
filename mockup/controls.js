@@ -83,6 +83,42 @@ function closeSelect(restoreFocus = false) {
     trigger.focus({ preventScroll: true });
 }
 
+/* Places a popup under its trigger, or above it when it would not fit below
+   `floor` (the screen by default). `shrinkTo` is the height a scrolling list
+   may shrink to before it flips; a popup that cannot scroll passes Infinity. */
+function placePopup(
+  popup,
+  trigger,
+  { width, maxHeight, shrinkTo = 150, floor },
+) {
+  const inGame = !!trigger.closest("#game");
+  const rect = trigger.getBoundingClientRect(),
+    game = inGame
+      ? $("#game").getBoundingClientRect()
+      : { left: 0, top: 0, width: innerWidth, bottom: innerHeight };
+  width = Math.min(width, game.width - 24);
+  popup.style.width = width + "px";
+  popup.style.left =
+    Math.max(12, Math.min(rect.left - game.left, game.width - width - 12)) +
+    "px";
+  const limit = Math.min(game.bottom, innerHeight, floor ?? Infinity);
+  const bottom = limit - rect.bottom - 12;
+  const top = rect.top - Math.max(0, game.top) - 12;
+  const height = Math.min(popup.scrollHeight + 2, maxHeight);
+  const above = bottom < Math.min(height, shrinkTo) && top > bottom;
+  const available = Math.max(48, above ? top : bottom);
+  popup.style.maxHeight = Math.min(maxHeight, available) + "px";
+  /* A popup opened above its field hangs from its bottom edge, so a search that
+     shrinks the list keeps it attached to the field. */
+  if (above) {
+    const container = inGame ? game.height : innerHeight;
+    popup.style.bottom = container - (rect.top - game.top) + 6 + "px";
+  } else {
+    popup.style.top = rect.bottom - game.top + 6 + "px";
+  }
+  return { x: rect.x, y: rect.y };
+}
+
 function openDropdown(trigger, at) {
   closeSelect();
   trigger.focus({ preventScroll: true });
@@ -113,30 +149,10 @@ function openDropdown(trigger, at) {
   renderSelectOptions();
   trigger.setAttribute("aria-expanded", "true");
   trigger.setAttribute("aria-controls", popup.id);
-  const rect = trigger.getBoundingClientRect(),
-    game = inGame
-      ? $("#game").getBoundingClientRect()
-      : { left: 0, top: 0, width: innerWidth, bottom: innerHeight };
-  openSelect.anchor = { x: rect.x, y: rect.y };
-  const width = Math.min(Math.max(rect.width, 190), game.width - 24);
-  popup.style.width = width + "px";
-  popup.style.left =
-    Math.max(12, Math.min(rect.left - game.left, game.width - width - 12)) +
-    "px";
-  const bottom = Math.min(game.bottom, innerHeight) - rect.bottom - 12;
-  const top = rect.top - Math.max(0, game.top) - 12;
-  const height = Math.min(popup.scrollHeight + 2, 280);
-  const above = bottom < Math.min(height, 150) && top > bottom;
-  const available = Math.max(48, above ? top : bottom);
-  popup.style.maxHeight = Math.min(280, available) + "px";
-  /* A menu opened above its field hangs from its bottom edge, so a search that
-     shrinks the list keeps it attached to the field. */
-  if (above) {
-    const container = inGame ? game.height : innerHeight;
-    popup.style.bottom = container - (rect.top - game.top) + 6 + "px";
-  } else {
-    popup.style.top = rect.bottom - game.top + 6 + "px";
-  }
+  openSelect.anchor = placePopup(popup, trigger, {
+    width: Math.max(trigger.getBoundingClientRect().width, 190),
+    maxHeight: 280,
+  });
   if (search) popup.querySelector("input").focus({ preventScroll: true });
   focusSelectOption(index);
 }

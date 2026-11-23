@@ -102,3 +102,16 @@ states set from the browser console where there is no route):
 - Settings help strip look: the strip is a band in the side rail's tone (`rgb(10 11 12 / 0.9)`) across the foot of the sheet, keeping its 1 px top edge, with 6 px more padding above and below. The setting's name is bold at 15 px, the explanation stays muted, and the value note is in `--leaf` with the value bold (**Walk**: no sprint.), split at the first `: ` of the `VALUE_NOTES` text. Checked at 1280×720 in all seven categories.
 
 - Esc leaves tools in play: each press takes one step, in this order: it cancels a pinned structure preview, then puts the place Tool away, then leaves Quick layout mode, and only then opens the pause menu. Backspace still does the first three. Esc on `/layout` and `/place` still exits. The Layout-ready card reads `Esc Exit`. The place Tool HUD card and the structure list footer now say Esc or K. The play prompt bar never named an exit key, so it is unchanged. Each step was checked in headless Chrome.
+- Biomes panel Atmosphere colour picker: `/worlds/new/biomes`, a biome's
+  pencil, then Sky or Fog. The native colour input is gone. The closed field is
+  a swatch plus its hex value, one control; Click, Enter or Space (A) opens a
+  popup with 8 presets (sky blue, white, dusk orange, overcast grey, night blue,
+  jungle haze, desert sand, ember red), a saturation/brightness square, a hue
+  slider and a hex field. Arrows move within the focused part (Shift for bigger
+  steps), Tab and Shift+Tab (LB/RB) move between parts, Enter picks. Every
+  change applies live, so the diorama redraws as you go: Esc (B) closes and
+  restores the colour the popup opened with, while a click outside closes and
+  keeps it. Clicking a preset picks it and closes. It opens above its row when
+  it would run past the panel body's bottom, as Sky and Fog both do at
+  1280×720. `colourField(label, bind, value)` in `mockup/colour-picker.js`;
+  `placePopup` in `controls.js` now places both it and the dropdowns.
