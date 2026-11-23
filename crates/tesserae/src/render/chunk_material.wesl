@@ -201,8 +201,9 @@ fn fragment(
 
     // Block light is a local source, so it is emissive: tinted by the Voxel's
     // own palette colour, so a face a lantern reaches still shows its Material
-    // instead of turning into a flat glow. Alpha 1.0 puts it through exposure
-    // with the rest of the lighting.
+    // instead of turning into a flat glow. The material's emissive_exposure_weight
+    // is Bevy's default 0, so block light skips exposure: BLOCK_LIGHT_STRENGTH is
+    // in display units and does not move with the camera's Exposure.
     let block = light_level(in.light, 0u);
     // rgb only: emissive.a selects whether exposure applies, and adding to it
     // would push it past 1.0, where bevy_pbr's mix() extrapolates.
