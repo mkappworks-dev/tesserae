@@ -1239,7 +1239,11 @@ mod tests {
         let mut app = app(Holding::Tool(PLACE));
         assert!(frame(&mut app, None, Some(MouseButton::Right)).is_empty());
         let said = ("Nothing in reach.".to_owned(), Tone::Alert);
-        assert_eq!(showing(app.world_mut()), [said.clone()], "no answer yet");
+        assert_eq!(
+            showing(app.world_mut()),
+            std::slice::from_ref(&said),
+            "no answer yet"
+        );
         answer(&mut app, Err(RejectReason::InsidePlayer));
         frame(&mut app, None, Some(MouseButton::Right));
         assert!(app.world().resource::<PlaceTool>().pinned.is_none());
