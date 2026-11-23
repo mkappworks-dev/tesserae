@@ -139,10 +139,6 @@ impl<A: Bundle> Prompt<A> {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the screens that move onto the frame use it")
-    )]
     pub(super) fn act(self, act: A) -> Self {
         Self {
             act: Some(act),
@@ -152,10 +148,6 @@ impl<A: Bundle> Prompt<A> {
 
     /// The controller button that also fires it: X for a screen's secondary
     /// action, Y for its destructive or reset one.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the screens that move onto the frame use it")
-    )]
     pub(super) fn pad(self, button: GamepadButton) -> Self {
         Self {
             pad: Some(button),
@@ -317,10 +309,6 @@ fn spawn_prompt<A: Bundle>(row: &mut ChildSpawnerCommands, prompt: Prompt<A>) {
 /// A menu screen's sheet: its title over the scenery, an optional one-line
 /// subtitle, and at most one main button. Back and every other action go in
 /// the prompt bar.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the screens that move onto the frame use it")
-)]
 pub(super) struct MenuSheet<'a, A> {
     pub title: &'a str,
     pub subtitle: Option<&'a str>,
@@ -328,10 +316,6 @@ pub(super) struct MenuSheet<'a, A> {
 }
 
 /// Spawns the sheet with `body` scrolling inside it, and returns the main button.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the screens that move onto the frame use it")
-)]
 pub(super) fn menu_sheet<A: Bundle>(
     main: &mut ChildSpawnerCommands,
     sheet: MenuSheet<A>,

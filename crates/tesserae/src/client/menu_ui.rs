@@ -64,7 +64,6 @@ impl Tab {
 #[derive(Resource, Default)]
 pub(super) struct Searches {
     pub catalogue: String,
-    pub bindings: String,
     pub recipes: String,
 }
 pub(super) fn title(name: &str) -> String {
@@ -87,9 +86,9 @@ pub(super) fn matches(query: &str, text: &str) -> bool {
 }
 #[derive(Component)]
 struct Shell;
-/// What the Settings shell was built from: the tab, whether it is modal, and
-/// the Preferences that change its look, none when closed.
-type ShellKey = Option<(Tab, bool, bool, bool)>;
+/// What the Settings shell was built from: the tab and the Preferences that
+/// change its look, none when closed.
+type ShellKey = Option<(Tab, bool, bool)>;
 #[derive(Resource)]
 pub(super) struct Mosaic(pub(super) Handle<Image>);
 #[derive(Resource)]
@@ -268,7 +267,6 @@ type SearchDecorations<'w, 's> = Query<
 fn sync_search(
     fields: Query<(&SearchField, &EditableText)>,
     mut searches: ResMut<Searches>,
-    mut settings: ResMut<Settings>,
     mut decorations: SearchDecorations,
 ) {
     if let Some((field, text)) = fields.iter().next() {
@@ -286,12 +284,7 @@ fn sync_search(
             };
             node.display = if show { Display::Flex } else { Display::None };
         }
-        if field.0 == Tab::Bindings {
-            if searches.bindings != value {
-                searches.bindings = value;
-                settings.dirty = true;
-            }
-        } else if field.0 == Tab::Catalogue && searches.catalogue != value {
+        if field.0 == Tab::Catalogue && searches.catalogue != value {
             searches.catalogue = value;
         } else if field.0 == Tab::Recipes && searches.recipes != value {
             searches.recipes = value;
@@ -383,31 +376,25 @@ pub(super) struct SettingsBody;
 
 type ShellContext<'w> = (
     Option<Res<'w, State<crate::session::AppState>>>,
-    Option<Res<'w, Mosaic>>,
     Option<Res<'w, super::menu::Facts>>,
 );
 
 /// The Settings frame: the category rail beside a sheet whose body the page
-/// fills, between the launcher's header and footer. It is rebuilt only when
-/// the category or a dialog changes, so the focused search field survives a
-/// page rebuild.
-#[allow(clippy::too_many_arguments)]
+/// fills, over the scenery, with the prompt bar below. It is rebuilt only
+/// when the category or the look changes, so a page rebuild keeps its place.
 fn shell(
     mut commands: Commands,
     mut settings: ResMut<Settings>,
-    searches: Res<Searches>,
     preferences: Res<super::profile::Preferences>,
     roots: Query<Entity, With<Shell>>,
     mut previous: Local<Option<ShellKey>>,
     mut focus: ResMut<InputFocus>,
-    (playing, logo, facts): ShellContext,
+    (playing, facts): ShellContext,
 ) {
-    use super::cinematic as cine;
+    use super::frame::{self, Cap, Prompt};
     use super::worlds::pages;
-    let modal = settings.capturing() || settings.modal();
     let wanted = settings.open.then_some((
         settings.tab,
-        modal,
         preferences.solid_background,
         preferences.stronger_contrast,
     ));
@@ -424,7 +411,7 @@ fn shell(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some((tab, _modal, solid, _)) = wanted else {
+    let Some((tab, solid, _)) = wanted else {
         return;
     };
     // The page lands in the new body this frame.
@@ -435,9 +422,20 @@ fn shell(
     } else {
         pages::SCENERY_PLACE.to_owned()
     };
+    let mut prompts = vec![Prompt::new(Cap::Esc, "Back").act(Operation::Back)];
+    if tab == Tab::Bindings {
+        prompts.push(Prompt::new(Cap::Letter('Q'), "Previous").act(Operation::CategoryStep(-1)));
+        prompts.push(Prompt::new(Cap::Letter('E'), "Next").act(Operation::CategoryStep(1)));
+    }
+    prompts.push(
+        Prompt::new(Cap::Letter('R'), "Reset to defaults")
+            .act(Operation::Reset)
+            .pad(bevy::input::gamepad::GamepadButton::North),
+    );
     commands
         .spawn((
             Shell,
+            frame::Frame,
             GlobalZIndex(9),
             bevy::input_focus::tab_navigation::TabGroup {
                 modal: true,
@@ -460,7 +458,6 @@ fn shell(
             if !solid {
                 root.spawn((theme::shade(), pages::fill(), Pickable::IGNORE));
             }
-            pages::header(root, logo.as_deref());
             root.spawn(Node {
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
@@ -483,43 +480,27 @@ fn shell(
                 })
                 .with_children(|workspace| {
                     rail(workspace, tab);
-                    workspace
-                        .spawn((
-                            cine::surface(theme::panel()),
-                            cine::framed(Node {
-                                flex_direction: FlexDirection::Column,
-                                flex_grow: 1.0,
-                                min_width: Val::Px(0.0),
-                                min_height: Val::Px(0.0),
-                                overflow: Overflow::clip(),
-                                ..default()
-                            }),
-                        ))
-                        .with_children(|sheet| {
-                            cine::sheet_header(
-                                sheet,
-                                &cine::Sheet {
-                                    eyebrow: "MENU / SETTINGS",
-                                    title: tab.label(),
-                                    subtitle: "Your preferences, across every World.",
-                                },
-                            );
-                            if tab == Tab::Bindings {
-                                search_row(sheet, tab, &searches.bindings);
-                            }
-                            sheet.spawn((
+                    frame::menu_sheet(
+                        workspace,
+                        frame::MenuSheet::<()> {
+                            title: tab.label(),
+                            subtitle: None,
+                            primary: None,
+                        },
+                        |body| {
+                            body.spawn((
                                 SettingsBody,
                                 Node {
-                                    flex_direction: FlexDirection::Column,
                                     flex_grow: 1.0,
                                     min_height: Val::Px(0.0),
                                     ..default()
                                 },
                             ));
-                        });
+                        },
+                    );
                 });
             });
-            pages::footer(root, &place);
+            frame::prompt_bar(root, &place, prompts);
         });
 }
 
@@ -755,75 +736,6 @@ pub(super) fn search_frame(
         });
     id
 }
-/// The Key bindings search: a plain field, as the prototype's.
-fn search_row(sheet: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
-    sheet
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::new(
-                Val::Px(theme::SHEET_PAD_X),
-                Val::Px(theme::SHEET_PAD_X),
-                Val::Px(20.0),
-                Val::Px(20.0),
-            ),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|row| {
-            row.spawn((
-                SearchFrame,
-                BackgroundColor(theme::FIELD),
-                BorderColor::all(theme::field_edge()),
-                Node {
-                    height: Val::Px(theme::CONTROL_HEIGHT),
-                    border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                    padding: UiRect::horizontal(Val::Px(12.0)),
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|field| {
-                field.spawn((
-                    SearchField(tab),
-                    TextInput,
-                    EditableText::new(value),
-                    TabIndex(0),
-                    font(theme::TEXT_BODY),
-                    TextColor(theme::INK),
-                    bevy::text::TextCursorStyle {
-                        color: theme::SAGE,
-                        selection_color: theme::SAGE.with_alpha(0.3),
-                        ..default()
-                    },
-                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
-                    Node {
-                        flex_grow: 1.0,
-                        min_width: Val::Px(0.0),
-                        ..default()
-                    },
-                ));
-                field.spawn((
-                    SearchPlaceholder,
-                    Text::new("Search actions or keys…"),
-                    font(theme::TEXT_BODY),
-                    TextColor(theme::placeholder()),
-                    Pickable::IGNORE,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(12.0),
-                        ..default()
-                    },
-                    if value.is_empty() {
-                        Visibility::Inherited
-                    } else {
-                        Visibility::Hidden
-                    },
-                ));
-            });
-        });
-}
-
 fn make_logo(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     use bevy::{
         asset::RenderAssetUsages,
@@ -1532,15 +1444,6 @@ fn age_notifications(
     }
 }
 
-pub(super) fn description(parent: &mut ChildSpawnerCommands, value: &str) {
-    parent.spawn((
-        Text::new(value),
-        font(theme::TEXT_SMALL),
-        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-        TextColor(theme::muted()),
-        Pickable::IGNORE,
-    ));
-}
 pub(super) fn paragraph(
     parent: &mut ChildSpawnerCommands,
     value: impl Into<String>,
@@ -1686,10 +1589,14 @@ mod tests {
         app
     }
     fn field(app: &mut App) -> Entity {
+        let root = app.world_mut().spawn(Node::default()).id();
+        let mut field = Entity::PLACEHOLDER;
         app.world_mut()
-            .query_filtered::<Entity, With<SearchField>>()
-            .single(app.world())
-            .unwrap()
+            .commands()
+            .entity(root)
+            .with_children(|parent| field = search_frame(parent, Tab::Catalogue, "", 32.0));
+        app.world_mut().flush();
+        field
     }
     #[test]
     fn the_rail_marks_the_open_category_and_quiet_buttons_stay_borderless() {
@@ -1740,44 +1647,6 @@ mod tests {
         assert_eq!(
             *app.world().get::<BorderColor>(quiet).unwrap(),
             BorderColor::all(Color::NONE)
-        );
-    }
-    #[test]
-    fn filtering_preserves_the_native_editor_and_focus_and_retains_each_query() {
-        let mut app = app();
-        app.update();
-        let editor = field(&mut app);
-        app.world_mut()
-            .resource_mut::<InputFocus>()
-            .set(editor, FocusCause::Pressed);
-        app.world_mut()
-            .get_mut::<EditableText>(editor)
-            .unwrap()
-            .editor
-            .set_text("Stone");
-        app.update();
-        assert_eq!(field(&mut app), editor);
-        assert_eq!(app.world().resource::<InputFocus>().get(), Some(editor));
-        assert_eq!(app.world().resource::<Searches>().bindings, "Stone");
-        app.world_mut().resource_mut::<Settings>().tab = Tab::Display;
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&SearchField>()
-                .iter(app.world())
-                .count(),
-            0
-        );
-        app.world_mut().resource_mut::<Settings>().tab = Tab::Bindings;
-        app.update();
-        let restored = field(&mut app);
-        assert_eq!(
-            app.world()
-                .get::<EditableText>(restored)
-                .unwrap()
-                .value()
-                .to_string(),
-            "Stone"
         );
     }
     #[test]
