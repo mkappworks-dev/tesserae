@@ -719,6 +719,8 @@ fn logic(app: &mut App) {
         .init_resource::<terrain::TerrainPreview>()
         .add_observer(activate)
         .add_observer(slide)
+        .add_observer(biomes::press_map)
+        .add_observer(biomes::drag_map)
         .add_observer(open_settings)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(

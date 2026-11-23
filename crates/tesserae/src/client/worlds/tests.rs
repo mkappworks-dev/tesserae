@@ -1617,6 +1617,66 @@ fn arrow_keys_move_the_edited_biome_on_the_climate_map() {
 }
 
 #[test]
+fn dragging_on_the_climate_map_places_the_edited_biome_under_the_pointer() {
+    use bevy::picking::backend::HitData;
+    use bevy::picking::events::{Pointer, PointerDrag, PointerPress};
+    use bevy::picking::pointer::{Location, PointerButton, PointerId};
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    let map = app
+        .world_mut()
+        .query_filtered::<Entity, With<pages::ClimateMap>>()
+        .single(app.world())
+        .unwrap();
+    // Centred on the origin, as the identity transform the headless app leaves it with.
+    app.world_mut()
+        .entity_mut(map)
+        .insert(bevy::ui::ComputedNode {
+            size: Vec2::new(200.0, 100.0),
+            ..default()
+        });
+    let at = |x: f32, y: f32| {
+        Pointer::new(
+            PointerId::Mouse,
+            Location {
+                target: bevy::camera::NormalizedRenderTarget::None {
+                    width: 800,
+                    height: 600,
+                },
+                position: Vec2::new(x, y),
+            },
+        )
+    };
+    let version = launcher(&app).version;
+    app.world_mut().trigger(PointerPress {
+        entity: map,
+        pointer: at(50.0, -25.0),
+        button: PointerButton::Primary,
+        hit: HitData::new(map, 0.0, None, None),
+        count: 1,
+    });
+    app.update();
+    let meadow = edited(&app, 1);
+    assert_eq!((meadow.temperature, meadow.humidity), (0.75, 0.75));
+    app.world_mut().trigger(PointerDrag {
+        entity: map,
+        pointer: at(-150.0, 10.0),
+        button: PointerButton::Primary,
+        distance: Vec2::ZERO,
+        delta: Vec2::ZERO,
+    });
+    app.update();
+    let meadow = edited(&app, 1);
+    assert_eq!(
+        (meadow.temperature, meadow.humidity),
+        (0.0, 0.4),
+        "past the edge stays on the map"
+    );
+    assert_eq!(slider_value(&mut app, Knob::Temperature), 0.0);
+    assert_eq!(launcher(&app).version, version, "a drag keeps its map");
+}
+
+#[test]
 fn no_biome_left_holds_the_biomes_step() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
     act(&mut app, Act::ToggleBiome(0));

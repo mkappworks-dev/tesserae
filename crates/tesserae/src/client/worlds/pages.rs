@@ -3693,6 +3693,10 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesD
 #[derive(Component)]
 pub(super) struct CurrentDot;
 
+/// The temperature and humidity plane; pressing or dragging on it places the edited Biome.
+#[derive(Component)]
+pub(super) struct ClimateMap;
+
 /// The edited Biome's dot, which arrow keys move while it has the focus.
 #[derive(Component)]
 pub(super) struct ClimateHandle;
@@ -3718,6 +3722,7 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 .in_color_space(InterpolationColorSpace::Srgba)
                 .into(),
             ]),
+            ClimateMap,
             BorderColor::all(theme::CLIMATE_EDGE),
             Node {
                 height: Val::Px(110.0),
@@ -3748,7 +3753,6 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 };
                 let mut dot = map.spawn((
                     bevy::ui_widgets::Button,
-                    Act::SelectBiome(at),
                     BackgroundColor(fade(climate_colour(choice.temperature, choice.humidity))),
                     BorderColor::all(fade(theme::DOT_EDGE)),
                     if current {
@@ -3773,6 +3777,9 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                         ..default()
                     },
                 ));
+                if !current {
+                    dot.insert(Act::SelectBiome(at));
+                }
                 if current {
                     dot.insert((
                         CurrentDot,
