@@ -453,7 +453,7 @@ fn rebuild(
                             align_items: AlignItems::Center,
                             column_gap: Val::Px(10.0),
                             padding: UiRect::axes(Val::Px(6.0), Val::Px(5.0)),
-                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_ROW)),
                             ..default()
                         },
                         BackgroundColor(if selected { ROW_SELECTED } else { Color::NONE }),
