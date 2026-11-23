@@ -42,9 +42,11 @@ pub(super) fn setting_row(
                 Text::new(title),
                 theme::weighted(15.0, theme::LABEL),
                 TextColor(theme::INK),
+                // Grown to the free width, or the label wraps at its narrowest.
                 Node {
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
                     min_width: Val::Px(0.0),
-                    flex_shrink: 1.0,
                     ..default()
                 },
                 Pickable::IGNORE,
@@ -284,9 +286,7 @@ pub(super) fn choice_visuals(
 
 /// A key cap: the binding as a game prints it, or — when unbound.
 #[derive(Component)]
-pub(super) struct KeyCap {
-    waiting: bool,
-}
+pub(super) struct KeyCap;
 
 const CAP_EDGE: Color = Color::srgb_u8(0x4a, 0x4e, 0x54);
 const CAP_LIT_EDGE: Color = Color::srgb_u8(0x9a, 0x9f, 0x93);
@@ -295,12 +295,11 @@ pub(super) fn key_cap(
     parent: &mut ChildSpawnerCommands,
     label: Option<String>,
     operation: Operation,
-    waiting: bool,
 ) {
     let bound = label.is_some();
     parent
         .spawn((
-            KeyCap { waiting },
+            KeyCap,
             bevy::ui_widgets::Button,
             TabIndex(0),
             operation,
@@ -310,7 +309,7 @@ pub(super) fn key_cap(
                 ColorStop::auto(Color::srgb_u8(0x2b, 0x2e, 0x32)),
                 ColorStop::auto(Color::srgb_u8(0x20, 0x23, 0x26)),
             ])),
-            BorderColor::all(if waiting { theme::FOCUS } else { CAP_EDGE }),
+            BorderColor::all(CAP_EDGE),
             Node {
                 min_width: Val::Px(44.0),
                 min_height: Val::Px(36.0),
@@ -339,20 +338,14 @@ pub(super) fn key_cap(
 }
 
 pub(super) fn cap_visuals(
-    mut caps: Query<(Entity, &KeyCap, &Hovered, &mut BorderColor, &mut Outline)>,
+    mut caps: Query<(Entity, &Hovered, &mut BorderColor, &mut Outline), With<KeyCap>>,
     focus: Res<bevy::input_focus::InputFocus>,
     visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
     let ringed = crate::client::menu_ui::visible_focus(Some(&focus), visible.as_deref());
-    for (entity, cap, hovered, mut edge, mut outline) in &mut caps {
+    for (entity, hovered, mut edge, mut outline) in &mut caps {
         let lit = hovered.0 || focus.get() == Some(entity);
-        edge.set_if_neq(BorderColor::all(if cap.waiting {
-            theme::FOCUS
-        } else if lit {
-            CAP_LIT_EDGE
-        } else {
-            CAP_EDGE
-        }));
+        edge.set_if_neq(BorderColor::all(if lit { CAP_LIT_EDGE } else { CAP_EDGE }));
         let ring = if ringed == Some(entity) {
             theme::FOCUS
         } else {
@@ -421,18 +414,26 @@ pub(super) fn help_panel(parent: &mut ChildSpawnerCommands, help: &RowHelp) {
         });
 }
 
-/// Points the help panel at the row that holds focus.
+/// Points the help panel at the row that holds focus, or at the page's first
+/// row while focus is elsewhere.
 pub(super) fn show_help(
     focus: Res<bevy::input_focus::InputFocus>,
-    rows: Query<&RowHelp>,
-    parents: Query<&ChildOf>,
+    (rows, pages): (Query<&RowHelp>, Query<Entity, With<Page>>),
+    (parents, children): (Query<&ChildOf>, Query<&Children>),
     mut titles: Query<&mut Text, (With<HelpTitle>, Without<HelpText>)>,
     mut texts: Query<&mut Text, (With<HelpText>, Without<HelpTitle>)>,
 ) {
-    let Some(help) = focus.get().and_then(|focused| {
+    let focused = focus.get().and_then(|focused| {
         std::iter::once(focused)
             .chain(parents.iter_ancestors(focused))
             .find_map(|e| rows.get(e).ok())
+    });
+    let Some(help) = focused.or_else(|| {
+        pages.iter().next().and_then(|page| {
+            children
+                .iter_descendants_depth_first(page)
+                .find_map(|e| rows.get(e).ok())
+        })
     }) else {
         return;
     };
@@ -830,6 +831,7 @@ pub(super) fn waiting_overlay(
             modal: true,
             ..default()
         },
+        ZIndex(1),
         BackgroundColor(Color::srgba_u8(10, 11, 12, 235)),
         BorderColor::all(theme::FOCUS),
         Node {

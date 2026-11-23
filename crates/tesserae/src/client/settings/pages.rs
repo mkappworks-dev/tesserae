@@ -166,8 +166,9 @@ pub(in crate::client) fn render(
     {
         *remembered = Some(at);
     }
+    // A category just opened focuses its first control.
     if *previous != Some(settings.tab) {
-        *remembered = None;
+        *remembered = Some(0);
     }
     *previous = settings.open.then_some(settings.tab);
     settings.dirty = false;
@@ -717,17 +718,28 @@ pub(super) fn binding_rows(
                 theme::weighted(15.0, theme::LABEL),
                 TextColor(theme::INK),
                 Node {
+                    flex_grow: 1.0,
+                    flex_basis: Val::Px(0.0),
                     min_width: Val::Px(0.0),
                     ..default()
                 },
                 Pickable::IGNORE,
             ));
-            row.spawn(Node {
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                flex_shrink: 0.0,
-                ..default()
-            })
+            // Gradients draw over a later sibling, so the overlay alone shows.
+            let shown = if waiting.is_some() {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            };
+            row.spawn((
+                shown,
+                Node {
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    flex_shrink: 0.0,
+                    ..default()
+                },
+            ))
             .with_children(|caps| {
                 let column = |caps: &mut ChildSpawnerCommands,
                               device: Device,
@@ -741,7 +753,6 @@ pub(super) fn binding_rows(
                                 c,
                                 cap_label(binding),
                                 Operation::Capture(device, action, slot),
-                                waiting == Some((device, slot)),
                             );
                         }
                     });
