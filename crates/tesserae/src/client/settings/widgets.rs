@@ -92,8 +92,6 @@ pub(super) struct ChoicePart {
 
 const CHOICE_WIDTH_PX: f32 = 220.0;
 const CHOICE_HEIGHT_PX: f32 = 40.0;
-const CHOICE_FILL: Color = Color::srgba(1.0, 1.0, 1.0, 0.05);
-const CHOICE_LIT: Color = Color::srgba(1.0, 1.0, 1.0, 0.11);
 
 fn choice_node(choice: Choice) -> impl Bundle {
     (
@@ -103,7 +101,7 @@ fn choice_node(choice: Choice) -> impl Bundle {
         TabIndex(0),
         Hovered::default(),
         theme::focus_ring(),
-        BackgroundColor(CHOICE_FILL),
+        BackgroundColor(theme::choice_fill()),
         BorderColor::all(theme::edge()),
         Node {
             width: Val::Px(CHOICE_WIDTH_PX),
@@ -259,7 +257,11 @@ pub(super) fn choice_visuals(
     let ringed = crate::client::menu_ui::visible_focus(Some(&focus), visible.as_deref());
     for (entity, hovered, mut fill, mut outline) in &mut choices {
         let lit = hovered.0 || focus.get() == Some(entity);
-        fill.set_if_neq(BackgroundColor(if lit { CHOICE_LIT } else { CHOICE_FILL }));
+        fill.set_if_neq(BackgroundColor(if lit {
+            theme::choice_lit()
+        } else {
+            theme::choice_fill()
+        }));
         let ring = if ringed == Some(entity) {
             theme::FOCUS
         } else {
@@ -381,7 +383,7 @@ pub(super) struct HelpText;
 pub(super) fn help_panel(parent: &mut ChildSpawnerCommands, help: &RowHelp) {
     parent
         .spawn((
-            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.04)),
+            BackgroundColor(theme::css_tint(0.04)),
             BorderColor::all(theme::SAGE),
             Node {
                 width: Val::Px(240.0),

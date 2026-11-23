@@ -347,7 +347,7 @@ fn style(
             )
         } else if quiet {
             if hover {
-                (theme::QUIET_HOVER, theme::QUIET_HOVER_EDGE)
+                (theme::quiet_hover(), theme::QUIET_HOVER_EDGE)
             } else {
                 (Color::NONE, Color::NONE)
             }

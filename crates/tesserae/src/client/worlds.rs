@@ -1530,9 +1530,9 @@ fn paint_slots(
     for (entity, hovered, mut fill, mut edge, mut outline) in &mut slots {
         let on = lit(entity, hovered.0);
         fill.set_if_neq(BackgroundColor(if on {
-            pages::SLOT_LIT
+            theme::slot_lit()
         } else {
-            pages::SLOT_FILL
+            theme::slot_fill()
         }));
         if on {
             edge.set_if_neq(BorderColor::all(pages::SLOT_EDGE_LIT));

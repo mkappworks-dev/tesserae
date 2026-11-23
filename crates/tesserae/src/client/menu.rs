@@ -768,7 +768,7 @@ fn biomes(dialog: &mut ChildSpawnerCommands, facts: &WorldFacts) {
             for name in &facts.biomes {
                 chips
                     .spawn((
-                        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.05)),
+                        BackgroundColor(theme::css_tint(0.05)),
                         Node {
                             padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
                             border_radius: BorderRadius::MAX,

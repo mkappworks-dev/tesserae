@@ -3267,7 +3267,7 @@ fn hovering_a_world_lights_its_slot_and_shows_its_icons() {
     assert_eq!(icons_shown_on(&mut app), [Act::Play(river.clone())]);
     assert_eq!(
         app.world().get::<BackgroundColor>(tile).unwrap().0,
-        pages::SLOT_LIT
+        theme::slot_lit()
     );
     act(&mut app, Act::Edit(river.clone()));
     assert_eq!(
