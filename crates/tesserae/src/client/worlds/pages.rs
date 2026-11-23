@@ -53,6 +53,8 @@ pub(super) fn spawn(
         page,
         Screen::Title | Screen::Worlds | Screen::Create(_) | Screen::Edit(_)
     );
+    // The Opening screen is the loading screen's first frames: full screen, with no chrome.
+    let bare = matches!(page, Screen::Opening(_));
     let mut root = commands.spawn((
         Root,
         TabGroup::default(),
@@ -73,7 +75,7 @@ pub(super) fn spawn(
     }
     root.with_children(|root| {
         root.spawn((theme::shade(), fill(), Pickable::IGNORE));
-        if !framed {
+        if !framed && !bare {
             header(root, logo);
         }
         root.spawn(Node {
@@ -108,14 +110,14 @@ pub(super) fn spawn(
                 Screen::Edit(path) => edit(main, l, installed, thumbnails, path, scroll),
                 Screen::Trust(next) => trust(main, l, installed, next, scroll),
                 Screen::Opening(name) => {
-                    opening(main, name);
+                    opening(main, l, name);
                     None
                 }
             };
         });
         if framed {
             frame::prompt_bar(root, SCENERY_PLACE, prompts(&page, l, installed));
-        } else {
+        } else if !bare {
             footer(root, SCENERY_PLACE);
         }
         let resetting = l.screen == Screen::Create(Step::Biomes)
@@ -478,18 +480,8 @@ fn title(
     ));
 }
 
-fn opening(main: &mut ChildSpawnerCommands, name: &str) {
-    super::super::loading::opening(main, name, (), |card| {
-        card.spawn((
-            BackgroundColor(theme::RAISED),
-            Node {
-                height: Val::Px(4.0),
-                margin: UiRect::top(Val::Px(18.0)),
-                border_radius: BorderRadius::all(Val::Px(2.0)),
-                ..default()
-            },
-        ));
-    });
+fn opening(main: &mut ChildSpawnerCommands, l: &Launcher, name: &str) {
+    super::super::loading::opening(main, l.opening_game.as_deref(), name);
 }
 
 /// A sheet, centred and bounded so a wide window does not stretch its lines.
@@ -869,7 +861,7 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
 }
 
 /// The terrain saved when the World was created, or the neutral landscape for one saved before.
-fn world_picture(
+pub(in crate::client) fn world_picture(
     parent: &mut ChildSpawnerCommands,
     thumbnails: &Thumbnails,
     folder: &Path,

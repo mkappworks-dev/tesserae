@@ -131,7 +131,6 @@ pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
 pub(super) const SLOT_ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
 pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x40);
 
-pub(super) const TEXT_PANEL_TITLE: f32 = 31.0;
 pub(super) const TEXT_TITLE: f32 = 28.0;
 pub(super) const TEXT_DIALOG_TITLE: f32 = 22.0;
 pub(super) const TEXT_HEADING: f32 = 19.0;
@@ -354,7 +353,6 @@ pub(super) const WORKSPACE_MAX: f32 = 1180.0;
 pub(super) const WORKSPACE_GAP: f32 = 24.0;
 pub(super) const RAIL_WIDTH: f32 = 224.0;
 pub(super) const RAIL_ENTRY_HEIGHT: f32 = 48.0;
-pub(super) const MENU_WIDTH: f32 = 300.0;
 /// "You are here" on the World, under the Menu.
 pub(super) const STATUS_INK: Color = Color::srgb_u8(0xee, 0xf1, 0xea);
 pub(super) const TEXT_STATUS: f32 = 24.0;
@@ -504,7 +502,6 @@ pub(super) const DEATH_SCRIM: [Color; 2] = [
 ];
 pub(super) const DEATH_TITLE: Color = Color::srgb_u8(0xf4, 0xec, 0xe8);
 pub(super) const DEATH_CAUSE: Color = Color::srgb_u8(0xd4, 0xcf, 0xcc);
-pub(super) const DEATH_EYEBROW: Color = Color::srgb_u8(0xd8, 0xa5, 0x9c);
 pub(super) const TEXT_DEATH_TITLE: f32 = 46.0;
 /// −0.01 em of the death title.
 pub(super) const DEATH_TITLE_TRACKING: f32 = -0.46;

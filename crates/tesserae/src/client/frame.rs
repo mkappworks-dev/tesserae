@@ -266,6 +266,30 @@ pub(super) fn prompt_bar<A: Bundle>(
     });
 }
 
+/// A key's cap beside a control, as the pause menu's items and Respawn show it; it fires nothing.
+pub(super) fn key_cap(parent: &mut ChildSpawnerCommands, key: &str, ink: Color) -> Entity {
+    parent
+        .spawn((
+            BorderColor::all(ink.with_alpha(ink.alpha() * 0.5)),
+            Node {
+                padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
+                align_self: AlignSelf::Center,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_child((
+            Text::new(key),
+            theme::font(theme::TEXT_KEY),
+            bevy::text::LetterSpacing::Px(0.9),
+            TextColor(ink),
+            Pickable::IGNORE,
+        ))
+        .id()
+}
+
 fn chrome(value: &str) -> impl Bundle {
     (
         Text::new(value),
