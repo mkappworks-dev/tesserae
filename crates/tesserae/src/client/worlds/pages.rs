@@ -686,20 +686,8 @@ fn world_slot(
             aspect_ratio: Some(16.0 / 9.0),
             ..default()
         };
-        match thumbnails.world(&entry.path) {
-            Some(saved) => {
-                t.spawn((
-                    SlotPicture,
-                    ImageNode::new(saved.clone()),
-                    node,
-                    Pickable::IGNORE,
-                ));
-            }
-            None => {
-                let picture = thumbnail(t, node);
-                t.commands().entity(picture).insert(SlotPicture);
-            }
-        }
+        let picture = world_picture(t, thumbnails, &entry.path, node);
+        t.commands().entity(picture).insert(SlotPicture);
         slot_name(t, name);
         let small = |t: &mut ChildSpawnerCommands, value: String, colour: Color| {
             t.spawn((
@@ -855,6 +843,21 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
             ButtonStyle::Small { kind: Kind::Ghost },
         );
     });
+}
+
+/// The terrain saved when the World was created, or the neutral landscape for one saved before.
+fn world_picture(
+    parent: &mut ChildSpawnerCommands,
+    thumbnails: &Thumbnails,
+    folder: &Path,
+    node: Node,
+) -> Entity {
+    match thumbnails.world(folder) {
+        Some(saved) => parent
+            .spawn((ImageNode::new(saved.clone()), node, Pickable::IGNORE))
+            .id(),
+        None => thumbnail(parent, node),
+    }
 }
 
 /// A Game's landscape in miniature: banded hills under a sky, and a tree.
