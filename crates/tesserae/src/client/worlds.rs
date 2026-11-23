@@ -769,6 +769,7 @@ fn logic(app: &mut App) {
         .add_observer(biomes::press_map)
         .add_observer(biomes::drag_map)
         .add_observer(open_settings)
+        .add_observer(dismiss)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(
             Update,
@@ -952,6 +953,22 @@ const NO_GAME: &str = "Install a Game in the Mods folder to create a World.";
 fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     if let Ok(act) = acts.get(event.entity) {
         queue.0.push(act.clone());
+    }
+}
+
+/// Closes the open Mods or Biomes popup back onto its icon.
+fn close_pop(l: &mut Launcher) {
+    let icon = (l.mod_view.pop.take().map(Act::ModPop))
+        .or_else(|| l.biome_view.pop.take().map(Act::BiomePop));
+    if icon.is_some() {
+        l.refocus = icon;
+        l.version += 1;
+    }
+}
+
+fn dismiss(_: On<super::frame::Dismiss>, launcher: Option<ResMut<Launcher>>) {
+    if let Some(mut l) = launcher {
+        close_pop(&mut l);
     }
 }
 
@@ -1296,14 +1313,7 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             cx.relaunch.0 = None;
             cx.exit.write(AppExit::Success);
         }
-        Act::Back if l.mod_view.pop.is_some() => {
-            l.refocus = l.mod_view.pop.take().map(Act::ModPop);
-            l.version += 1;
-        }
-        Act::Back if l.biome_view.pop.is_some() => {
-            l.refocus = l.biome_view.pop.take().map(Act::BiomePop);
-            l.version += 1;
-        }
+        Act::Back if l.mod_view.pop.is_some() || l.biome_view.pop.is_some() => close_pop(l),
         // Escape answers the reset dialog rather than leaving the step under it.
         Act::Back if l.form.biomes.as_ref().is_some_and(|d| d.resetting) => {
             if let Some(draft) = l.form.biomes.as_mut() {

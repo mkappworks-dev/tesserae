@@ -1001,6 +1001,35 @@ fn a_popup_takes_focus_and_escape_closes_it_back_onto_its_icon() {
 }
 
 #[test]
+fn a_click_outside_a_popup_closes_it_and_does_nothing_else() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods());
+    on_mods_step(&mut app);
+    act(&mut app, Act::ModPop(Pop::Filter));
+    app.update();
+    let version = launcher(&app).version;
+    super::super::frame::testing::click_outside(&mut app);
+    app.update();
+    assert_eq!(launcher(&app).mod_view.pop, None);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+    assert!(picked(&app).is_empty());
+    assert!(
+        launcher(&app).version > version,
+        "the step redraws without it"
+    );
+    assert_eq!(focused_act(&app), Some(Act::ModPop(Pop::Filter)));
+
+    let (mut app, _worlds) = to_three_biomes();
+    act(&mut app, Act::BiomePop(Pop::Sort));
+    app.update();
+    super::super::frame::testing::click_outside(&mut app);
+    app.update();
+    assert_eq!(launcher(&app).biome_view.pop, None);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    assert_eq!(focused_act(&app), Some(Act::BiomePop(Pop::Sort)));
+}
+
+#[test]
 fn search_hides_mods_in_place() {
     let worlds = Directory::new();
     let mut app = app(&worlds, three_mods());
