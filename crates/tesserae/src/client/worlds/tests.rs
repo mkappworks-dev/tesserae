@@ -1758,6 +1758,83 @@ fn a_new_worlds_slot_shows_the_terrain_it_was_created_with_without_drawing_it_ag
     assert_eq!(slot_picture(&mut later, &path), Some(preview));
 }
 
+/// Saves a 2 by 1 thumbnail of one grey into the World's folder.
+fn grey_thumbnail(path: &Path, shade: u8) -> Vec<u8> {
+    let rgba = [shade, shade, shade, 255].repeat(2);
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+    encoder.set_color(png::ColorType::Rgba);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&rgba).unwrap();
+    writer.finish().unwrap();
+    std::fs::write(path.join(library::THUMBNAIL), bytes).unwrap();
+    rgba
+}
+
+fn slot_pictures(app: &mut App) -> usize {
+    app.world_mut()
+        .query_filtered::<(), With<pages::SlotPicture>>()
+        .iter(app.world())
+        .count()
+}
+
+#[test]
+fn a_world_saved_without_a_thumbnail_lists_with_the_neutral_picture_and_opens() {
+    let worlds = Directory::new();
+    let older = library::create(&worlds.0, &details("Older", false)).unwrap();
+    let newer = library::create(&worlds.0, &details("Newer", false)).unwrap();
+    let grey = grey_thumbnail(&newer, 90);
+    std::fs::write(older.join("unrelated.png"), b"not a thumbnail").unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    app.update();
+    act(&mut app, Act::Worlds);
+    assert_eq!(slot_pictures(&mut app), 2, "every World has a picture");
+    assert_eq!(
+        slot_picture(&mut app, &older),
+        None,
+        "the neutral landscape"
+    );
+    assert_eq!(slot_picture(&mut app, &newer), Some(grey));
+    act(&mut app, Act::Play(older.clone()));
+    assert_eq!(
+        app.world().resource::<Switch>().0,
+        Some(Target::World(older))
+    );
+}
+
+#[test]
+fn an_unreadable_thumbnail_shows_the_neutral_picture() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Torn", false)).unwrap();
+    std::fs::write(path.join(library::THUMBNAIL), b"\x89PNG torn").unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    app.update();
+    act(&mut app, Act::Worlds);
+    assert_eq!(slot_pictures(&mut app), 1);
+    assert_eq!(slot_picture(&mut app, &path), None);
+}
+
+#[test]
+fn deleting_a_world_removes_its_thumbnail_with_it() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Doomed", false)).unwrap();
+    let grey = grey_thumbnail(&path, 200);
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    app.update();
+    act(&mut app, Act::Worlds);
+    assert_eq!(slot_picture(&mut app, &path), Some(grey));
+    act(&mut app, Act::Edit(path.clone()));
+    act(&mut app, Act::Disclose(Disclosure::ManageWorld));
+    act(&mut app, Act::Delete);
+    act(&mut app, Act::ConfirmDelete);
+    assert!(!path.join(library::THUMBNAIL).exists());
+    assert!(!path.exists());
+    assert_eq!(slot_pictures(&mut app), 0);
+}
+
 #[test]
 fn reset_restores_the_declared_biomes_and_untouched_biomes_store_nothing() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
