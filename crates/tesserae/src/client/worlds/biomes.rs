@@ -160,16 +160,39 @@ fn drag_to(
     follow(draft, sliders, commands);
 }
 
-/// What a Biome's preview is drawn from: its own sky, fog and ground, and how cavernous it is.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct Look {
-    pub(super) sky: [u8; 3],
-    pub(super) fog: [u8; 3],
-    pub(super) surface: [u8; 3],
-    pub(super) soil: [u8; 3],
-    pub(super) rock: [u8; 3],
-    pub(super) caves: f32,
+/// The selection's Materials the open Ground dropdown's search matches, in their declared order.
+pub(super) fn ground_matches(l: &Launcher) -> Vec<String> {
+    let Some(draft) = l.form.biomes.as_ref() else {
+        return Vec::new();
+    };
+    draft
+        .declared
+        .materials
+        .iter()
+        .filter(|m| {
+            ui::matches(
+                &l.ground_search,
+                &material_title(&draft.declared.materials, m),
+            )
+        })
+        .cloned()
+        .collect()
 }
+
+/// A Material's name as the menus show it, with its Mod's when another Material shares it.
+pub(super) fn material_title(materials: &[String], material: &str) -> String {
+    let title = ui::declared_title(material);
+    let shared = materials
+        .iter()
+        .any(|m| m != material && ui::declared_title(m) == title);
+    match material.split_once(':') {
+        Some((owner, _)) if shared => format!("{title} \u{00b7} {}", ui::declared_title(owner)),
+        _ => title,
+    }
+}
+
+/// What a Biome's diorama is drawn from: its own sky, fog and ground, and how cavernous it is.
+pub(super) type Look = tesserae_core::diorama::Scene;
 
 pub(super) fn look(l: &Launcher, at: usize) -> Option<Look> {
     let draft = l.form.biomes.as_ref()?;
@@ -185,24 +208,31 @@ pub(super) fn look(l: &Launcher, at: usize) -> Option<Look> {
         soil: colour(ground.map(|g| &g.soil)),
         rock: colour(ground.map(|g| &g.rock)),
         caves: choice.cave_scale.unwrap_or(1.0),
+        shape: fnv(&choice.name),
     })
 }
 
 /// A Material's appearance colour, or one made from its name while the Game is not yet read, so
 /// two Materials never look alike by accident.
-fn material(source: Option<&tesserae_core::terrain_preview::Source>, name: &str) -> [u8; 3] {
+pub(super) fn material(
+    source: Option<&tesserae_core::terrain_preview::Source>,
+    name: &str,
+) -> [u8; 3] {
     let declared = source.and_then(|s| {
         let (_, id) = s.materials.iter().find(|(n, _)| n == name)?;
         let (_, rgba) = s.colours.iter().find(|(m, _)| m == id)?;
         Some([rgba[0], rgba[1], rgba[2]])
     });
     declared.unwrap_or_else(|| {
-        let hash = name.bytes().fold(0x811c_9dc5_u32, |h, b| {
-            (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
-        });
-        let hue = (hash % 360) as f32;
+        let hue = (fnv(name) % 360) as f32;
         let c = Color::hsl(hue, 0.35, 0.45).to_srgba();
         [c.red, c.green, c.blue].map(|v| (v * 255.0).round() as u8)
+    })
+}
+
+fn fnv(name: &str) -> u32 {
+    name.bytes().fold(0x811c_9dc5_u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
     })
 }
 
@@ -242,6 +272,8 @@ pub(super) struct BiomeView {
     pub(super) customised_only: bool,
     pub(super) sort: BiomeSort,
     pub(super) pop: Option<Pop>,
+    /// The ground layer whose Material dropdown is open.
+    pub(super) ground: Option<Layer>,
 }
 
 impl BiomeView {
@@ -318,6 +350,11 @@ pub(super) fn on_biomes(l: &mut Launcher, act: Act) {
     let mut refocus = act.clone();
     let view = &mut l.biome_view;
     match act {
+        Act::GroundPop(layer) if view.ground == Some(layer) => view.ground = None,
+        Act::GroundPop(layer) => {
+            view.ground = Some(layer);
+            l.ground_search.clear();
+        }
         Act::BiomePop(pop) if view.pop == Some(pop) => view.pop = None,
         Act::BiomePop(pop) => {
             view.pop = Some(pop);

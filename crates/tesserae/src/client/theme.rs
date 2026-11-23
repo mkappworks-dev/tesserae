@@ -90,10 +90,9 @@ pub(super) const WARNING: Color = Color::srgb_u8(0xf0, 0xc0, 0x80);
 pub(super) const ACCENT: Color = Color::srgb_u8(0xa8, 0xb5, 0xa2);
 const NOTICE_CARD: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xe6);
 
-/// A picked Game or Biome card, marked by a bar along one edge.
+/// A picked Game or Biome card.
 pub(super) const CARD_CHOSEN: Color = Color::srgb_u8(0x29, 0x29, 0x2e);
 pub(super) const CARD_CHOSEN_EDGE: Color = Color::srgb_u8(0xc0, 0xc7, 0xbb);
-pub(super) const CARD_BAR: f32 = 3.0;
 /// Card fills under the pointer: the prototype's `brightness(1.15)`.
 pub(super) const CARD_HOVER: Color = Color::srgb_u8(0x1d, 0x1d, 0x20);
 pub(super) const CARD_CHOSEN_HOVER: Color = Color::srgb_u8(0x2f, 0x2f, 0x35);

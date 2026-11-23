@@ -4,6 +4,7 @@
 
 mod biomes;
 mod create;
+mod diorama;
 mod edit_world;
 mod mods;
 mod open;
@@ -421,6 +422,7 @@ struct Launcher {
     mod_view: ModView,
     biome_search: String,
     biome_view: BiomeView,
+    ground_search: String,
     /// The control the last act came from, focused again when its page is rebuilt.
     refocus: Option<Act>,
     problem: Option<String>,
@@ -469,6 +471,7 @@ impl Launcher {
         self.problem = None;
         self.mod_view.pop = None;
         self.biome_view.pop = None;
+        self.biome_view.ground = None;
         self.refocus = None;
         self.trust_details = false;
         self.version += 1;
@@ -525,7 +528,9 @@ pub(super) enum Act {
     EditMode(GameMode),
     ToggleBiome(usize),
     SelectBiome(usize),
-    CycleGround(Layer),
+    /// Opens or closes a ground layer's Material dropdown in the edit panel.
+    GroundPop(Layer),
+    PickGround(Layer, String),
     /// The edit panel's Done: back to the terrain preview.
     CloseBiome,
     /// Restores the Biome in the edit panel.
@@ -595,6 +600,8 @@ enum Field {
     Search,
     ModSearch,
     BiomeSearch,
+    /// The open Ground dropdown's search.
+    GroundSearch,
     Sky,
     Fog,
     TemperatureSize,
@@ -603,6 +610,9 @@ enum Field {
 
 #[derive(Component)]
 struct Root;
+
+/// The page's scrolling column and the Biome panel's body, each of which keeps its place.
+type Scrolling = Or<(With<PageScroll>, With<pages::PanelScroll>)>;
 
 /// The page's own scrolling column, whose position survives a rebuild of the same page.
 #[derive(Component)]
@@ -727,6 +737,8 @@ fn review_capture(
                 "biome" => Act::SelectBiome(0),
                 "biome-filter" => Act::BiomePop(Pop::Filter),
                 "biome-sort" => Act::BiomePop(Pop::Sort),
+                "ground" => Act::GroundPop(Layer::Surface),
+                "ground-rock" => Act::GroundPop(Layer::Rock),
                 // The Opening card stays up: no World is handed to the loader.
                 "opening" => {
                     if let Some(l) = launcher.as_mut() {
@@ -787,6 +799,7 @@ fn logic(app: &mut App) {
         .init_resource::<InputFocus>()
         .init_resource::<Thumbnails>()
         .init_resource::<terrain::TerrainPreview>()
+        .init_resource::<diorama::Dioramas>()
         .add_observer(activate)
         .add_observer(step)
         .add_observer(slide)
@@ -813,6 +826,8 @@ fn logic(app: &mut App) {
                 filter,
                 pages::paint_bulk,
                 pages::paint_biomes,
+                diorama::draw,
+                pages::hang_ground_list,
                 placeholders,
                 opening,
                 (
@@ -960,6 +975,7 @@ fn start(
         mod_view: ModView::default(),
         biome_search: String::new(),
         biome_view: BiomeView::default(),
+        ground_search: String::new(),
         refocus: None,
         trust_details: false,
         problem: None,
@@ -1007,10 +1023,11 @@ fn step(event: On<super::pad::Step>, acts: Query<&Act>, mut queue: ResMut<Queue>
     }
 }
 
-/// Closes the open Mods or Biomes popup back onto its icon.
+/// Closes the open Mods or Biomes popup, or a Ground dropdown, back onto its control.
 fn close_pop(l: &mut Launcher) {
     let icon = (l.mod_view.pop.take().map(Act::ModPop))
-        .or_else(|| l.biome_view.pop.take().map(Act::BiomePop));
+        .or_else(|| l.biome_view.pop.take().map(Act::BiomePop))
+        .or_else(|| l.biome_view.ground.take().map(Act::GroundPop));
     if icon.is_some() {
         l.refocus = icon;
         l.version += 1;
@@ -1090,6 +1107,13 @@ fn keys(
             | Field::TemperatureSize
             | Field::HumiditySize => queue.0.push(Act::Next),
             Field::Rename => queue.0.push(Act::SaveName),
+            Field::GroundSearch => {
+                if let Some(layer) = launcher.biome_view.ground
+                    && let Some(first) = biomes::ground_matches(&launcher).into_iter().next()
+                {
+                    queue.0.push(Act::PickGround(layer, first));
+                }
+            }
             Field::Search | Field::ModSearch | Field::BiomeSearch => {}
         }
     }
@@ -1125,6 +1149,7 @@ fn sync_fields(
             Field::Search => launcher.bypass_change_detection().search = value,
             Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
             Field::BiomeSearch => launcher.bypass_change_detection().biome_search = value,
+            Field::GroundSearch => launcher.bypass_change_detection().ground_search = value,
         }
     }
 }
@@ -1141,6 +1166,7 @@ fn filter(
     let query = |by: Field| match by {
         Field::ModSearch => &launcher.mod_search,
         Field::BiomeSearch => &launcher.biome_search,
+        Field::GroundSearch => &launcher.ground_search,
         _ => &launcher.search,
     };
     let mut any = std::collections::BTreeSet::new();
@@ -1260,10 +1286,13 @@ fn handle(
                 | Act::BiomeStatus(..)
                 | Act::BiomeCustomised
                 | Act::BiomeFilterReset
+                | Act::GroundPop(..)
         );
         if !popup
             && act != Act::Back
-            && (l.mod_view.pop.take().is_some() | l.biome_view.pop.take().is_some())
+            && (l.mod_view.pop.take().is_some()
+                | l.biome_view.pop.take().is_some()
+                | l.biome_view.ground.take().is_some())
         {
             l.version += 1;
         }
@@ -1297,7 +1326,7 @@ fn handle(
             | Act::Step(..)
             | Act::ToggleBiome(..)
             | Act::SelectBiome(..)
-            | Act::CycleGround(..)
+            | Act::PickGround(..)
             | Act::CloseBiome
             | Act::ResetBiome
             | Act::ResetBiomes
@@ -1323,7 +1352,8 @@ fn handle(
             | Act::BiomeCustomised
             | Act::BiomeFilterReset
             | Act::BiomeSort(..)
-            | Act::SelectShownBiomes => on_biomes(l, act),
+            | Act::SelectShownBiomes
+            | Act::GroundPop(..) => on_biomes(l, act),
         }
     }
 }
@@ -1353,7 +1383,13 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             cx.relaunch.0 = None;
             cx.exit.write(AppExit::Success);
         }
-        Act::Back if l.mod_view.pop.is_some() || l.biome_view.pop.is_some() => close_pop(l),
+        Act::Back
+            if l.mod_view.pop.is_some()
+                || l.biome_view.pop.is_some()
+                || l.biome_view.ground.is_some() =>
+        {
+            close_pop(l)
+        }
         // Escape answers the reset dialog rather than leaving the step under it.
         Act::Back if l.form.biomes.as_ref().is_some_and(|d| d.resetting) => {
             if let Some(draft) = l.form.biomes.as_mut() {
@@ -1404,7 +1440,7 @@ fn render(
     ),
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
-    scrolled: Query<&ScrollPosition, With<PageScroll>>,
+    scrolled: Query<(&ScrollPosition, Has<PageScroll>), Scrolling>,
     (logo, thumbnails): (Option<Res<ui::Mosaic>>, Res<Thumbnails>),
     (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
@@ -1419,11 +1455,19 @@ fn render(
     }
     *built = Some(l.version);
     // A click rebuilds the page it is on; keep its place there, and start a new page at the top.
-    let scroll = if shown.as_ref() == Some(&l.screen) {
-        scrolled.iter().next().map_or(Vec2::ZERO, |p| p.0)
+    let same = shown.as_ref() == Some(&l.screen);
+    let scroll = if same {
+        scrolled
+            .iter()
+            .find_map(|(p, page)| page.then_some(p.0))
+            .unwrap_or(Vec2::ZERO)
     } else {
         Vec2::ZERO
     };
+    let panel_scroll = scrolled
+        .iter()
+        .find_map(|(p, page)| (!page).then_some(p.0))
+        .filter(|_| same);
     *shown = Some(l.screen.clone());
     for root in &roots {
         commands.entity(root).despawn();
@@ -1436,6 +1480,16 @@ fn render(
         &thumbnails,
         scroll,
     );
+    // The Biome panel scrolls on its own, and its Ground dropdowns open from low in it.
+    if let Some(offset) = panel_scroll {
+        commands.queue(move |world: &mut World| {
+            let mut bodies =
+                world.query_filtered::<&mut ScrollPosition, With<pages::PanelScroll>>();
+            for mut body in bodies.iter_mut(world) {
+                body.0 = offset;
+            }
+        });
+    }
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
@@ -1444,11 +1498,21 @@ fn render(
         });
     }
     if let Some(act) = l.refocus.clone() {
+        // An opened Ground dropdown takes the focus to its search, as typing is how most pick.
+        let search = matches!(act, Act::GroundPop(_)) && l.biome_view.ground.is_some();
         commands.queue(move |world: &mut World| {
-            let again = world
-                .query::<(Entity, &Act)>()
-                .iter(world)
-                .find_map(|(e, a)| (*a == act).then_some(e));
+            let field = search.then(|| {
+                world
+                    .query::<(Entity, &Field)>()
+                    .iter(world)
+                    .find_map(|(e, f)| (*f == Field::GroundSearch).then_some(e))
+            });
+            let again = field.flatten().or_else(|| {
+                world
+                    .query::<(Entity, &Act)>()
+                    .iter(world)
+                    .find_map(|(e, a)| (*a == act).then_some(e))
+            });
             if let (Some(entity), Some(mut focus)) = (again, world.get_resource_mut::<InputFocus>())
             {
                 focus.set(entity, FocusCause::Auto);
