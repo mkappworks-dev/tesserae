@@ -22,7 +22,7 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             // In the field, so the seed is seen and can be copied before the World is made.
             l.form.seed = l.form.random_seed.to_string();
             l.initial = l.form.clone();
-            l.show(Screen::Create(Step::World));
+            l.show(Screen::Create(Step::Game));
         }
         Act::ReCreate => {
             let Some(details) = l.selected().and_then(Entry::details).cloned() else {
@@ -67,6 +67,12 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             let Some(game) = cx.installed.games.get(index) else {
                 return;
             };
+            if l.form.game.as_ref() == Some(&game.id) {
+                if l.screen == Screen::Create(Step::Game) {
+                    go(l, cx.installed, cx.previewer, Step::World);
+                }
+                return;
+            }
             l.form.game = Some(game.id.clone());
             // Each Game starts from the Mods it suggests; picks made for another do not carry over.
             l.form.mods = cx.installed.suggested(&game.id);
@@ -319,16 +325,18 @@ pub(super) fn cycle(draft: &mut BiomesDraft, layer: Layer) {
 /// Why a step cannot be left forward, if it cannot.
 pub(super) fn check(step: Step, form: &Form, installed: &Installed) -> Result<(), String> {
     match step {
-        Step::World => {
+        Step::Game => {
             let installed_game = form
                 .game
                 .as_ref()
                 .is_some_and(|id| installed.games.iter().any(|g| &g.id == id));
-            if !installed_game {
-                return Err(NO_GAME.into());
+            if installed_game {
+                Ok(())
+            } else {
+                Err(NO_GAME.into())
             }
-            validate(form).map(|_| ())
         }
+        Step::World => validate(form).map(|_| ()),
         Step::Biomes => form
             .biomes
             .as_ref()
@@ -388,7 +396,7 @@ pub(super) fn create(
         .cloned()
     else {
         l.form.problem = Some(NO_GAME.into());
-        l.show(Screen::Create(Step::World));
+        l.show(Screen::Create(Step::Game));
         return;
     };
     let missing = installed.missing(&game.id);
@@ -399,7 +407,7 @@ pub(super) fn create(
             missing.join(", "),
             if missing.len() == 1 { "is" } else { "are" }
         ));
-        l.show(Screen::Create(Step::World));
+        l.show(Screen::Create(Step::Game));
         return;
     }
     let mods: Vec<_> = installed

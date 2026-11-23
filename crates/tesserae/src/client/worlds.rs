@@ -98,6 +98,7 @@ enum Screen {
 /// The steps of Create World, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Step {
+    Game,
     World,
     Mods,
     Biomes,
@@ -105,10 +106,17 @@ pub(super) enum Step {
 }
 
 impl Step {
-    const ORDER: [Step; 4] = [Step::World, Step::Mods, Step::Biomes, Step::Review];
+    const ORDER: [Step; 5] = [
+        Step::Game,
+        Step::World,
+        Step::Mods,
+        Step::Biomes,
+        Step::Review,
+    ];
 
     fn label(self) -> &'static str {
         match self {
+            Step::Game => "Game",
             Step::World => "World",
             Step::Mods => "Mods",
             Step::Biomes => "Biomes",
