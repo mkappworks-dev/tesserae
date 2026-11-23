@@ -18,8 +18,9 @@ WIDTH, HEIGHT = 512, 288
 repo = pathlib.Path(__file__).resolve().parent.parent
 
 # Mod id -> what stands in its row, left to right: a texture name is a Voxel of that texture, an
-# RGBA colour a plain Voxel (for a Material with no texture, as its appearance row gives it), and ("plant", texture, ground) the plant's
-# sprite standing on a Voxel of `ground`, a "mod/texture" path.
+# RGBA colour a plain Voxel (for a Material with no texture, as its appearance row gives it),
+# ("noise", RGBA, seed) a Voxel textured with noise in that colour, and ("plant", texture, ground)
+# the plant's sprite standing on a Voxel of `ground`, a "mod/texture" path.
 MODS = {
     "timber": ["planks", "thatch"],
     "crystals": ["amethyst", "citrine", "aquamarine"],
@@ -27,7 +28,7 @@ MODS = {
     "frost": ["snow", "ice", "packed_ice"],
     "strata": ["turf", "soil", "sand", "stone"],
     "waters": [(26, 82, 158, 166), "obsidian"],
-    "bog": ["peat", (92, 70, 44, 224), (24, 22, 28, 255)],
+    "bog": ["peat", ("noise", (92, 70, 44, 224), 61), ("noise", (24, 22, 28, 255), 67)],
     "brickwork": ["brick", "cobble", "tile"],
     "glassworks": ["glass", "frosted_glass", "lantern"],
     "lamps": ["glowstone", "amberlight", "moonlight"],
@@ -271,6 +272,28 @@ def plain(rgba, light, canvas):
     return paint
 
 
+def noisy(rgba, seed):
+    """Three 16 by 16 faces of fbm noise around a colour, so a Material with no texture of its own
+    reads as textured beside those that have one."""
+    *colour, a = rgba
+    # Dark colours scale to near-black, so the noise is added as an offset, not a factor.
+    spread = max(36, max(colour) // 2)
+
+    def face(offset):
+        rows = []
+        for y in range(16):
+            row = []
+            for x in range(16):
+                n = fbm(seed + offset, x * 0.3, y * 0.3) - 0.5
+                speck = 0.6 if hash01(seed + offset, x, y) > 0.93 else 0
+                lift = int((n * 1.6 + speck) * spread)
+                row.append((*shade(colour, 1.0, lift), a))
+            rows.append(row)
+        return rows
+
+    return [face(0), face(1000), face(2000)]
+
+
 def texture(mod, name):
     if "/" in name:
         mod, name = name.split("/")
@@ -306,7 +329,10 @@ def mod_thumbnail(mod, items):
         plant = None
         if isinstance(item, tuple) and item[0] == "plant":
             _, plant, item = item
-        if isinstance(item, tuple):
+        if isinstance(item, tuple) and item[0] == "noise":
+            top, side, _ = noisy(*item[1:])
+            faces = [textured(top, 1.0, canvas), textured(side, 0.82, canvas), textured(side, 0.64, canvas)]
+        elif isinstance(item, tuple):
             faces = [plain(item, k, canvas) for k in (1.0, 0.82, 0.64)]
         else:
             top, side, _ = texture(mod, item)
