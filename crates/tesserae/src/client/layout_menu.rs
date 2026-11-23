@@ -517,7 +517,7 @@ fn axis_row(
             ..default()
         },
         BackgroundColor(if active {
-            theme::LAYOUT_ROW_ON
+            theme::layout_row_on()
         } else {
             Color::NONE
         }),

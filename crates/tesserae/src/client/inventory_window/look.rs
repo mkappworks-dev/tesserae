@@ -197,7 +197,7 @@ fn flat_colours(flat: Flat) -> (Color, Color, Color) {
 /// the faint light fill instead.
 fn lit(color: Color) -> Color {
     if color.alpha() == 0.0 {
-        return theme::QUIET_HOVER;
+        return theme::quiet_hover();
     }
     let c = color.to_srgba();
     Color::srgba(

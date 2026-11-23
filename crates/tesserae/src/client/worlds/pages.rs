@@ -474,7 +474,7 @@ fn slot_tile<'a>(
         },
         bevy::picking::hover::Hovered::default(),
         theme::focus_ring(),
-        BackgroundColor(SLOT_FILL),
+        BackgroundColor(theme::slot_fill()),
         BorderColor::all(Color::NONE),
         Node {
             flex_direction: FlexDirection::Column,
@@ -487,8 +487,6 @@ fn slot_tile<'a>(
     ))
 }
 
-pub(super) const SLOT_FILL: Color = Color::srgba(1.0, 1.0, 1.0, 0.04);
-pub(super) const SLOT_LIT: Color = Color::srgba(1.0, 1.0, 1.0, 0.08);
 pub(super) const SLOT_EDGE_LIT: Color = Color::srgb_u8(0xc1, 0xcd, 0xb5);
 
 /// The first slot, which opens Create World. It hides while a search is typed.
