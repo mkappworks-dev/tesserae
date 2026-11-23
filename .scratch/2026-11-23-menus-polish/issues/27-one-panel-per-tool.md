@@ -1,6 +1,6 @@
 # 27: One panel per tool
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately); ticket 26 edits the Biomes step only
 
@@ -30,11 +30,13 @@ separate Layout-ready HUD card (ticket 11) and the place Tool's HUD card go.
 
 ## Acceptance criteria
 
-- [ ] Each tool shows one panel, full while choosing and compact while aiming,
+- [x] Each tool shows one panel, full while choosing and compact while aiming,
       in the same place
-- [ ] L/K toggle, Enter aims, Esc leaves from either state (a pinned preview
+- [x] L/K toggle, Enter aims, Esc leaves from either state (a pinned preview
       first), RMB places
-- [ ] Building a blueprint unselects it and reopens the full panel
-- [ ] The two tools exclude each other
+- [x] Building a blueprint unselects it and reopens the full panel
+- [x] The two tools exclude each other
 
 ## Comments
+
+The Client has no word from the Server that a Structure landed whole (only a refusal toast), so it unselects the Template and reopens the panel when it sends the build; a refused build leaves nothing selected. The mockup's Outside / Inside / Placing view switch is left out: in the game the ghost stands in the World. The tint legend and the Authored / This World totals of the old list window go, as the mockup dropped them. The hotbar still hides behind the full panel, as Quick layout's did, because the prompt bar takes the bottom edge where the mockup lifts the hotbar above it. Pinned, the place Tool's caps are Use Build, Esc Cancel and K Edit; G (Use) builds, as before.

@@ -282,7 +282,7 @@ pub(super) fn plugin(app: &mut App) {
         app.insert_resource(super::menu::Menu::opened(menu == "details"));
     }
     // `TESSERAE_SCREENSHOT_LAYOUT` opens the Layout menu with the mode on; `=ready` turns the
-    // mode on with the menu closed, so the HUD card shows.
+    // mode on with the panel compact.
     if let Some(layout) = std::env::var_os("TESSERAE_SCREENSHOT_LAYOUT") {
         app.insert_resource(super::layout::LayoutMode::turned_on());
         if layout != "ready" {
@@ -1073,7 +1073,7 @@ fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
 }
 
 /// `TESSERAE_SCREENSHOT_PLACE` holds the Game's place Tool, and `=list` opens
-/// its Template list too.
+/// its panel full too.
 fn capture_holding(
     catalogue: Res<super::edit::Catalogue>,
     mut hotbar: ResMut<super::edit::Hotbar>,

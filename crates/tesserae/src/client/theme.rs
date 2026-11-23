@@ -6,7 +6,6 @@ use bevy::prelude::*;
 
 const PANEL: Color = Color::srgb_u8(0x0b, 0x0b, 0x0c);
 pub(super) const RAISED: Color = Color::srgb_u8(0x18, 0x18, 0x1b);
-const SHEET_HEADER: Color = Color::srgb_u8(0x11, 0x11, 0x13);
 /// World, Game, Mod and Biome cards.
 pub(super) const CARD: Color = Color::srgb_u8(0x19, 0x19, 0x1c);
 pub(super) const CHOSEN: Color = Color::srgb_u8(0x27, 0x27, 0x2b);
@@ -20,7 +19,6 @@ const MUTED: Color = Color::srgb_u8(0xc7, 0xc9, 0xce);
 /// Rail entries, the edition line and the prompt bar.
 const CHROME_INK: Color = Color::srgb_u8(0xe1, 0xe4, 0xe3);
 /// The Inventory's and the Catalogue's quieter eyebrows.
-const ITEM_EYEBROW: Color = Color::srgb_u8(0xc0, 0xc2, 0xc8);
 pub(super) const SAGE: Color = Color::srgb_u8(0xc1, 0xcd, 0xb5);
 pub(super) const SAGE_HOVER: Color = Color::srgb_u8(0xd4, 0xde, 0xc9);
 pub(super) const SAGE_INK: Color = Color::srgb_u8(0x16, 0x1b, 0x16);
@@ -206,13 +204,11 @@ macro_rules! by_contrast {
 by_contrast! {
     MUTED, muted, INK;
     CHROME_INK, chrome_ink, INK;
-    ITEM_EYEBROW, item_eyebrow, INK;
     CATEGORY_INK, category_ink, INK;
     PLACEHOLDER, placeholder, INK;
     ITEM_SOFT, item_soft, ITEM_INK;
     HUD_QUIET_INK, hud_quiet_ink, INK;
     PANEL, panel, Color::srgb_u8(0x11, 0x11, 0x12);
-    SHEET_HEADER, sheet_header, Color::srgb_u8(0x17, 0x19, 0x1c);
     NOTICE_CARD, notice_card, Color::srgb_u8(0x0b, 0x0b, 0x0d);
     FULL_NOTICE, full_notice, Color::srgb_u8(11, 11, 13);
     BAND, band, Color::srgb_u8(42, 52, 59);
@@ -444,8 +440,6 @@ pub(super) const CATALOGUE_SUBTITLE: Color = Color::srgb_u8(0xa9, 0xad, 0xb6);
 /// An input the Inventory holds too few of.
 pub(super) const RECIPE_SHORT: Color = Color::srgb_u8(0xd9, 0x9a, 0x83);
 pub(super) const RADIUS_ROW: f32 = 6.0;
-pub(super) const CLOSE_EDGE: Color = Color::srgb_u8(0x51, 0x51, 0x59);
-pub(super) const CLOSE_INK: Color = Color::srgb_u8(0xd9, 0xda, 0xe0);
 pub(super) const KEY_CHIP: Color = Color::srgba_u8(0, 0, 0, 0xbb);
 pub(super) const KEY_CHIP_EDGE: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x4d);
 pub(super) const KEY_CHIP_INK: Color = Color::srgb_u8(0xf2, 0xf3, 0xee);
@@ -471,7 +465,6 @@ pub(super) const SLOT_DROP: Color = Color::srgb_u8(0xd6, 0xc8, 0x8f);
 pub(super) const SLOT_NUMBER: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x73);
 pub(super) const ITEM_SHADOW_ALPHA: f32 = 0.667;
 pub(super) const LAYOUT_SURFACE: Color = Color::srgba_u8(0x0b, 0x0b, 0x0d, 0xef);
-pub(super) const LAYOUT_RULE: Color = Color::srgb_u8(0x49, 0x49, 0x51);
 pub(super) const METHOD: Color = Color::srgb_u8(0x19, 0x19, 0x1e);
 pub(super) const METHOD_EDGE: Color = Color::srgb_u8(0x54, 0x54, 0x5b);
 pub(super) const METHOD_INK: Color = Color::srgb_u8(0xb9, 0xbd, 0xc6);
@@ -487,10 +480,7 @@ pub(super) const AXIS_TAG_INK: Color = Color::srgb_u8(0xd2, 0xd7, 0xdd);
 pub(super) const AXIS_WAY_INK: Color = Color::srgb_u8(0xc0, 0xc4, 0xcc);
 pub(super) const GAP_RULE: Color = Color::srgb_u8(0x44, 0x44, 0x4d);
 pub(super) const GAP_NOTE: Color = Color::srgb_u8(0xaf, 0xb4, 0xc0);
-pub(super) const TOTALS: Color = Color::srgb_u8(0x20, 0x20, 0x25);
-pub(super) const TOTALS_EDGE: Color = Color::srgb_u8(0x52, 0x52, 0x5b);
 pub(super) const TOTALS_TERM: Color = Color::srgb_u8(0xa9, 0xb0, 0xbd);
-pub(super) const TOTALS_VALUE: Color = Color::srgb_u8(0xe1, 0xe8, 0xd9);
 pub(super) const LAYOUT_ERROR: Color = Color::srgb_u8(0x33, 0x25, 0x26);
 pub(super) const LAYOUT_ERROR_EDGE: Color = Color::srgb_u8(0xc8, 0x8d, 0x7d);
 pub(super) const LAYOUT_ERROR_INK: Color = Color::srgb_u8(0xf1, 0xbc, 0xad);
@@ -505,13 +495,9 @@ pub(super) const LAYOUT_STATUS_INK: Color = Color::srgb_u8(0xc3, 0xcc, 0xb9);
 pub(super) fn layout_row_on() -> Color {
     css_tint(0.06)
 }
-pub(super) const ITEM_TEXT_TITLE: f32 = 23.0;
-pub(super) const ITEM_TEXT_EYEBROW: f32 = 11.0;
 pub(super) const ITEM_BUTTON_TEXT: f32 = 13.0;
 pub(super) const ITEM_BUTTON_HEIGHT: f32 = 38.0;
 pub(super) const ITEM_RADIUS: f32 = 9.0;
-pub(super) const CLOSE_SIZE: f32 = 40.0;
-pub(super) const ICON_SIZE: f32 = 20.0;
 /// About one slot gap, so a selected slot's glow never reaches its neighbour.
 pub(super) const SLOT_GLOW_BLUR: f32 = 5.0;
 /// A plain `button`'s hover brightness.
@@ -521,7 +507,6 @@ pub(super) const STEPPER_VALUE_TEXT: f32 = 15.0;
 pub(super) const SLOT_RECESS_PX: f32 = 3.0;
 pub(super) const SLOT_LIFT_PX: f32 = 2.0;
 pub(super) const GLYPH_SIZE: f32 = 22.0;
-pub(super) const TOOL_TRACKING: f32 = 1.2;
 
 // Pass E: the in-play HUD and the death screen.
 pub(super) const HUD_BAR: Color = Color::srgba_u8(6, 7, 8, 0xc7);
