@@ -32,7 +32,7 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             if details.game.is_none() || !cx.installed.unmet(&details).is_empty() {
                 return;
             }
-            let copy = format!("{} (copy)", details.name);
+            let copy = format!("{} \u{2014} new world", details.name);
             l.form = Form {
                 name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
                 seed: details.seed.to_string(),
@@ -47,9 +47,10 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 l.clashes = cx.installed.clashes(&game, &l.form.mods);
             }
             l.initial = l.form.clone();
-            // Through the Game step's Trust and read, as Next from it would.
+            // On Review, an exact copy is one press away and any change one jump back to its step.
+            // It passes every step's Trust and read on the way, as the rail would.
             l.show(Screen::Create(Step::Game));
-            go(l, cx.installed, cx.previewer, Step::World);
+            go(l, cx.installed, cx.previewer, Step::Review);
         }
         Act::CopyResolved => {
             if let Ok(seed) = l.form.seed() {
@@ -213,7 +214,8 @@ pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Preview
     if current <= Step::Mods && target > Step::Biomes && !mods_trusted(l, installed, target) {
         return;
     }
-    if target == Step::Biomes && !read_biomes(l, installed, previewer) {
+    // Review lists the Biomes, so a jump past the Biomes step reads them too.
+    if target >= Step::Biomes && !read_biomes(l, installed, previewer) {
         return;
     }
     l.show(Screen::Create(target));

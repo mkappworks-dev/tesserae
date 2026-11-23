@@ -493,7 +493,7 @@ fn rename_changes_the_listed_name_and_recreate_copies_the_settings() {
     act(&mut app, Act::Edit(path));
     act(&mut app, Act::ReCreate);
     let form = launcher(&app).form.clone();
-    assert_eq!(form.name, "New name (copy)");
+    assert_eq!(form.name, "New name \u{2014} new world");
     assert_eq!(form.seed, "42");
     assert_eq!(form.voxel_size_m, 0.5);
 }
@@ -716,7 +716,7 @@ fn creating_takes_two_steps_and_back_keeps_the_picks() {
 }
 
 #[test]
-fn a_world_lists_its_mods_and_recreate_opens_them_on_step_two() {
+fn a_world_lists_its_mods_and_recreate_opens_them_on_review() {
     let worlds = Directory::new();
     let mut world = details("Lit", true);
     world.mods = vec![library::ModRef {
@@ -740,7 +740,7 @@ fn a_world_lists_its_mods_and_recreate_opens_them_on_step_two() {
         .any(|t| t.0 == "Glassworks");
     assert!(listed, "the World's Mods are named");
     act(&mut app, Act::ReCreate);
-    assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
     assert!(launcher(&app).form.mods.contains("glassworks"));
     assert!(!launcher(&app).form.mods.contains("lamps"));
 }
@@ -2366,11 +2366,10 @@ fn create_from_these_settings_prefills_every_step() {
     let form = launcher(&app).form.clone();
     assert_eq!(
         (form.name.as_str(), form.seed.as_str(), form.voxel_size_m),
-        ("Liked (copy)", "42", 0.5)
+        ("Liked \u{2014} new world", "42", 0.5)
     );
     assert_eq!(form.game_mode, GameMode::Survival);
-    act(&mut app, Act::Next);
-    act(&mut app, Act::Next);
+    act(&mut app, Act::Back);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
     let draft = launcher(&app).form.biomes.clone().unwrap();
     assert!(!draft.choices[0].enabled, "the Biome stays off");
@@ -3446,5 +3445,45 @@ fn edit_world_shows_one_game_mode_that_sets_the_worlds_default_and_the_players_o
             default: Some(GameMode::Survival),
             own: Some(GameMode::Survival),
         }
+    );
+}
+
+#[test]
+fn new_world_with_these_settings_opens_review_filled_in_with_a_fresh_name_and_create_focused() {
+    let worlds = Directory::new();
+    let world = Sidecar {
+        mods: vec![library::ModRef {
+            id: "lamps".into(),
+            version: "1".into(),
+        }],
+        ..details("Liked", true)
+    };
+    let path = library::create(&worlds.0, &world).unwrap();
+    std::fs::write(path.join("00000001.commit"), b"terrain").unwrap();
+    let (mut app, _pad) = pad_app(
+        &worlds,
+        Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
+    );
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path));
+    act(&mut app, Act::ReCreate);
+    app.update();
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Create(Step::Review),
+        "no new Trust for the same Game and Mods"
+    );
+    assert_eq!(launcher(&app).form.name, "Liked \u{2014} new world");
+    assert!(launcher(&app).form.biomes.is_some(), "the Biomes are read");
+    assert_eq!(focused_act(&app), Some(Act::Create));
+    act(&mut app, Act::Create);
+    let copy = created(&app);
+    assert_eq!((copy.seed, copy.mods.len()), (42, 1));
+    let Some(Target::World(new)) = app.world().resource::<Switch>().0.clone() else {
+        unreachable!()
+    };
+    assert!(
+        !new.join("00000001.commit").exists(),
+        "nothing built carries over"
     );
 }
