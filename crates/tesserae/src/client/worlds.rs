@@ -4,11 +4,13 @@
 
 mod create;
 mod edit_world;
+mod mods;
 mod open;
 pub(super) mod pages;
 
 use create::*;
 use edit_world::*;
+use mods::{Bulk, ModSort, ModView, Pop, on_mods};
 use open::*;
 
 use std::path::{Path, PathBuf};
@@ -358,9 +360,10 @@ struct Launcher {
     /// Edit World's choice of modes.
     modes: Modes,
     search: String,
-    /// The Mods step's search and category tab; `None` shows every category.
     mod_search: String,
-    mod_tab: Option<String>,
+    mod_view: ModView,
+    /// The control the last act came from, focused again when its page is rebuilt.
+    refocus: Option<Act>,
     /// Disclosure rows the player has flipped from how they start.
     flipped: std::collections::BTreeSet<Disclosure>,
     problem: Option<String>,
@@ -417,6 +420,8 @@ impl Launcher {
     fn show(&mut self, screen: Screen) {
         self.screen = screen;
         self.problem = None;
+        self.mod_view.pop = None;
+        self.refocus = None;
         self.version += 1;
     }
 
@@ -486,7 +491,14 @@ pub(super) enum Act {
     TrustStep,
     Dismiss,
     Disclose(Disclosure),
-    ModTab(Option<String>),
+    /// Opens or closes a popup beside the Mods search.
+    ModPop(Pop),
+    ModCategory(String),
+    ModSelectedOnly,
+    ModFilterReset,
+    ModSort(ModSort),
+    /// The Mods step's tri-state box: ticks every Mod shown, or clears them.
+    SelectShownMods,
 }
 
 #[derive(Resource, Default)]
@@ -696,6 +708,7 @@ fn logic(app: &mut App) {
                 render,
                 show_filter,
                 filter,
+                pages::paint_bulk,
                 placeholders,
                 opening,
                 (
@@ -826,7 +839,8 @@ fn start(
         modes: Modes::default(),
         search: String::new(),
         mod_search: String::new(),
-        mod_tab: None,
+        mod_view: ModView::default(),
+        refocus: None,
         flipped: Default::default(),
         problem: None,
         clashes: Default::default(),
@@ -1097,6 +1111,14 @@ fn handle(
     };
     for act in std::mem::take(&mut queue.0) {
         let l = &mut *l;
+        l.refocus = None;
+        let popup = matches!(
+            act,
+            Act::ModPop(..) | Act::ModCategory(..) | Act::ModSelectedOnly | Act::ModFilterReset
+        );
+        if !popup && act != Act::Back && l.mod_view.pop.take().is_some() {
+            l.version += 1;
+        }
         match act {
             Act::Continue | Act::Play(..) | Act::Trust => on_open(l, &mut cx, act),
             Act::Edit(..)
@@ -1138,8 +1160,13 @@ fn handle(
             | Act::Quit
             | Act::Back
             | Act::Dismiss
-            | Act::Disclose(..)
-            | Act::ModTab(..) => navigate(l, &mut cx, act),
+            | Act::Disclose(..) => navigate(l, &mut cx, act),
+            Act::ModPop(..)
+            | Act::ModCategory(..)
+            | Act::ModSelectedOnly
+            | Act::ModFilterReset
+            | Act::ModSort(..)
+            | Act::SelectShownMods => on_mods(l, cx.installed, act),
         }
     }
 }
@@ -1176,8 +1203,8 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             l.version += 1;
         }
-        Act::ModTab(tab) => {
-            l.mod_tab = tab;
+        Act::Back if l.mod_view.pop.is_some() => {
+            l.refocus = l.mod_view.pop.take().map(Act::ModPop);
             l.version += 1;
         }
         // Escape answers the reset dialog rather than leaving the step under it.
@@ -1256,6 +1283,18 @@ fn render(
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
+                focus.set(entity, FocusCause::Auto);
+            }
+        });
+    }
+    if let Some(act) = l.refocus.clone() {
+        commands.queue(move |world: &mut World| {
+            let again = world
+                .query::<(Entity, &Act)>()
+                .iter(world)
+                .find_map(|(e, a)| (*a == act).then_some(e));
+            if let (Some(entity), Some(mut focus)) = (again, world.get_resource_mut::<InputFocus>())
+            {
                 focus.set(entity, FocusCause::Auto);
             }
         });

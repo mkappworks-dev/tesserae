@@ -101,6 +101,7 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 }
             }
             l.clashes = cx.installed.clashes(&game, &l.form.mods);
+            l.refocus = Some(Act::ToggleMod(index));
             l.version += 1;
         }
         Act::TrustStep => {

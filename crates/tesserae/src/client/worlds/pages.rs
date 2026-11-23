@@ -95,7 +95,7 @@ pub(super) fn spawn(
                 Screen::Library => library_page(main, installed, thumbnails, scroll),
                 Screen::Create(Step::Game) => game_page(main, l, installed, thumbnails, scroll),
                 Screen::Create(Step::World) => form(main, l, installed, scroll),
-                Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
+                Screen::Create(Step::Mods) => mods_page(main, l, installed, thumbnails, scroll),
                 Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
                 Screen::Create(Step::Review) => review(main, l, installed, scroll),
                 Screen::Delete(_) | Screen::Discard(_) | Screen::StepTrust { .. } => None,
@@ -1884,11 +1884,71 @@ fn game_picture(row: &mut ChildSpawnerCommands, picture: Picture) {
     }
 }
 
-/// Step two: the Mods, with what the Game needs locked on and what would clash left out.
+/// The Mods step's list, whose children are the Mod cards in the order shown.
+#[derive(Component)]
+pub(super) struct ModList;
+
+/// The Mod a card on the Mods step shows.
+#[derive(Component)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "only tests ask which Mod a card is")
+)]
+pub(super) struct ModId(pub(super) String);
+
+/// The number on the filter icon.
+#[derive(Component)]
+pub(super) struct FilterBadge;
+
+/// The select-all box, as last drawn; typing a search repaints it without a rebuild.
+#[derive(Component)]
+pub(super) struct BulkTick(Bulk);
+
+#[derive(Component)]
+pub(super) struct BulkCount;
+
+fn bulk_label(chosen: usize, total: usize) -> String {
+    format!("{chosen} of {total} selected")
+}
+
+/// Keeps the select-all box and its count true to the search, which filters in place.
+pub(super) fn paint_bulk(
+    mut commands: Commands,
+    launcher: Option<Res<Launcher>>,
+    installed: Res<Installed>,
+    mut counts: Query<&mut Text, With<BulkCount>>,
+    mut ticks: Query<(Entity, &mut BulkTick)>,
+) {
+    let Some(l) = launcher else {
+        return;
+    };
+    if ticks.is_empty() {
+        return;
+    }
+    let (state, chosen, total) = mods::bulk(&l, &installed);
+    for mut text in &mut counts {
+        let wanted = bulk_label(chosen, total);
+        if text.0 != wanted {
+            text.0 = wanted;
+        }
+    }
+    for (entity, mut tick) in &mut ticks {
+        if tick.0 != state {
+            tick.0 = state;
+            commands
+                .entity(entity)
+                .despawn_related::<Children>()
+                .with_children(|b| check_box(b, state, true, 20.0));
+        }
+    }
+}
+
+/// Step three: the Mods, with what the Game needs locked on and what would clash left out.
 fn mods_page(
     main: &mut ChildSpawnerCommands,
     l: &Launcher,
     installed: &Installed,
+    thumbnails: &Thumbnails,
     scroll: Vec2,
 ) -> Option<Entity> {
     let f = &l.form;
@@ -1914,94 +1974,74 @@ fn mods_page(
             },
         );
         gap(col, 20.0);
-        text_field(
-            col,
-            Field::ModSearch,
-            &l.mod_search,
-            "",
-            "Search installed Mods\u{2026}",
-        );
-        gap(col, 20.0);
-        let sections = sections(installed, &[]);
+        search_line(col, l, installed);
+        gap(col, 14.0);
+        let (state, chosen, total) = mods::bulk(l, installed);
         col.spawn((
-            BorderColor::all(theme::edge()),
+            bevy::ui_widgets::Button,
+            TabIndex(0),
+            Act::SelectShownMods,
+            Pick {
+                fill: Color::NONE,
+                edge: Color::NONE,
+                hover: None,
+            },
             Node {
-                column_gap: Val::Px(15.0),
-                border: UiRect::bottom(Val::Px(theme::RULE)),
-                flex_wrap: FlexWrap::Wrap,
+                align_self: AlignSelf::FlexStart,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                padding: UiRect::axes(Val::Px(15.0), Val::Px(6.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                 flex_shrink: 0.0,
                 ..default()
             },
         ))
-        .with_children(|tabs| {
-            buttons::button(
-                tabs,
-                "All",
-                Act::ModTab(None),
-                ButtonStyle::Tab {
-                    selected: l.mod_tab.is_none(),
-                },
-            );
-            for (name, _) in &sections {
-                buttons::button(
-                    tabs,
-                    name.clone(),
-                    Act::ModTab(Some(name.clone())),
-                    ButtonStyle::Tab {
-                        selected: l.mod_tab.as_ref() == Some(name),
-                    },
-                );
-            }
+        .with_children(|bar| {
+            bar.spawn((BulkTick(state), Node::default(), Pickable::IGNORE))
+                .with_children(|b| check_box(b, state, true, 20.0));
+            bar.spawn((
+                BulkCount,
+                Text::new(bulk_label(chosen, total)),
+                theme::font(theme::TEXT_SMALL),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+            ));
         });
-        gap(col, 17.0);
-        let shown = |id: &str| {
-            l.mod_tab
-                .as_ref()
-                .is_none_or(|tab| installed.about(id).0.unwrap_or(OTHER_SECTION) == tab.as_str())
-        };
-        col.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
+        gap(col, 10.0);
+        col.spawn((
+            ModList,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
         .with_children(|list| {
-            for id in required.iter().filter(|id| shown(id)) {
-                if let Some(m) = installed.mods.iter().find(|m| &m.id == id) {
-                    let (_, about) = installed.about(id);
-                    mod_card(
-                        list,
-                        ModCard {
-                            act: None,
-                            check: Some((true, false)),
-                            picture: None,
-                            border: theme::edge(),
-                            title: ui::title(&m.id),
-                            detail: about.unwrap_or_default().to_owned(),
-                            adds: None,
-                            tag: Some(("Required".to_owned(), theme::category_ink())),
-                        },
-                    );
-                }
-            }
-            for i in sections.iter().flat_map(|(_, mods)| mods.iter().copied()) {
+            for i in mods::listed(l, installed) {
                 let m = &installed.mods[i];
-                if required.contains(&m.id) || !shown(&m.id) {
-                    continue;
-                }
                 let (category, about) = installed.about(&m.id);
+                let picture = match picture(installed, thumbnails, &m.id) {
+                    Picture::Swatches(colours) if colours.is_empty() => None,
+                    picture => Some(picture),
+                };
                 let ticked = f.mods.contains(&m.id);
                 let mut card = ModCard {
                     act: Some(Act::ToggleMod(i)),
                     check: Some((ticked, true)),
-                    picture: None,
+                    picture,
                     border: theme::edge(),
                     title: ui::title(&m.id),
                     detail: about.unwrap_or_default().to_owned(),
-                    adds: None,
+                    adds: installed.adds(&m.id),
                     tag: category.map(|c| (c.to_owned(), theme::category_ink())),
                 };
-                if let Some(why) = installed.blocked(&game, &m.id) {
+                if required.contains(&m.id) {
+                    card.act = None;
+                    card.check = Some((true, false));
+                    card.tag = Some(("Required".to_owned(), theme::category_ink()));
+                } else if let Some(why) = installed.blocked(&game, &m.id) {
                     card.act = None;
                     card.check = Some((false, false));
                     card.detail = format!("Unavailable: {why}");
@@ -2025,12 +2065,14 @@ fn mods_page(
                     card.check = Some((true, false));
                     card.tag = Some(("Needed by another Mod".to_owned(), theme::category_ink()));
                 }
-                let words = format!("{} {}", card.title, card.detail);
                 let entity = mod_card(list, card);
-                list.commands().entity(entity).insert(WorldCard {
-                    words,
-                    by: Field::ModSearch,
-                });
+                list.commands().entity(entity).insert((
+                    ModId(m.id.clone()),
+                    WorldCard {
+                        words: mods::words(installed, &m.id),
+                        by: Field::ModSearch,
+                    },
+                ));
             }
         });
         col.spawn((
@@ -2068,6 +2110,261 @@ fn mods_page(
             theme::muted(),
         );
     })
+}
+
+/// The Mods search, with the Filter and Sort icons that open their popups beside it.
+fn search_line(col: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) {
+    let view = &l.mod_view;
+    col.spawn(Node {
+        column_gap: Val::Px(8.0),
+        align_items: AlignItems::Center,
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|line| {
+        line.spawn(Node {
+            flex_grow: 1.0,
+            min_width: Val::Px(0.0),
+            ..default()
+        })
+        .with_children(|search| {
+            text_field(
+                search,
+                Field::ModSearch,
+                &l.mod_search,
+                "",
+                "Search installed Mods\u{2026}",
+            );
+        });
+        pop_icon(line, IconKind::Filter, Pop::Filter, view, |pop| {
+            pop_heading(pop, "Category");
+            for (name, mods) in sections(installed, &[]) {
+                let on = view.categories.contains(&name);
+                pop_row(
+                    pop,
+                    Act::ModCategory(name.clone()),
+                    |row| tick_box(row, on, true, 18.0),
+                    &name,
+                    Some(mods.len()),
+                );
+            }
+            pop_heading(pop, "Show");
+            pop_row(
+                pop,
+                Act::ModSelectedOnly,
+                |row| tick_box(row, view.selected_only, true, 18.0),
+                "Selected only",
+                None,
+            );
+            pop.spawn(Node {
+                justify_content: JustifyContent::FlexEnd,
+                margin: UiRect::top(Val::Px(8.0)),
+                ..default()
+            })
+            .with_children(|foot| {
+                if view.filters() > 0 {
+                    buttons::button(
+                        foot,
+                        "Reset",
+                        Act::ModFilterReset,
+                        ButtonStyle::Small {
+                            kind: Kind::Primary,
+                        },
+                    );
+                } else {
+                    // Nothing to reset: shown, but not a control.
+                    foot.spawn((
+                        Text::new("Reset"),
+                        theme::font(theme::TEXT_SMALL),
+                        TextColor(theme::muted().with_alpha(0.5)),
+                        Node {
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                            ..default()
+                        },
+                    ));
+                }
+            });
+        });
+        pop_icon(line, IconKind::Sort, Pop::Sort, view, |pop| {
+            for sort in ModSort::ALL {
+                let chosen = view.sort == sort;
+                pop_row(
+                    pop,
+                    Act::ModSort(sort),
+                    |row| {
+                        row.spawn(Node {
+                            width: Val::Px(18.0),
+                            height: Val::Px(18.0),
+                            flex_shrink: 0.0,
+                            ..default()
+                        })
+                        .with_children(|mark| {
+                            if chosen {
+                                ui::icon(mark, IconKind::Check, theme::SAGE, 18.0);
+                            }
+                        });
+                    },
+                    sort.label(),
+                    None,
+                );
+            }
+        });
+    });
+}
+
+/// An icon button that opens `pop`, its badge counting the filters set, and the popup when open.
+fn pop_icon(
+    line: &mut ChildSpawnerCommands,
+    kind: IconKind,
+    pop: Pop,
+    view: &ModView,
+    body: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    let badge = if pop == Pop::Filter {
+        view.filters()
+    } else {
+        0
+    };
+    line.spawn(Node {
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|wrap| {
+        wrap.spawn((
+            bevy::ui_widgets::Button,
+            TabIndex(0),
+            Act::ModPop(pop),
+            BackgroundColor(theme::FIELD),
+            BorderColor::all(theme::field_edge()),
+            Pick {
+                fill: theme::FIELD,
+                edge: theme::field_edge(),
+                hover: None,
+            },
+            Node {
+                width: Val::Px(theme::CONTROL_HEIGHT),
+                height: Val::Px(theme::CONTROL_HEIGHT),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
+        .with_children(|b| {
+            ui::icon(b, kind, theme::INK, 18.0);
+            if badge > 0 {
+                b.spawn((
+                    BackgroundColor(theme::SAGE),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top: Val::Px(-6.0),
+                        right: Val::Px(-6.0),
+                        min_width: Val::Px(18.0),
+                        height: Val::Px(18.0),
+                        padding: UiRect::horizontal(Val::Px(4.0)),
+                        border_radius: BorderRadius::all(Val::Px(9.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .with_children(|dot| {
+                    dot.spawn((
+                        FilterBadge,
+                        Text::new(badge.to_string()),
+                        theme::font(theme::TEXT_TAG),
+                        TextColor(theme::SAGE_INK),
+                        Pickable::IGNORE,
+                    ));
+                });
+            }
+        });
+        if view.pop != Some(pop) {
+            return;
+        }
+        wrap.spawn((
+            BackgroundColor(theme::RAISED),
+            BorderColor::all(theme::edge()),
+            GlobalZIndex(10),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(theme::CONTROL_HEIGHT + 6.0),
+                right: Val::Px(0.0),
+                width: Val::Px(260.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                padding: UiRect::all(Val::Px(8.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+                ..default()
+            },
+        ))
+        .with_children(body);
+    });
+}
+
+fn pop_heading(pop: &mut ChildSpawnerCommands, value: &str) {
+    pop.spawn((
+        Text::new(value.to_uppercase()),
+        theme::font(theme::TEXT_TAG),
+        bevy::text::LetterSpacing::Px(0.44),
+        TextColor(theme::muted()),
+        Node {
+            margin: UiRect::new(Val::Px(8.0), Val::Px(0.0), Val::Px(6.0), Val::Px(4.0)),
+            ..default()
+        },
+    ));
+}
+
+/// A popup row: its mark, a label and an optional count, the whole row the button.
+fn pop_row(
+    pop: &mut ChildSpawnerCommands,
+    act: Act,
+    mark: impl FnOnce(&mut ChildSpawnerCommands),
+    label: &str,
+    count: Option<usize>,
+) {
+    pop.spawn((
+        bevy::ui_widgets::Button,
+        TabIndex(0),
+        act,
+        Pick {
+            fill: Color::NONE,
+            edge: Color::NONE,
+            hover: Some((theme::CHOSEN, Color::NONE)),
+        },
+        Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            padding: UiRect::axes(Val::Px(8.0), Val::Px(7.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+            ..default()
+        },
+    ))
+    .with_children(|row| {
+        mark(row);
+        row.spawn((
+            Text::new(label),
+            theme::font(theme::TEXT_SMALL),
+            TextColor(theme::INK),
+            Node {
+                flex_grow: 1.0,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ));
+        if let Some(count) = count {
+            row.spawn((
+                Text::new(count.to_string()),
+                theme::font(theme::TEXT_SMALL),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+            ));
+        }
+    });
 }
 
 /// What one Mod card shows. `act` makes it a button; without one it only informs.
@@ -2245,6 +2542,13 @@ fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) -> Entity {
 
 /// A checkbox drawn inside a card that is itself the button.
 fn tick_box(parent: &mut ChildSpawnerCommands, ticked: bool, enabled: bool, size: f32) {
+    let state = if ticked { Bulk::All } else { Bulk::None };
+    check_box(parent, state, enabled, size);
+}
+
+/// A checkbox that can also show a dash, for some of a set.
+fn check_box(parent: &mut ChildSpawnerCommands, state: Bulk, enabled: bool, size: f32) {
+    let ticked = state != Bulk::None;
     let fade = |colour: Color| {
         if enabled {
             colour
@@ -2288,8 +2592,21 @@ fn tick_box(parent: &mut ChildSpawnerCommands, ticked: bool, enabled: bool, size
             },
             Pickable::IGNORE,
         ));
-        if ticked {
-            ui::icon(b, IconKind::Check, fade(theme::SAGE_INK), size * 0.75);
+        match state {
+            Bulk::All => ui::icon(b, IconKind::Check, fade(theme::SAGE_INK), size * 0.75),
+            Bulk::Some => {
+                b.spawn((
+                    BackgroundColor(fade(theme::SAGE_INK)),
+                    Node {
+                        width: Val::Px(size * 0.5),
+                        height: Val::Px(2.0),
+                        border_radius: BorderRadius::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
+            Bulk::None => {}
         }
     });
 }
@@ -2306,7 +2623,7 @@ pub(super) struct Pick {
 }
 
 /// The section of a Mod whose Manifest names none.
-const OTHER_SECTION: &str = "Other";
+pub(super) const OTHER_SECTION: &str = "Other";
 
 /// Optional Mods grouped under their Manifest's category, known sections first, then the rest
 /// alphabetically, with uncategorised ones last. Each holds indexes into `installed.mods`.

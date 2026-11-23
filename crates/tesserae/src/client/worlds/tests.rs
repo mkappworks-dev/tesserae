@@ -834,31 +834,181 @@ fn create_asks_for_trust_on_its_own_page_only_when_it_was_revoked_after_the_mods
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
 }
 
-#[test]
-fn the_mods_step_shows_one_category_per_tab_and_filters_by_search() {
+fn three_mods() -> Installed {
     let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[])
         .with_mod("lamps", &[])
-        .with_mod("strata", &[]);
+        .with_mod("strata", &[])
+        .with_mod("clay", &[]);
     installed.set_about("lamps", Some("Fire & light"), Some("Glowstone"));
-    installed.set_about("strata", Some("Terrain"), Some("Stone and clay"));
-    let worlds = Directory::new();
-    let mut app = app(&worlds, installed);
+    installed.set_about("strata", Some("Terrain"), Some("Stone layers"));
+    installed.set_about("clay", Some("Terrain"), Some("Riverbank clay"));
+    installed
+}
+
+fn on_mods_step(app: &mut App) {
     app.update();
-    new_world(&mut app);
-    act(&mut app, Act::Next);
-    assert!(shown(&mut app, "Lamps") && shown(&mut app, "Strata"));
-    act(&mut app, Act::ModTab(Some("Terrain".into())));
-    assert!(shown(&mut app, "Strata") && !shown(&mut app, "Lamps"));
-    act(&mut app, Act::ModTab(None));
-    type_into(&mut app, Field::ModSearch, "glow");
-    let visible: Vec<String> = app
+    new_world(app);
+    act(app, Act::Next);
+    assert_eq!(launcher(app).screen, Screen::Create(Step::Mods));
+}
+
+/// The Mods the step lists, top to bottom, leaving out those the search hides.
+fn mods_listed(app: &mut App) -> Vec<String> {
+    let list = app
         .world_mut()
-        .query::<(&WorldCard, &Node)>()
+        .query_filtered::<&Children, With<pages::ModList>>()
+        .single(app.world())
+        .unwrap()
+        .to_vec();
+    list.into_iter()
+        .filter(|&e| app.world().get::<Node>(e).unwrap().display != Display::None)
+        .filter_map(|e| app.world().get::<pages::ModId>(e).map(|m| m.0.clone()))
+        .collect()
+}
+
+fn picked(app: &App) -> Vec<String> {
+    launcher(app).form.mods.iter().cloned().collect()
+}
+
+#[test]
+fn the_mods_step_filters_by_category_and_selection_and_badges_the_filter() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods());
+    on_mods_step(&mut app);
+    assert_eq!(mods_listed(&mut app), ["clay", "lamps", "strata"]);
+    act(&mut app, Act::ModPop(Pop::Filter));
+    assert!(
+        !app.world_mut()
+            .query::<&Act>()
+            .iter(app.world())
+            .any(|a| *a == Act::ModFilterReset),
+        "Reset does nothing until a filter is set"
+    );
+    act(&mut app, Act::ModCategory("Terrain".into()));
+    assert_eq!(mods_listed(&mut app), ["clay", "strata"]);
+    assert_eq!(
+        filter_badge(&mut app),
+        Some("1".into()),
+        "the icon counts what is set"
+    );
+    act(&mut app, Act::ToggleMod(2));
+    assert_eq!(
+        launcher(&app).mod_view.pop,
+        None,
+        "a click elsewhere closes it"
+    );
+    act(&mut app, Act::ModPop(Pop::Filter));
+    act(&mut app, Act::ModSelectedOnly);
+    assert_eq!(mods_listed(&mut app), ["clay"]);
+    assert_eq!(filter_badge(&mut app), Some("2".into()));
+    act(&mut app, Act::ModFilterReset);
+    assert_eq!(mods_listed(&mut app), ["clay", "lamps", "strata"]);
+    assert_eq!(filter_badge(&mut app), None);
+}
+
+fn filter_badge(app: &mut App) -> Option<String> {
+    app.world_mut()
+        .query_filtered::<&Text, With<pages::FilterBadge>>()
         .iter(app.world())
-        .filter(|(_, node)| node.display != Display::None)
-        .map(|(card, _)| card.words.clone())
-        .collect();
-    assert_eq!(visible, ["Lamps Glowstone"]);
+        .next()
+        .map(|t| t.0.clone())
+}
+
+#[test]
+fn the_mods_step_sorts_by_name_category_or_selection() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods());
+    on_mods_step(&mut app);
+    act(&mut app, Act::ModPop(Pop::Sort));
+    act(&mut app, Act::ModSort(ModSort::NameDescending));
+    assert_eq!(mods_listed(&mut app), ["strata", "lamps", "clay"]);
+    assert_eq!(
+        launcher(&app).mod_view.pop,
+        None,
+        "picking a sort closes it"
+    );
+    act(&mut app, Act::ModPop(Pop::Sort));
+    act(&mut app, Act::ModSort(ModSort::Category));
+    assert_eq!(mods_listed(&mut app), ["clay", "strata", "lamps"]);
+    act(&mut app, Act::ToggleMod(1));
+    act(&mut app, Act::ModPop(Pop::Sort));
+    act(&mut app, Act::ModSort(ModSort::SelectedFirst));
+    assert_eq!(mods_listed(&mut app), ["strata", "clay", "lamps"]);
+}
+
+#[test]
+fn a_popup_takes_focus_and_escape_closes_it_back_onto_its_icon() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods());
+    on_mods_step(&mut app);
+    act(&mut app, Act::ModPop(Pop::Filter));
+    app.update();
+    assert_eq!(focused_act(&app), Some(Act::ModCategory("Terrain".into())));
+    act(&mut app, Act::ModCategory("Terrain".into()));
+    app.update();
+    assert_eq!(
+        focused_act(&app),
+        Some(Act::ModCategory("Terrain".into())),
+        "a tick keeps the focus"
+    );
+    press(&mut app, KeyCode::Escape);
+    app.update();
+    assert_eq!(launcher(&app).mod_view.pop, None);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+    assert_eq!(focused_act(&app), Some(Act::ModPop(Pop::Filter)));
+}
+
+#[test]
+fn search_hides_mods_in_place() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods());
+    on_mods_step(&mut app);
+    type_into(&mut app, Field::ModSearch, "glow");
+    assert_eq!(mods_listed(&mut app), ["lamps"]);
+}
+
+#[test]
+fn select_all_acts_only_on_the_mods_shown() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods());
+    on_mods_step(&mut app);
+    assert!(shown(&mut app, "0 of 3 selected"));
+    act(&mut app, Act::ModPop(Pop::Filter));
+    act(&mut app, Act::ModCategory("Terrain".into()));
+    act(&mut app, Act::SelectShownMods);
+    assert_eq!(picked(&app), ["clay", "strata"]);
+    assert!(shown(&mut app, "2 of 2 selected"));
+    act(&mut app, Act::SelectShownMods);
+    assert!(picked(&app).is_empty(), "a full set clears");
+    type_into(&mut app, Field::ModSearch, "river");
+    act(&mut app, Act::SelectShownMods);
+    assert_eq!(picked(&app), ["clay"], "the search narrows it too");
+    app.update();
+    assert!(shown(&mut app, "1 of 1 selected"));
+}
+
+#[test]
+fn required_mods_are_listed_on_and_cannot_be_cleared() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods().with_game_depends(&["strata"]));
+    on_mods_step(&mut app);
+    assert_eq!(mods_listed(&mut app), ["clay", "lamps", "strata"]);
+    assert!(shown(&mut app, "Required"));
+    assert!(shown(&mut app, "1 of 3 selected"));
+    act(&mut app, Act::SelectShownMods);
+    act(&mut app, Act::SelectShownMods);
+    assert!(picked(&app).is_empty());
+    assert!(
+        shown(&mut app, "1 of 3 selected"),
+        "the required Mod stays on"
+    );
+    assert!(
+        !app.world_mut()
+            .query::<&Act>()
+            .iter(app.world())
+            .any(|a| *a == Act::ToggleMod(1)),
+        "its card is not a button"
+    );
 }
 
 #[test]

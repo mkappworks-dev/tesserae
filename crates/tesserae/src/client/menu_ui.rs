@@ -966,10 +966,13 @@ pub(super) enum IconKind {
     /// A World slot's Edit and Delete.
     Pencil,
     Trash,
+    /// The Mods step's Filter and Sort popups.
+    Filter,
+    Sort,
 }
-const ICONS: usize = 27;
+const ICONS: usize = 29;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 24] = [
+const DRAWN: [IconKind; 26] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -994,6 +997,8 @@ const DRAWN: [IconKind; 24] = [
     IconKind::Layout,
     IconKind::Pencil,
     IconKind::Trash,
+    IconKind::Filter,
+    IconKind::Sort,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1305,6 +1310,21 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
                 .fold(f32::MAX, f32::min)
                 .min(segment(v(14.0, 17.5), v(21.0, 17.5)))
                 .min(segment(v(17.5, 14.0), v(17.5, 21.0))),
+        ),
+        IconKind::Filter => stroke(path(&[
+            v(3.0, 5.0),
+            v(21.0, 5.0),
+            v(14.0, 13.0),
+            v(14.0, 19.0),
+            v(10.0, 21.0),
+            v(10.0, 13.0),
+            v(3.0, 5.0),
+        ])),
+        IconKind::Sort => stroke(
+            segment(v(7.0, 4.0), v(7.0, 20.0))
+                .min(path(&[v(3.0, 16.0), v(7.0, 20.0), v(11.0, 16.0)]))
+                .min(segment(v(17.0, 20.0), v(17.0, 4.0)))
+                .min(path(&[v(13.0, 8.0), v(17.0, 4.0), v(21.0, 8.0)])),
         ),
         IconKind::Pencil => stroke(
             path(&[
