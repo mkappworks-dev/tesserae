@@ -10,6 +10,7 @@ mod open;
 pub(super) mod pages;
 mod terrain;
 
+use biomes::{BiomeSort, BiomeView, on_biomes};
 use create::*;
 use edit_world::*;
 use mods::{Bulk, ModSort, ModView, Pop, on_mods};
@@ -415,6 +416,8 @@ struct Launcher {
     search: String,
     mod_search: String,
     mod_view: ModView,
+    biome_search: String,
+    biome_view: BiomeView,
     /// The control the last act came from, focused again when its page is rebuilt.
     refocus: Option<Act>,
     /// Disclosure rows the player has flipped from how they start.
@@ -471,6 +474,7 @@ impl Launcher {
         self.screen = screen;
         self.problem = None;
         self.mod_view.pop = None;
+        self.biome_view.pop = None;
         self.refocus = None;
         self.version += 1;
     }
@@ -552,6 +556,15 @@ pub(super) enum Act {
     ModSort(ModSort),
     /// The Mods step's tri-state box: ticks every Mod shown, or clears them.
     SelectShownMods,
+    /// Opens or closes a popup beside the Biomes search.
+    BiomePop(Pop),
+    /// Shows enabled (`true`) or disabled Biomes.
+    BiomeStatus(bool),
+    BiomeCustomised,
+    BiomeFilterReset,
+    BiomeSort(BiomeSort),
+    /// The Biomes step's tri-state box: turns on every Biome shown, or turns them off.
+    SelectShownBiomes,
 }
 
 #[derive(Resource, Default)]
@@ -564,6 +577,7 @@ enum Field {
     Rename,
     Search,
     ModSearch,
+    BiomeSearch,
     Sky,
     Fog,
     TemperatureSize,
@@ -580,8 +594,8 @@ struct Root;
 #[derive(Component)]
 struct PageScroll;
 
-/// One World on the Worlds screen, or one Mod on the Mods step, with the
-/// words that field's search matches.
+/// One World on the Worlds screen, one Mod on the Mods step or one Biome on the Biomes step,
+/// with the words that field's search matches.
 #[derive(Component)]
 struct WorldCard {
     words: String,
@@ -902,6 +916,8 @@ fn start(
         search: String::new(),
         mod_search: String::new(),
         mod_view: ModView::default(),
+        biome_search: String::new(),
+        biome_view: BiomeView::default(),
         refocus: None,
         flipped: Default::default(),
         problem: None,
@@ -999,7 +1015,7 @@ fn keys(
             | Field::TemperatureSize
             | Field::HumiditySize => queue.0.push(Act::Next),
             Field::Rename => queue.0.push(Act::SaveName),
-            Field::Search | Field::ModSearch => {}
+            Field::Search | Field::ModSearch | Field::BiomeSearch => {}
         }
     }
 }
@@ -1034,6 +1050,7 @@ fn sync_fields(
             // Typing filters the cards in place; a rebuild would take the field's focus.
             Field::Search => launcher.bypass_change_detection().search = value,
             Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
+            Field::BiomeSearch => launcher.bypass_change_detection().biome_search = value,
         }
     }
     for mut text in &mut resolved {
@@ -1053,12 +1070,10 @@ fn filter(
     let Some(launcher) = launcher else {
         return;
     };
-    let query = |by: Field| {
-        if by == Field::ModSearch {
-            &launcher.mod_search
-        } else {
-            &launcher.search
-        }
+    let query = |by: Field| match by {
+        Field::ModSearch => &launcher.mod_search,
+        Field::BiomeSearch => &launcher.biome_search,
+        _ => &launcher.search,
     };
     let mut any = std::collections::BTreeSet::new();
     for (card, mut node) in &mut cards {
@@ -1179,9 +1194,19 @@ fn handle(
         l.refocus = None;
         let popup = matches!(
             act,
-            Act::ModPop(..) | Act::ModCategory(..) | Act::ModSelectedOnly | Act::ModFilterReset
+            Act::ModPop(..)
+                | Act::ModCategory(..)
+                | Act::ModSelectedOnly
+                | Act::ModFilterReset
+                | Act::BiomePop(..)
+                | Act::BiomeStatus(..)
+                | Act::BiomeCustomised
+                | Act::BiomeFilterReset
         );
-        if !popup && act != Act::Back && l.mod_view.pop.take().is_some() {
+        if !popup
+            && act != Act::Back
+            && (l.mod_view.pop.take().is_some() | l.biome_view.pop.take().is_some())
+        {
             l.version += 1;
         }
         match act {
@@ -1233,6 +1258,12 @@ fn handle(
             | Act::ModFilterReset
             | Act::ModSort(..)
             | Act::SelectShownMods => on_mods(l, cx.installed, act),
+            Act::BiomePop(..)
+            | Act::BiomeStatus(..)
+            | Act::BiomeCustomised
+            | Act::BiomeFilterReset
+            | Act::BiomeSort(..)
+            | Act::SelectShownBiomes => on_biomes(l, act),
         }
     }
 }
@@ -1271,6 +1302,10 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
         }
         Act::Back if l.mod_view.pop.is_some() => {
             l.refocus = l.mod_view.pop.take().map(Act::ModPop);
+            l.version += 1;
+        }
+        Act::Back if l.biome_view.pop.is_some() => {
+            l.refocus = l.biome_view.pop.take().map(Act::BiomePop);
             l.version += 1;
         }
         // Escape answers the reset dialog rather than leaving the step under it.

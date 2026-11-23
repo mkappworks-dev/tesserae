@@ -1773,6 +1773,145 @@ fn reset_restores_the_open_biome_and_reset_all_restores_every_biome() {
     assert_eq!(edited(&app, 1), declared("t:meadow", 0.3));
 }
 
+fn three_biomes(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
+    let biome = |name: &str, temperature: f32, humidity: f32| BiomeChoice {
+        humidity,
+        ..declared(name, temperature)
+    };
+    Ok(BiomePreview {
+        biomes: vec![
+            biome("t:zebra_plains", 0.5, 0.2),
+            biome("t:ash_flats", 0.7, 0.6),
+            biome("t:meadow", 0.3, 0.9),
+        ],
+        ..fake_preview(&Installed::fake(None, &[]), &[])?
+    })
+}
+
+fn to_three_biomes() -> (App, Directory) {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.insert_resource(Previewer(three_biomes));
+    app.update();
+    new_world(&mut app);
+    act(&mut app, Act::Next);
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    (app, worlds)
+}
+
+/// The Biomes the step lists, top to bottom, leaving out those the search hides.
+fn biomes_listed(app: &mut App) -> Vec<String> {
+    let list = app
+        .world_mut()
+        .query_filtered::<&Children, With<pages::BiomeList>>()
+        .single(app.world())
+        .unwrap()
+        .to_vec();
+    let names = launcher(app)
+        .form
+        .biomes
+        .as_ref()
+        .unwrap()
+        .choices
+        .iter()
+        .map(|c| ui::declared_title(&c.name))
+        .collect::<Vec<_>>();
+    list.into_iter()
+        .filter_map(|row| {
+            let at = app.world().get::<pages::BiomeRow>(row)?.0;
+            let node = app.world().get::<Node>(row)?;
+            (node.display != Display::None).then(|| names[at].clone())
+        })
+        .collect()
+}
+
+fn bulk_shown(app: &mut App) -> (Bulk, String) {
+    let tick = app
+        .world_mut()
+        .query::<&pages::BulkTick>()
+        .single(app.world())
+        .unwrap()
+        .state();
+    let count = app
+        .world_mut()
+        .query_filtered::<&Text, With<pages::BulkCount>>()
+        .single(app.world())
+        .unwrap()
+        .0
+        .clone();
+    (tick, count)
+}
+
+#[test]
+fn the_biomes_step_sorts_by_game_order_name_temperature_or_humidity() {
+    let (mut app, _worlds) = to_three_biomes();
+    assert_eq!(
+        biomes_listed(&mut app),
+        ["Zebra plains", "Ash flats", "Meadow"]
+    );
+    for (sort, order) in [
+        (BiomeSort::Name, ["Ash flats", "Meadow", "Zebra plains"]),
+        (
+            BiomeSort::Temperature,
+            ["Meadow", "Zebra plains", "Ash flats"],
+        ),
+        (BiomeSort::Humidity, ["Zebra plains", "Ash flats", "Meadow"]),
+        (BiomeSort::Game, ["Zebra plains", "Ash flats", "Meadow"]),
+    ] {
+        act(&mut app, Act::BiomePop(Pop::Sort));
+        act(&mut app, Act::BiomeSort(sort));
+        assert_eq!(biomes_listed(&mut app), order, "{sort:?}");
+        assert_eq!(launcher(&app).biome_view.pop, None, "choosing closes it");
+    }
+}
+
+#[test]
+fn the_biomes_step_filters_by_status_and_customisation_and_searches_in_place() {
+    let (mut app, _worlds) = to_three_biomes();
+    act(&mut app, Act::ToggleBiome(0));
+    act(&mut app, Act::SelectBiome(1));
+    slide(&mut app, Knob::Caves, 0.0);
+    act(&mut app, Act::CloseBiome);
+    act(&mut app, Act::BiomePop(Pop::Filter));
+    act(&mut app, Act::BiomeStatus(false));
+    assert_eq!(biomes_listed(&mut app), ["Zebra plains"]);
+    assert_eq!(filter_badge(&mut app).as_deref(), Some("1"));
+    act(&mut app, Act::BiomeStatus(true));
+    assert_eq!(biomes_listed(&mut app).len(), 3, "both statuses is all");
+    act(&mut app, Act::BiomeFilterReset);
+    act(&mut app, Act::BiomeCustomised);
+    assert_eq!(biomes_listed(&mut app), ["Ash flats"]);
+    act(&mut app, Act::BiomeFilterReset);
+    assert_eq!(filter_badge(&mut app), None);
+    let version = launcher(&app).version;
+    type_into(&mut app, Field::BiomeSearch, "MEA");
+    assert_eq!(biomes_listed(&mut app), ["Meadow"]);
+    assert_eq!(launcher(&app).version, version, "typing keeps the field");
+    type_into(&mut app, Field::BiomeSearch, "tundra");
+    assert!(biomes_listed(&mut app).is_empty());
+    assert!(shown(&mut app, "No matching Biomes."));
+}
+
+#[test]
+fn the_tri_state_box_turns_the_biomes_shown_on_or_off() {
+    let (mut app, _worlds) = to_three_biomes();
+    assert_eq!(bulk_shown(&mut app), (Bulk::All, "3 of 3 enabled".into()));
+    act(&mut app, Act::SelectShownBiomes);
+    assert_eq!(bulk_shown(&mut app), (Bulk::None, "0 of 3 enabled".into()));
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+    assert!(shown(&mut app, "Turn on at least one Biome to continue."));
+    type_into(&mut app, Field::BiomeSearch, "ash");
+    assert_eq!(bulk_shown(&mut app), (Bulk::None, "0 of 1 enabled".into()));
+    act(&mut app, Act::SelectShownBiomes);
+    assert_eq!(bulk_shown(&mut app), (Bulk::All, "1 of 1 enabled".into()));
+    type_into(&mut app, Field::BiomeSearch, "");
+    assert_eq!(bulk_shown(&mut app), (Bulk::Some, "1 of 3 enabled".into()));
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+}
+
 #[test]
 fn no_biome_left_holds_the_biomes_step() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));

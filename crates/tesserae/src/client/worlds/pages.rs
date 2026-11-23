@@ -1997,11 +1997,58 @@ pub(super) struct FilterBadge;
 #[derive(Component)]
 pub(super) struct BulkTick(Bulk);
 
+impl BulkTick {
+    #[cfg(test)]
+    pub(super) fn state(&self) -> Bulk {
+        self.0
+    }
+}
+
 #[derive(Component)]
 pub(super) struct BulkCount;
 
 fn bulk_label(chosen: usize, total: usize) -> String {
     format!("{chosen} of {total} selected")
+}
+
+fn enabled_label(on: usize, total: usize) -> String {
+    format!("{on} of {total} enabled")
+}
+
+/// The tri-state box over a list, with its count; `paint_bulk` keeps both true to the search.
+fn bulk_box(parent: &mut ChildSpawnerCommands, act: Act, state: Bulk, count: String) {
+    parent
+        .spawn((
+            bevy::ui_widgets::Button,
+            TabIndex(0),
+            act,
+            Pick {
+                fill: Color::NONE,
+                edge: Color::NONE,
+                hover: None,
+            },
+            Node {
+                align_self: AlignSelf::FlexStart,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                padding: UiRect::axes(Val::Px(15.0), Val::Px(6.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|bar| {
+            bar.spawn((BulkTick(state), Node::default(), Pickable::IGNORE))
+                .with_children(|b| check_box(b, state, true, 20.0));
+            bar.spawn((
+                BulkCount,
+                Text::new(count),
+                theme::font(theme::TEXT_SMALL),
+                TextColor(theme::muted()),
+                Pickable::IGNORE,
+            ));
+        });
 }
 
 /// Keeps the select-all box and its count true to the search, which filters in place.
@@ -2018,11 +2065,16 @@ pub(super) fn paint_bulk(
     if ticks.is_empty() {
         return;
     }
-    let (state, chosen, total) = mods::bulk(&l, &installed);
+    let (state, wanted) = if l.screen == Screen::Create(Step::Biomes) {
+        let (state, on, total) = biomes::bulk(&l);
+        (state, enabled_label(on, total))
+    } else {
+        let (state, chosen, total) = mods::bulk(&l, &installed);
+        (state, bulk_label(chosen, total))
+    };
     for mut text in &mut counts {
-        let wanted = bulk_label(chosen, total);
         if text.0 != wanted {
-            text.0 = wanted;
+            text.0.clone_from(&wanted);
         }
     }
     for (entity, mut tick) in &mut ticks {
@@ -2070,37 +2122,7 @@ fn mods_page(
         search_line(col, l, installed);
         gap(col, 14.0);
         let (state, chosen, total) = mods::bulk(l, installed);
-        col.spawn((
-            bevy::ui_widgets::Button,
-            TabIndex(0),
-            Act::SelectShownMods,
-            Pick {
-                fill: Color::NONE,
-                edge: Color::NONE,
-                hover: None,
-            },
-            Node {
-                align_self: AlignSelf::FlexStart,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                padding: UiRect::axes(Val::Px(15.0), Val::Px(6.0)),
-                border: UiRect::all(Val::Px(theme::RULE)),
-                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|bar| {
-            bar.spawn((BulkTick(state), Node::default(), Pickable::IGNORE))
-                .with_children(|b| check_box(b, state, true, 20.0));
-            bar.spawn((
-                BulkCount,
-                Text::new(bulk_label(chosen, total)),
-                theme::font(theme::TEXT_SMALL),
-                TextColor(theme::muted()),
-                Pickable::IGNORE,
-            ));
-        });
+        bulk_box(col, Act::SelectShownMods, state, bulk_label(chosen, total));
         gap(col, 10.0);
         col.spawn((
             ModList,
@@ -2229,7 +2251,12 @@ fn search_line(col: &mut ChildSpawnerCommands, l: &Launcher, installed: &Install
                 "Search installed Mods\u{2026}",
             );
         });
-        pop_icon(line, IconKind::Filter, Pop::Filter, view, |pop| {
+        let filter = (
+            Act::ModPop(Pop::Filter),
+            view.pop == Some(Pop::Filter),
+            view.filters(),
+        );
+        pop_icon(line, IconKind::Filter, filter, |pop| {
             pop_heading(pop, "Category");
             for (name, mods) in sections(installed, &[]) {
                 let on = view.categories.contains(&name);
@@ -2249,54 +2276,16 @@ fn search_line(col: &mut ChildSpawnerCommands, l: &Launcher, installed: &Install
                 "Selected only",
                 None,
             );
-            pop.spawn(Node {
-                justify_content: JustifyContent::FlexEnd,
-                margin: UiRect::top(Val::Px(8.0)),
-                ..default()
-            })
-            .with_children(|foot| {
-                if view.filters() > 0 {
-                    buttons::button(
-                        foot,
-                        "Reset",
-                        Act::ModFilterReset,
-                        ButtonStyle::Small {
-                            kind: Kind::Primary,
-                        },
-                    );
-                } else {
-                    // Nothing to reset: shown, but not a control.
-                    foot.spawn((
-                        Text::new("Reset"),
-                        theme::font(theme::TEXT_SMALL),
-                        TextColor(theme::muted().with_alpha(0.5)),
-                        Node {
-                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-                            ..default()
-                        },
-                    ));
-                }
-            });
+            filter_reset(pop, Act::ModFilterReset, view.filters() > 0);
         });
-        pop_icon(line, IconKind::Sort, Pop::Sort, view, |pop| {
+        let sort = (Act::ModPop(Pop::Sort), view.pop == Some(Pop::Sort), 0);
+        pop_icon(line, IconKind::Sort, sort, |pop| {
             for sort in ModSort::ALL {
                 let chosen = view.sort == sort;
                 pop_row(
                     pop,
                     Act::ModSort(sort),
-                    |row| {
-                        row.spawn(Node {
-                            width: Val::Px(18.0),
-                            height: Val::Px(18.0),
-                            flex_shrink: 0.0,
-                            ..default()
-                        })
-                        .with_children(|mark| {
-                            if chosen {
-                                ui::icon(mark, IconKind::Check, theme::SAGE, 18.0);
-                            }
-                        });
-                    },
+                    |row| sort_mark(row, chosen),
                     sort.label(),
                     None,
                 );
@@ -2305,19 +2294,14 @@ fn search_line(col: &mut ChildSpawnerCommands, l: &Launcher, installed: &Install
     });
 }
 
-/// An icon button that opens `pop`, its badge counting the filters set, and the popup when open.
+/// An icon button that opens or closes its popup with `act`, a badge counting the filters set,
+/// and the popup when `open`.
 fn pop_icon(
     line: &mut ChildSpawnerCommands,
     kind: IconKind,
-    pop: Pop,
-    view: &ModView,
+    (act, open, badge): (Act, bool, usize),
     body: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
-    let badge = if pop == Pop::Filter {
-        view.filters()
-    } else {
-        0
-    };
     line.spawn(Node {
         flex_shrink: 0.0,
         ..default()
@@ -2326,7 +2310,7 @@ fn pop_icon(
         wrap.spawn((
             bevy::ui_widgets::Button,
             TabIndex(0),
-            Act::ModPop(pop),
+            act,
             BackgroundColor(theme::FIELD),
             BorderColor::all(theme::field_edge()),
             Pick {
@@ -2374,7 +2358,7 @@ fn pop_icon(
                 });
             }
         });
-        if view.pop != Some(pop) {
+        if !open {
             return;
         }
         wrap.spawn((
@@ -2395,6 +2379,52 @@ fn pop_icon(
             },
         ))
         .with_children(body);
+    });
+}
+
+/// A filter popup's Reset, shown but not a control while no filter is set.
+fn filter_reset(pop: &mut ChildSpawnerCommands, act: Act, any: bool) {
+    pop.spawn(Node {
+        justify_content: JustifyContent::FlexEnd,
+        margin: UiRect::top(Val::Px(8.0)),
+        ..default()
+    })
+    .with_children(|foot| {
+        if any {
+            buttons::button(
+                foot,
+                "Reset",
+                act,
+                ButtonStyle::Small {
+                    kind: Kind::Primary,
+                },
+            );
+        } else {
+            foot.spawn((
+                Text::new("Reset"),
+                theme::font(theme::TEXT_SMALL),
+                TextColor(theme::muted().with_alpha(0.5)),
+                Node {
+                    padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                    ..default()
+                },
+            ));
+        }
+    });
+}
+
+/// A sort popup row's tick, on the chosen order.
+fn sort_mark(row: &mut ChildSpawnerCommands, chosen: bool) {
+    row.spawn(Node {
+        width: Val::Px(18.0),
+        height: Val::Px(18.0),
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|mark| {
+        if chosen {
+            ui::icon(mark, IconKind::Check, theme::SAGE, 18.0);
+        }
     });
 }
 
@@ -3413,6 +3443,8 @@ fn biomes_page(
 }
 
 fn biome_list(col: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft) {
+    biome_search_line(col, l, draft);
+    gap(col, 14.0);
     col.spawn(Node {
         justify_content: JustifyContent::SpaceBetween,
         align_items: AlignItems::Center,
@@ -3421,16 +3453,8 @@ fn biome_list(col: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft)
         ..default()
     })
     .with_children(|r| {
-        ui::paragraph(
-            r,
-            format!(
-                "{} of {} enabled",
-                draft.choices.iter().filter(|c| c.enabled).count(),
-                draft.choices.len()
-            ),
-            theme::TEXT_SMALL,
-            theme::muted(),
-        );
+        let (state, on, total) = biomes::bulk(l);
+        bulk_box(r, Act::SelectShownBiomes, state, enabled_label(on, total));
         buttons::button(
             r,
             "Reset all",
@@ -3439,18 +3463,123 @@ fn biome_list(col: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft)
         );
     });
     gap(col, 10.0);
-    col.spawn(Node {
-        flex_direction: FlexDirection::Column,
-        row_gap: Val::Px(7.0),
-        flex_shrink: 0.0,
-        ..default()
-    })
+    col.spawn((
+        BiomeList,
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(7.0),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
     .with_children(|list| {
-        for at in 0..draft.choices.len() {
+        for at in biomes::listed(l) {
             biome_row(list, l, draft, at);
         }
     });
+    col.spawn((
+        NoMatch(Field::BiomeSearch),
+        Node {
+            display: Display::None,
+            justify_content: JustifyContent::Center,
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(35.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
+    .with_children(|empty| {
+        ui::text(
+            empty,
+            "No matching Biomes.",
+            theme::TEXT_SMALL,
+            theme::muted(),
+        )
+    });
 }
+
+/// The Biomes search, with the Filter and Sort icons that open their popups beside it.
+fn biome_search_line(col: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft) {
+    let view = &l.biome_view;
+    col.spawn(Node {
+        column_gap: Val::Px(8.0),
+        align_items: AlignItems::Center,
+        flex_shrink: 0.0,
+        ..default()
+    })
+    .with_children(|line| {
+        line.spawn(Node {
+            flex_grow: 1.0,
+            min_width: Val::Px(0.0),
+            ..default()
+        })
+        .with_children(|search| {
+            text_field(
+                search,
+                Field::BiomeSearch,
+                &l.biome_search,
+                "",
+                "Search Biomes\u{2026}",
+            );
+        });
+        let filter = (
+            Act::BiomePop(Pop::Filter),
+            view.pop == Some(Pop::Filter),
+            view.filters(),
+        );
+        pop_icon(line, IconKind::Filter, filter, |pop| {
+            pop_heading(pop, "Status");
+            for (enabled, name) in [(true, "Enabled"), (false, "Disabled")] {
+                let on = view.statuses.contains(&enabled);
+                let count = draft
+                    .choices
+                    .iter()
+                    .filter(|c| c.enabled == enabled)
+                    .count();
+                pop_row(
+                    pop,
+                    Act::BiomeStatus(enabled),
+                    |row| tick_box(row, on, true, 18.0),
+                    name,
+                    Some(count),
+                );
+            }
+            pop_heading(pop, "Show");
+            pop_row(
+                pop,
+                Act::BiomeCustomised,
+                |row| tick_box(row, view.customised_only, true, 18.0),
+                "Customised only",
+                None,
+            );
+            filter_reset(pop, Act::BiomeFilterReset, view.filters() > 0);
+        });
+        let sort = (Act::BiomePop(Pop::Sort), view.pop == Some(Pop::Sort), 0);
+        pop_icon(line, IconKind::Sort, sort, |pop| {
+            for sort in BiomeSort::ALL {
+                let chosen = view.sort == sort;
+                pop_row(
+                    pop,
+                    Act::BiomeSort(sort),
+                    |row| sort_mark(row, chosen),
+                    sort.label(),
+                    None,
+                );
+            }
+        });
+    });
+}
+
+/// The Biomes step's list, its rows in the order shown.
+#[derive(Component)]
+pub(super) struct BiomeList;
+
+/// The Biome a row on the Biomes step shows, as its index in the draft.
+#[derive(Component)]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "only tests ask which Biome a row is")
+)]
+pub(super) struct BiomeRow(pub(super) usize);
 
 /// A Biome's preview on the Biomes step, and what it was last drawn from.
 #[derive(Component)]
@@ -3613,6 +3742,11 @@ fn biome_row(list: &mut ChildSpawnerCommands, l: &Launcher, draft: &BiomesDraft,
     };
     let selected = draft.editing && at == draft.selected;
     list.spawn((
+        BiomeRow(at),
+        WorldCard {
+            words: biomes::words(choice),
+            by: Field::BiomeSearch,
+        },
         BackgroundColor(theme::CARD),
         BorderColor::all(if selected {
             theme::CARD_CHOSEN_EDGE

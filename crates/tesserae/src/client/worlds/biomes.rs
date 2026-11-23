@@ -208,3 +208,154 @@ fn material(source: Option<&tesserae_core::terrain_preview::Source>, name: &str)
         [c.red, c.green, c.blue].map(|v| (v * 255.0).round() as u8)
     })
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::client) enum BiomeSort {
+    #[default]
+    Game,
+    Name,
+    Temperature,
+    Humidity,
+}
+
+impl BiomeSort {
+    pub(super) const ALL: [BiomeSort; 4] = [
+        BiomeSort::Game,
+        BiomeSort::Name,
+        BiomeSort::Temperature,
+        BiomeSort::Humidity,
+    ];
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            BiomeSort::Game => "Game order",
+            BiomeSort::Name => "Name A\u{2013}Z",
+            BiomeSort::Temperature => "Temperature, cold to warm",
+            BiomeSort::Humidity => "Humidity, dry to wet",
+        }
+    }
+}
+
+/// How the Biomes step narrows and orders its list. The search lives in
+/// `Launcher::biome_search`, since typing filters in place without a rebuild.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct BiomeView {
+    /// Enabled (`true`) and disabled Biomes shown; empty shows both.
+    pub(super) statuses: std::collections::BTreeSet<bool>,
+    pub(super) customised_only: bool,
+    pub(super) sort: BiomeSort,
+    pub(super) pop: Option<Pop>,
+}
+
+impl BiomeView {
+    /// What the filter icon's badge counts.
+    pub(super) fn filters(&self) -> usize {
+        self.statuses.len() + usize::from(self.customised_only)
+    }
+}
+
+/// What the search matches a Biome on.
+pub(super) fn words(choice: &BiomeChoice) -> String {
+    ui::declared_title(&choice.name)
+}
+
+/// The Biomes the filter keeps, as indexes into the draft, in the chosen order. The search is
+/// applied on top, in place.
+pub(super) fn listed(l: &Launcher) -> Vec<usize> {
+    let Some(draft) = l.form.biomes.as_ref() else {
+        return Vec::new();
+    };
+    let view = &l.biome_view;
+    let mut list: Vec<usize> = (0..draft.choices.len())
+        .filter(|&at| {
+            let choice = &draft.choices[at];
+            (view.statuses.is_empty() || view.statuses.contains(&choice.enabled))
+                && (!view.customised_only || draft.customised(at))
+        })
+        .collect();
+    let by = |at: &usize| &draft.choices[*at];
+    match view.sort {
+        BiomeSort::Game => {}
+        BiomeSort::Name => list.sort_by_key(|at| words(by(at))),
+        BiomeSort::Temperature => {
+            list.sort_by(|a, b| by(a).temperature.total_cmp(&by(b).temperature))
+        }
+        BiomeSort::Humidity => list.sort_by(|a, b| by(a).humidity.total_cmp(&by(b).humidity)),
+    }
+    list
+}
+
+/// [`listed`] less what the search hides: what the tri-state box acts on.
+pub(super) fn shown(l: &Launcher) -> Vec<usize> {
+    let Some(draft) = l.form.biomes.as_ref() else {
+        return Vec::new();
+    };
+    listed(l)
+        .into_iter()
+        .filter(|&at| ui::matches(&l.biome_search, &words(&draft.choices[at])))
+        .collect()
+}
+
+/// The tri-state box over the Biomes shown, and how many of them are on.
+pub(super) fn bulk(l: &Launcher) -> (Bulk, usize, usize) {
+    let shown = shown(l);
+    let on = l.form.biomes.as_ref().map_or(0, |draft| {
+        shown
+            .iter()
+            .filter(|&&at| draft.choices[at].enabled)
+            .count()
+    });
+    let state = match on {
+        0 => Bulk::None,
+        n if n == shown.len() => Bulk::All,
+        _ => Bulk::Some,
+    };
+    (state, on, shown.len())
+}
+
+/// The acts on the Biomes step's search line, its popups and its tri-state box.
+pub(super) fn on_biomes(l: &mut Launcher, act: Act) {
+    if l.screen != Screen::Create(Step::Biomes) {
+        return;
+    }
+    let mut refocus = act.clone();
+    let view = &mut l.biome_view;
+    match act {
+        Act::BiomePop(pop) if view.pop == Some(pop) => view.pop = None,
+        Act::BiomePop(pop) => {
+            view.pop = Some(pop);
+            refocus = match pop {
+                Pop::Filter => Act::BiomeStatus(true),
+                Pop::Sort => Act::BiomeSort(view.sort),
+            };
+        }
+        Act::BiomeStatus(enabled) => {
+            if !view.statuses.remove(&enabled) {
+                view.statuses.insert(enabled);
+            }
+        }
+        Act::BiomeCustomised => view.customised_only = !view.customised_only,
+        Act::BiomeFilterReset => {
+            view.statuses.clear();
+            view.customised_only = false;
+            refocus = Act::BiomeStatus(true);
+        }
+        Act::BiomeSort(sort) => {
+            view.sort = sort;
+            view.pop = None;
+            refocus = Act::BiomePop(Pop::Sort);
+        }
+        Act::SelectShownBiomes => {
+            let turn_on = bulk(l).0 != Bulk::All;
+            let shown = shown(l);
+            if let Some(draft) = l.form.biomes.as_mut() {
+                for at in shown {
+                    draft.choices[at].enabled = turn_on;
+                }
+            }
+        }
+        _ => return,
+    }
+    l.refocus = Some(refocus);
+    l.version += 1;
+}
