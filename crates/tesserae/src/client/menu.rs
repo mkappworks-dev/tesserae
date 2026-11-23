@@ -614,7 +614,7 @@ fn world_details(
     (thumbnails, folder): (&super::worlds::Thumbnails, &std::path::Path),
 ) {
     root.spawn((
-        BackgroundColor(theme::overlay()),
+        BackgroundColor(theme::details_overlay()),
         Node {
             position_type: PositionType::Absolute,
             width: Val::Percent(100.0),
@@ -630,11 +630,17 @@ fn world_details(
                 modal: true,
                 ..default()
             },
-            cine::dialog_box(),
+            super::frame::left_to_right(theme::details_shade(), theme::details_shade_far()),
+            Node {
+                width: Val::Px(660.0),
+                max_width: Val::Percent(92.0),
+                padding: UiRect::all(Val::Px(25.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(12.0),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
+                ..default()
+            },
         ));
-        dialog.entry::<Node>().and_modify(|mut node| {
-            node.width = Val::Px(660.0);
-        });
         dialog.with_children(|dialog| {
             cine::dialog_title(
                 dialog,
@@ -1183,6 +1189,51 @@ mod tests {
         writer.finish().unwrap();
         std::fs::write(folder.join(tesserae_core::save::library::THUMBNAIL), bytes).unwrap();
         rgba
+    }
+
+    #[test]
+    fn world_details_is_see_through_with_a_light_dim_and_no_frame() {
+        let mut app = app();
+        let folder = std::env::temp_dir().join(format!(
+            "tesserae-details-{}",
+            tesserae_core::save::WorldId::new().as_str()
+        ));
+        app.init_resource::<Assets<Image>>()
+            .init_resource::<super::super::worlds::Thumbnails>()
+            .insert_resource(crate::open::Opened::at(folder));
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        choose(&mut app, Choice::Details);
+        let picture = app
+            .world_mut()
+            .query_filtered::<&ChildOf, With<DetailsPicture>>()
+            .single(app.world())
+            .unwrap()
+            .parent();
+        let dialog = app.world().entity(picture);
+        assert_eq!(
+            dialog.get::<BackgroundGradient>(),
+            Some(&super::super::frame::left_to_right(
+                theme::details_shade(),
+                theme::details_shade_far()
+            ))
+        );
+        let dim = dialog.get::<ChildOf>().unwrap().parent();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(dim),
+            Some(&BackgroundColor(theme::details_overlay()))
+        );
+        assert_eq!(dialog.get::<Node>().unwrap().border, UiRect::ZERO);
+        assert!(dialog.get::<BoxShadow>().is_none());
+        assert!(
+            dialog.get::<Children>().unwrap().iter().all(|child| app
+                .world()
+                .get::<Node>(child)
+                .unwrap()
+                .position_type
+                != PositionType::Absolute),
+            "no light ring inside"
+        );
     }
 
     #[test]

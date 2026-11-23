@@ -136,6 +136,21 @@ pub(super) fn sheet_shade_far() -> Color {
     css_dim(SHEET_RGB, 0.78)
 }
 
+/// World details' fill, thin enough that the paused scenery shows through.
+pub(super) fn details_shade() -> Color {
+    css_dim(SHEET_RGB, 0.62)
+}
+
+/// World details' fill at its far edge.
+pub(super) fn details_shade_far() -> Color {
+    css_dim(SHEET_RGB, 0.5)
+}
+
+/// Under World details: lighter than [`overlay()`], since the pause screen is already dimmed.
+pub(super) fn details_overlay() -> Color {
+    css_dim(OVERLAY_RGB, 0.3)
+}
+
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
 const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
 pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
@@ -727,6 +742,13 @@ mod tests {
     fn a_sheet_and_its_rail_dim_as_much_as_the_prototypes() {
         assert_dims_like_the_prototype(sheet_shade(), SHEET_RGB, 0.9);
         assert_dims_like_the_prototype(sheet_shade_far(), SHEET_RGB, 0.78);
+    }
+
+    #[test]
+    fn world_details_and_its_dim_are_as_see_through_as_the_prototypes() {
+        assert_dims_like_the_prototype(details_shade(), SHEET_RGB, 0.62);
+        assert_dims_like_the_prototype(details_shade_far(), SHEET_RGB, 0.5);
+        assert_dims_like_the_prototype(details_overlay(), OVERLAY_RGB, 0.3);
     }
 
     #[test]
