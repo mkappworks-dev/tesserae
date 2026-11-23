@@ -28,7 +28,7 @@ const games = {
     palette: [
       { swatch: "#d9cf9a", sky: "#8cc6d8", fog: "#bfe0e6", surface: "Sand" },
       { swatch: "#e0c98f", sky: "#a8c8d6", fog: "#d6e2dc", surface: "Sand" },
-      { swatch: "#c9dde3", sky: "#9db6c6", fog: "#c4d4dc", surface: "Snow" },
+      { swatch: "#c9dde3", surface: "Snow" },
     ],
     required: ["crystals"],
   },
@@ -217,8 +217,8 @@ let worlds = [
 function defaultBiomes(game) {
   return games[game].names.map((name, i) => ({
     name,
-    sky: DEFAULT_SKY,
-    fog: DEFAULT_FOG,
+    sky: null,
+    fog: null,
     ...clone(biomeDefaults[i]),
     ...(games[game].palette?.[i] || {}),
     enabled: true,
@@ -791,10 +791,10 @@ function biomeEditor() {
     ["Sky", "sky"],
     ["Fog", "fog"],
   ]
-    .map(
-      ([label, key]) =>
-        `<div class="pick-row"><span>${label}</span>${colourField(`${label} colour`, `biome.${key}`, b[key])}</div>`,
-    )
+    .map(([label, key]) => {
+      const air = shownAir(state.biomes, state.selected, key);
+      return `<div class="pick-row"><span>${label}</span>${colourField(`${label} colour`, `biome.${key}`, air.borrowed ? "" : air.hex, air.hex)}</div>`;
+    })
     .join(
       "",
     )}</div></div><footer class="panel-foot">${button("Reset", "reset-biome", { small: true, ghost: true, disabled: !b.custom })}${button("Done", "close-biome", { primary: true })}</footer></section>`;
@@ -1683,7 +1683,9 @@ document.addEventListener("input", (e) => {
       ? v === ""
         ? NaN
         : Number(v)
-      : v;
+      : ["sky", "fog"].includes(key)
+        ? v || null
+        : v;
     markCustom();
     const dot = $(".climate-map .current");
     if (dot) {
