@@ -1376,6 +1376,101 @@ fn the_mods_step_scrolls_to_its_last_mod_by_wheel_and_by_focus() {
     );
 }
 
+/// The nearest node above `entity` that scrolls.
+fn scroller(app: &App, entity: Entity) -> Option<Entity> {
+    app.world()
+        .entity(entity)
+        .get::<ChildOf>()
+        .map(ChildOf::parent)
+        .and_then(|parent| {
+            let node = app.world().get::<Node>(parent);
+            if node.is_some_and(|n| n.overflow.y == bevy::ui::OverflowAxis::Scroll) {
+                Some(parent)
+            } else {
+                scroller(app, parent)
+            }
+        })
+}
+
+fn field_control(app: &mut App, wanted: Field) -> Entity {
+    app.world_mut()
+        .query::<(Entity, &Field)>()
+        .iter(app.world())
+        .find_map(|(e, f)| (*f == wanted).then_some(e))
+        .unwrap()
+}
+
+/// Panics unless `row` scrolls in a node that leaves every one of `toolbar` in place.
+fn toolbar_stays(app: &App, toolbar: &[Entity], row: Entity) {
+    let list = scroller(app, row).expect("the list scrolls");
+    for &control in toolbar {
+        let mut above = std::iter::successors(Some(control), |&e| {
+            app.world().get::<ChildOf>(e).map(ChildOf::parent)
+        });
+        assert!(
+            above.all(|e| e != list),
+            "a toolbar control scrolls with the list"
+        );
+    }
+}
+
+#[test]
+fn the_mods_toolbar_stays_while_its_list_scrolls_and_keeps_its_place() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, three_mods());
+    on_mods_step(&mut app);
+    let toolbar = [
+        field_control(&mut app, Field::ModSearch),
+        control(&mut app, &Act::ModPop(Pop::Filter)),
+        control(&mut app, &Act::ModPop(Pop::Sort)),
+        control(&mut app, &Act::SelectShownMods),
+    ];
+    let row = control(&mut app, &Act::ToggleMod(0));
+    toolbar_stays(&app, &toolbar, row);
+
+    let list = scroller(&app, row).unwrap();
+    app.world_mut().get_mut::<ScrollPosition>(list).unwrap().y = 120.0;
+    act(&mut app, Act::ToggleMod(0));
+    let row = control(&mut app, &Act::ToggleMod(0));
+    let list = scroller(&app, row).unwrap();
+    assert_eq!(
+        app.world().get::<ScrollPosition>(list).unwrap().y,
+        120.0,
+        "ticking a Mod keeps the list where it was"
+    );
+}
+
+#[test]
+fn the_biomes_toolbar_stays_while_its_list_scrolls_beside_the_panel_too() {
+    let (mut app, _worlds) = to_three_biomes();
+    for _ in 0..2 {
+        let toolbar = [
+            field_control(&mut app, Field::BiomeSearch),
+            control(&mut app, &Act::BiomePop(Pop::Filter)),
+            control(&mut app, &Act::BiomePop(Pop::Sort)),
+            control(&mut app, &Act::SelectShownBiomes),
+            control(&mut app, &Act::ResetBiomes),
+        ];
+        let row = control(&mut app, &Act::ToggleBiome(0));
+        toolbar_stays(&app, &toolbar, row);
+        act(&mut app, Act::SelectBiome(0));
+    }
+}
+
+#[test]
+fn the_worlds_search_stays_while_the_slots_scroll() {
+    let worlds = Directory::new();
+    for at in 0..9 {
+        library::create(&worlds.0, &played(&format!("Quarry {at}"), "terra", at)).unwrap();
+    }
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    let search = field_control(&mut app, Field::Search);
+    let slot = control(&mut app, &Act::New);
+    toolbar_stays(&app, &[search], slot);
+}
+
 #[test]
 fn only_dialogs_trap_focus_so_the_empty_list_can_reach_create() {
     let trapping = |app: &mut App| {
