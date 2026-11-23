@@ -633,7 +633,22 @@ type HudWriters<'w> = (
 /// `TESSERAE_SCREENSHOT_VITALS=<health>,<hunger>,<air s>`,
 /// `TESSERAE_SCREENSHOT_DEATH=fall|drowning|lava|starvation[,kept]`,
 /// `TESSERAE_SCREENSHOT_PICKUP=<taken>[,<left>]` and
-/// `TESSERAE_SCREENSHOT_NOTICE=<text>`. Messages only; the World is untouched.
+/// `TESSERAE_SCREENSHOT_NOTICE=[info:|alert:|error:]<text>[|...]`, one toast each. Messages
+/// only; the World is untouched.
+/// Each `|`-separated notice as a toast, toned by an `info:`, `alert:` or `error:` prefix.
+pub(super) fn notify_each(commands: &mut Commands, notices: &str) {
+    use super::menu_ui::Tone;
+    for notice in notices.split('|') {
+        let (tone, text) = match notice.split_once(':') {
+            Some(("info", text)) => (Tone::Info, text),
+            Some(("alert", text)) => (Tone::Alert, text),
+            Some(("error", text)) => (Tone::Error, text),
+            _ => (Tone::Change, notice),
+        };
+        super::menu_ui::notify_for(commands, text, tone, 10.0);
+    }
+}
+
 fn hud_fixture(
     mut commands: Commands,
     time: Res<Time<Real>>,
@@ -763,8 +778,8 @@ fn hud_fixture(
             });
         }
     }
-    if let Some(text) = notice {
-        super::menu_ui::notify_for(&mut commands, &text, super::menu_ui::Tone::Change, 10.0);
+    if let Some(notices) = notice {
+        notify_each(&mut commands, &notices);
     }
 }
 

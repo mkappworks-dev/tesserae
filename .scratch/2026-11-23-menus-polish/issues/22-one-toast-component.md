@@ -1,6 +1,6 @@
 # 22: One toast component
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: [02: Approve the mockup](./02-mockup-approval.md)
 
@@ -22,14 +22,16 @@ pickup feed and the hotbar's Inventory-full line stay as they are.
 
 ## Acceptance criteria
 
-- [ ] Toasts appear where the approved study puts them, in menus and in play,
+- [x] Toasts appear where the approved study puts them, in menus and in play,
       covering no HUD element
-- [ ] At most three show; the same message again shows ×2 and restarts its
+- [x] At most three show; the same message again shows ×2 and restarts its
       timer
-- [ ] Tone sets only the icon colour; errors stay longer
-- [ ] Cards in a stack share one width (the widest, at least 220 px)
-- [ ] Every existing `notify` call site still shows its message
+- [x] Tone sets only the icon colour; errors stay longer
+- [x] Cards in a stack share one width (the widest, at least 220 px)
+- [x] Every existing `notify` call site still shows its message
 
 ## Comments
 
 The user chose the positions from the `/toasts` study on 2026-11-23: bottom-centre above the prompt bar in menus, top-centre under the compass in play.
+
+Done on `feat/menus-polish-p22-toasts`. `Tone` gained `Info` (neutral ⓘ: speed level, movement mode, placement ghost, respawn) and `Error` (8 s: World, layout and preference save failures); `Change` is the green ✓ and `Alert` the 3 s amber ⚠. In-game screens with a prompt bar (Inventory, Map, Menu, Settings) count as menus. Not ported: the card's backdrop blur, which Bevy UI has no cheap equivalent for.

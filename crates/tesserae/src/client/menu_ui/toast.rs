@@ -70,6 +70,8 @@ impl Scope {
 #[derive(Component, Default)]
 struct Stack {
     scope: Scope,
+    /// Whether a focused frame has set `scope`; an unfocused one cannot tell a menu from play.
+    settled: bool,
 }
 #[derive(Component)]
 struct Column;
@@ -90,8 +92,16 @@ struct Toast {
 #[derive(Component)]
 struct Paint {
     toast: Entity,
-    fill: Color,
-    border: Color,
+    color: Color,
+    part: Part,
+}
+/// Which of the painted node's colours `Paint` sets; every `Node` carries a fill and an edge.
+#[derive(Clone, Copy)]
+enum Part {
+    Fill,
+    FillAndEdge(Color),
+    Ink,
+    Image,
 }
 #[derive(Component)]
 struct ToastText;
@@ -154,8 +164,8 @@ fn show(world: &mut World, text: String, tone: Tone, seconds: f32) {
                     ChildOf(label),
                     Paint {
                         toast: same,
-                        fill: theme::muted(),
-                        border: Color::NONE,
+                        color: theme::muted(),
+                        part: Part::Ink,
                     },
                     Text::new(value),
                     theme::tabular(theme::font(COUNT_TEXT_PX)),
@@ -186,16 +196,16 @@ fn show(world: &mut World, text: String, tone: Tone, seconds: f32) {
             Pickable::IGNORE,
         ))
         .id();
-    let paint = |fill: Color, border: Color| Paint {
+    let paint = |color: Color, part: Part| Paint {
         toast: slot,
-        fill,
-        border,
+        color,
+        part,
     };
     let mut count_label = Entity::PLACEHOLDER;
     commands.entity(slot).with_children(|slot_children| {
         slot_children
             .spawn((
-                paint(theme::toast_fill(), theme::edge()),
+                paint(theme::toast_fill(), Part::FillAndEdge(theme::edge())),
                 BackgroundColor(Color::NONE),
                 BorderColor::all(Color::NONE),
                 Node {
@@ -215,7 +225,7 @@ fn show(world: &mut World, text: String, tone: Tone, seconds: f32) {
             ))
             .with_children(|card| {
                 card.spawn((
-                    paint(tone_color, Color::NONE),
+                    paint(tone_color, Part::Image),
                     super::Icon(kind, Color::NONE),
                     Node {
                         width: Val::Px(ICON_PX),
@@ -227,7 +237,7 @@ fn show(world: &mut World, text: String, tone: Tone, seconds: f32) {
                 ));
                 card.spawn((
                     ToastText,
-                    paint(theme::NOTICE_CARD_INK, Color::NONE),
+                    paint(theme::NOTICE_CARD_INK, Part::Ink),
                     Text::new(text.clone()),
                     theme::font(scope.text_px()),
                     LineHeight::RelativeToFont(1.35),
@@ -240,7 +250,7 @@ fn show(world: &mut World, text: String, tone: Tone, seconds: f32) {
                 ));
                 count_label = card
                     .spawn((
-                        paint(theme::TOAST_COUNT, Color::NONE),
+                        paint(theme::TOAST_COUNT, Part::Fill),
                         BackgroundColor(Color::NONE),
                         Node {
                             display: Display::None,
@@ -356,7 +366,14 @@ fn place(
     if node.display != display {
         node.display = display;
     }
-    let scope = scope_now(state.as_deref(), ownership.as_deref()).unwrap_or(stack.scope);
+    let scope = match scope_now(state.as_deref(), ownership.as_deref()) {
+        Some(scope) => {
+            stack.settled = true;
+            scope
+        }
+        None if stack.settled => stack.scope,
+        None => Scope::Play,
+    };
     if stack.scope != scope {
         stack.scope = scope;
         for mut font in &mut texts {
@@ -442,17 +459,19 @@ fn opacity(toast: &Toast) -> f32 {
     })
 }
 
+type Painted = (
+    &'static Paint,
+    Option<&'static mut BackgroundColor>,
+    Option<&'static mut BorderColor>,
+    Option<&'static mut TextColor>,
+    Option<&'static mut ImageNode>,
+);
+
 fn fade(
     preferences: Option<Res<crate::client::profile::Preferences>>,
     stacks: Query<&Stack>,
     mut slots: Query<(&Toast, &mut Node, &mut UiTransform)>,
-    mut paints: Query<(
-        &Paint,
-        Option<&mut BackgroundColor>,
-        Option<&mut BorderColor>,
-        Option<&mut TextColor>,
-        Option<&mut ImageNode>,
-    )>,
+    mut paints: Query<Painted>,
 ) {
     let still = preferences.is_some_and(|p| p.reduced_motion);
     let rise_px = match stacks.single().map(|s| s.scope).unwrap_or_default() {
@@ -487,17 +506,26 @@ fn fade(
         };
         let alpha = opacity(toast);
         let faded = |color: Color| color.with_alpha(color.alpha() * alpha);
-        if let Some(mut fill) = fill {
-            fill.0 = faded(paint.fill);
-        }
-        if let Some(mut border) = border {
-            *border = BorderColor::all(faded(paint.border));
-        }
-        if let Some(mut ink) = ink {
-            ink.0 = faded(paint.fill);
-        }
-        if let Some(mut image) = image {
-            image.color = faded(paint.fill);
+        let color = faded(paint.color);
+        match paint.part {
+            Part::Fill | Part::FillAndEdge(_) => {
+                if let Some(mut fill) = fill {
+                    fill.0 = color;
+                }
+                if let (Part::FillAndEdge(edge), Some(mut border)) = (paint.part, border) {
+                    *border = BorderColor::all(faded(edge));
+                }
+            }
+            Part::Ink => {
+                if let Some(mut ink) = ink {
+                    ink.0 = color;
+                }
+            }
+            Part::Image => {
+                if let Some(mut image) = image {
+                    image.color = color;
+                }
+            }
         }
     }
 }
@@ -609,6 +637,13 @@ mod tests {
             .map(|(fill, border)| (fill.0, *border))
             .collect();
         assert_eq!(cards.len(), 3);
+        let filled = app
+            .world_mut()
+            .query::<&BackgroundColor>()
+            .iter(app.world())
+            .filter(|fill| fill.0 != Color::NONE)
+            .count();
+        assert_eq!(filled, 6, "only cards and count bubbles are filled");
         for card in &cards {
             assert_eq!(
                 *card,
@@ -619,7 +654,7 @@ mod tests {
             .world_mut()
             .query::<(&super::super::Icon, &Paint)>()
             .iter(app.world())
-            .map(|(icon, paint)| (icon.0, paint.fill))
+            .map(|(icon, paint)| (icon.0, paint.color))
             .collect();
         assert_eq!(
             icons,
@@ -671,9 +706,11 @@ mod tests {
         let mut app = app();
         app.insert_resource(State::new(AppState::InWorld))
             .insert_resource(Ownership::playing());
-        let mut compass = ComputedNode::default();
-        compass.size = Vec2::new(1120.0, 160.0);
-        compass.inverse_scale_factor = 0.5;
+        let compass = ComputedNode {
+            size: Vec2::new(1120.0, 160.0),
+            inverse_scale_factor: 0.5,
+            ..default()
+        };
         app.world_mut().spawn((
             CompassRoot,
             compass,
@@ -692,6 +729,19 @@ mod tests {
         let (node, _, sizes) = stack(&mut app);
         assert_eq!(node.bottom, Val::Px(50.0));
         assert_eq!(sizes, [13.0]);
+    }
+
+    #[test]
+    fn an_unfocused_world_window_places_a_new_stack_for_play() {
+        let mut app = app();
+        let mut unfocused = Ownership::playing();
+        unfocused.owner = Owner::Unfocused;
+        app.insert_resource(State::new(AppState::InWorld))
+            .insert_resource(unfocused);
+        say(&mut app, "Speed 2", Tone::Info);
+        let (node, _, sizes) = stack(&mut app);
+        assert_eq!(node.top, Val::Px(GAP_PX));
+        assert_eq!(sizes, [14.0]);
     }
 
     #[test]

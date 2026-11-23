@@ -623,7 +623,8 @@ mod tests {
             .iter(app.world())
             .map(|text| text.0.clone())
             .collect();
-        assert_eq!(toasts, ["Speed 1"], "each press names the new level");
+        assert_eq!(toasts.len(), 5, "each press names the new level");
+        assert_eq!(toasts.last().map(String::as_str), Some("Speed 1"));
         // Nothing but another press changes it, a stop and a respawn included.
         app.update();
         let after = app
