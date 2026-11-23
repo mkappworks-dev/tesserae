@@ -346,6 +346,8 @@ pub struct Volumes {
     pub effects: u8,
     pub ambient: u8,
     pub music: u8,
+    /// Menu sounds, apart from Effects, which the World's sounds follow.
+    pub interface: u8,
     pub detail: EffectVolumes,
 }
 
@@ -356,6 +358,7 @@ impl Default for Volumes {
             effects: 100,
             ambient: 70,
             music: 50,
+            interface: 100,
             detail: EffectVolumes::default(),
         }
     }
@@ -363,9 +366,15 @@ impl Default for Volumes {
 
 impl Volumes {
     pub fn valid(&self) -> bool {
-        [self.master, self.effects, self.ambient, self.music]
-            .iter()
-            .all(|&v| v <= 100)
+        [
+            self.master,
+            self.effects,
+            self.ambient,
+            self.music,
+            self.interface,
+        ]
+        .iter()
+        .all(|&v| v <= 100)
             && self.detail.valid()
     }
 
@@ -379,6 +388,12 @@ impl Volumes {
         };
         let unit = |v: u8| f32::from(v.min(100)) / 100.0;
         unit(self.master) * unit(setting) * volume * attenuation
+    }
+
+    /// A menu sound's volume, which Interface sets rather than any category.
+    pub fn interface_gain(&self, volume: f32) -> f32 {
+        let unit = |v: u8| f32::from(v.min(100)) / 100.0;
+        unit(self.master) * unit(self.interface) * volume
     }
 }
 

@@ -1,6 +1,6 @@
 # 28: Audio sections, Interface volume and menu rumble
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -24,9 +24,14 @@ As in the approved mockup (`/settings/audio`, `/settings/controller`, commit
 
 ## Acceptance criteria
 
-- [ ] The menu click follows Interface, not Effects; 0 mutes it
-- [ ] Sound effects is always shown with every effect slider
-- [ ] Rumble on menu press Off stops the menu-press rumble
-- [ ] Both new settings are saved and restored
+- [x] The menu click follows Interface, not Effects; 0 mutes it
+- [x] Sound effects is always shown with every effect slider
+- [x] Rumble on menu press Off stops the menu-press rumble
+- [x] Both new settings are saved and restored
 
 ## Comments
+
+- Master volume still scales the click: Interface sits under Master like the
+  other categories. `Volumes::interface_gain` lives in tesserae-core beside
+  `gain`, not as a new `SoundCategory`, so Game sound libraries cannot claim it.
+- The Sound effects heading's note is a new `settings::widgets::noted_group`.

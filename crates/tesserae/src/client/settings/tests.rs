@@ -86,7 +86,7 @@ fn wait(app: &mut App, seconds: f32) {
 fn a_change_applies_at_once_and_survives_leaving_settings() {
     use super::super::minimap::MinimapSize;
     type Read = fn(&Preferences) -> bool;
-    let cases: [(Tab, Operation, Read); 8] = [
+    let cases: [(Tab, Operation, Read); 9] = [
         (Tab::Behavior, Operation::Invert(true), |p| p.invert_y),
         (Tab::Behavior, Operation::Repeat(true), |p| p.repeat_held),
         (Tab::Behavior, Operation::Ghost(true), |p| p.placement_ghost),
@@ -102,6 +102,9 @@ fn a_change_applies_at_once_and_survives_leaving_settings() {
         }),
         (Tab::Accessibility, Operation::StrongerContrast(true), |p| {
             p.stronger_contrast
+        }),
+        (Tab::Controller, Operation::PadMenuRumble(false), |p| {
+            !p.pad.menu_rumble
         }),
     ];
     for (tab, operation, read) in cases {
@@ -506,6 +509,10 @@ fn the_map_and_compass_settings_say_unavailable_while_the_world_forbids_them() {
 fn resetting_a_page_restores_only_its_own_preferences() {
     let mut app = app();
     app.world_mut().resource_mut::<Preferences>().volumes.master = 17;
+    app.world_mut()
+        .resource_mut::<Preferences>()
+        .volumes
+        .interface = 17;
     app.world_mut().resource_mut::<Preferences>().invert_y = true;
     activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
     activate_operation(&mut app, Operation::Reset);
@@ -522,6 +529,7 @@ fn resetting_a_page_restores_only_its_own_preferences() {
     activate_operation(&mut app, Operation::Reset);
     activate_operation(&mut app, Operation::ConfirmReset);
     assert_eq!(app.world().resource::<Preferences>().volumes.master, 100);
+    assert_eq!(app.world().resource::<Preferences>().volumes.interface, 100);
     assert_eq!(saved(&mut app).volumes.master, 100);
     assert_eq!(app.world().resource::<Settings>().last, Tab::Audio);
 }
@@ -1133,4 +1141,47 @@ fn the_window_mode_applies_at_once_steps_and_reverts_unless_kept() {
         WindowMode::Fullscreen,
         "kept and saved"
     );
+}
+
+#[test]
+fn the_interface_slider_sets_and_saves_the_menu_volume() {
+    let mut app = app();
+    activate_operation(&mut app, Operation::Navigate(Tab::Audio));
+    move_slider(&mut app, Scalar::InterfaceVolume, 0.0);
+    assert_eq!(app.world().resource::<Preferences>().volumes.interface, 0);
+    assert_eq!(app.world().resource::<Preferences>().volumes.effects, 100);
+    assert_eq!(saved(&mut app).volumes.interface, 0);
+}
+
+#[test]
+fn the_audio_page_always_shows_every_sound_effect_slider_under_its_own_heading() {
+    let mut app = page_app(Tab::Audio);
+    let texts: Vec<String> = app
+        .world_mut()
+        .query::<&Text>()
+        .iter(app.world())
+        .map(|t| t.0.clone())
+        .collect();
+    for wanted in [
+        "SOUND MIX",
+        "Interface",
+        "SOUND EFFECTS",
+        "Each is relative to Effects; 0 mutes it.",
+        "Footsteps",
+        "Hurt & death",
+    ] {
+        assert!(texts.iter().any(|t| t == wanted), "{wanted} in {texts:?}");
+    }
+    let scalars: Vec<Scalar> = app
+        .world_mut()
+        .query::<&Scalar>()
+        .iter(app.world())
+        .copied()
+        .collect();
+    let details = scalars
+        .iter()
+        .filter(|s| matches!(s, Scalar::DetailVolume(_)))
+        .count();
+    assert_eq!(details, 10, "no expand or collapse hides them");
+    assert!(scalars.iter().any(|s| matches!(s, Scalar::InterfaceVolume)));
 }
