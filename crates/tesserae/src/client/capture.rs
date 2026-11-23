@@ -286,9 +286,9 @@ pub(super) fn plugin(app: &mut App) {
         app.insert_resource(super::layout::LayoutMode::turned_on())
             .insert_resource(super::layout_menu::LayoutMenu::opened());
     }
-    // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window with its
-    // details; `=crafting` brings the Crafting tab to the front, `=station`
-    // the Workbench's pane, and `=container` a Chest's slots holding Wood.
+    // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window; `=crafting`
+    // brings the Crafting tab to the front, `=station` the Workbench's pane,
+    // and `=container` a Chest's slots holding Wood.
     if let Some(inventory) = std::env::var_os("TESSERAE_SCREENSHOT_INVENTORY") {
         app.insert_resource(super::inventory_window::InventoryWindow::opened());
         if inventory == "crafting" {
