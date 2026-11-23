@@ -1046,7 +1046,7 @@ const MODES: [(GameMode, &str, &str); 2] = [
     (
         GameMode::Creative,
         "Creative",
-        "Take any Material from the Catalogue. Placing is free. No damage or hunger.",
+        "Take any Material from the Catalogue. Placing spends Items, as in Survival. No damage or hunger.",
     ),
     (
         GameMode::Survival,
