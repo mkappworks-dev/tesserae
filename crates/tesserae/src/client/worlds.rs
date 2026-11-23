@@ -10,6 +10,7 @@ mod edit_world;
 mod mods;
 mod open;
 pub(super) mod pages;
+mod reads;
 mod saved;
 mod terrain;
 
@@ -425,11 +426,15 @@ struct Launcher {
     ground_search: String,
     /// The control the last act came from, focused again when its page is rebuilt.
     refocus: Option<Act>,
+    /// The field focused again when its page is rebuilt, as `refocus` is for a control.
+    refield: Option<Field>,
     problem: Option<String>,
     /// The Trust page or dialog shows its permissions and limits.
     trust_details: bool,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
+    /// The set `clashes` was checked for; the check runs again off the main thread once it differs.
+    clashes_for: Option<reads::ClashKey>,
     /// The terrain preview's source and the Game and Mods it was read for.
     terrain: Option<(
         Vec<String>,
@@ -474,6 +479,7 @@ impl Launcher {
         self.biome_view.ground = None;
         self.biome_view.colour = None;
         self.refocus = None;
+        self.refield = None;
         self.trust_details = false;
         self.version += 1;
     }
@@ -820,6 +826,7 @@ fn logic(app: &mut App) {
         .init_resource::<Thumbnails>()
         .init_resource::<terrain::TerrainPreview>()
         .init_resource::<diorama::Dioramas>()
+        .init_resource::<reads::Reads>()
         .add_observer(activate)
         .add_observer(step)
         .add_observer(slide)
@@ -838,7 +845,7 @@ fn logic(app: &mut App) {
                 biomes::nudge,
                 sync_fields,
                 highlight,
-                handle,
+                (handle, reads::run).chain(),
                 load_thumbnails,
                 saved::load,
                 terrain::draw,
@@ -1005,9 +1012,11 @@ fn start(
         biome_view: BiomeView::default(),
         ground_search: String::new(),
         refocus: None,
+        refield: None,
         trust_details: false,
         problem: None,
         clashes: Default::default(),
+        clashes_for: None,
         version: 0,
         terrain: None,
         from_list: false,
@@ -1271,7 +1280,7 @@ fn handle(
     mut queue: ResMut<Queue>,
     launcher: Option<ResMut<Launcher>>,
     mut installed: ResMut<Installed>,
-    (worlds, previewer): (Res<WorldsDir>, Res<Previewer>),
+    worlds: Res<WorldsDir>,
     remover: Res<Remover>,
     mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
@@ -1284,7 +1293,6 @@ fn handle(
         commands: &mut commands,
         installed: &mut installed,
         worlds: &worlds.0,
-        previewer: *previewer,
         remover: &remover,
         relaunch: &mut relaunch,
         exit: &mut exit,
@@ -1293,6 +1301,7 @@ fn handle(
     for act in std::mem::take(&mut queue.0) {
         let l = &mut *l;
         l.refocus = None;
+        l.refield = None;
         let popup = matches!(
             act,
             Act::ModPop(..)
@@ -1385,7 +1394,6 @@ struct Acting<'a, 'w, 's, 'e> {
     commands: &'a mut Commands<'w, 's>,
     installed: &'a mut Installed,
     worlds: &'a Path,
-    previewer: Previewer,
     remover: &'a Remover,
     relaunch: &'a mut Switch,
     exit: &'a mut MessageWriter<'e, AppExit>,
@@ -1539,6 +1547,18 @@ fn render(
                     .iter(world)
                     .find_map(|(e, a)| (*a == act).then_some(e))
             });
+            if let (Some(entity), Some(mut focus)) = (again, world.get_resource_mut::<InputFocus>())
+            {
+                focus.set(entity, FocusCause::Auto);
+            }
+        });
+    }
+    if let Some(field) = l.refield {
+        commands.queue(move |world: &mut World| {
+            let again = world
+                .query::<(Entity, &Field)>()
+                .iter(world)
+                .find_map(|(e, f)| (*f == field).then_some(e));
             if let (Some(entity), Some(mut focus)) = (again, world.get_resource_mut::<InputFocus>())
             {
                 focus.set(entity, FocusCause::Auto);

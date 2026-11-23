@@ -99,6 +99,7 @@ pub struct Clash {
 }
 
 /// A Mod that would run without a recorded Trust grant for its exact bytes.
+#[derive(Clone)]
 pub struct Untrusted {
     /// The effective limits it would run under.
     pub limits: tesserae_mods::ModLimits,
@@ -107,7 +108,7 @@ pub struct Untrusted {
 }
 
 /// What the World list can offer, found without running any Mod code.
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct Installed {
     /// [`tesserae_mods::DEFAULT_GAME`]: what a World with no record, and the empty form, default to.
     pub game: Option<GameRef>,

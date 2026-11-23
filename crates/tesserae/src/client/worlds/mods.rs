@@ -201,6 +201,9 @@ fn select_shown(l: &mut Launcher, installed: &Installed) {
     let Some(game) = l.form.game.clone() else {
         return;
     };
+    if l.clashes_for != reads::clash_key(&l.form) {
+        create::clashes_now(l, installed);
+    }
     let ids: Vec<String> = shown(l, installed)
         .into_iter()
         .map(|i| installed.mods[i].id.clone())
@@ -214,9 +217,9 @@ fn select_shown(l: &mut Launcher, installed: &Installed) {
             let needed = installed.closure_for(&game, &l.form.mods);
             if !needed.contains(&id) && addable(l, installed, &game, &id) {
                 l.form.mods.insert(id);
-                l.clashes = installed.clashes(&game, &l.form.mods);
+                create::clashes_now(l, installed);
             }
         }
     }
-    l.clashes = installed.clashes(&game, &l.form.mods);
+    create::clashes_now(l, installed);
 }
