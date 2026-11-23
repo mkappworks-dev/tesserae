@@ -69,3 +69,7 @@ states set from the browser console where there is no route):
   declares its own keeps them (Tidewater, Ember, Lumen, Meadow palettes);
   Terra's declare none, so Terra shows the defaults, and Reset and Reset all
   restore them.
+
+- Settings › Display opens with a Window group: Window mode cycles Windowed,
+  Borderless fullscreen and Fullscreen (default Windowed) and, as a display
+  change, opens the keep-or-revert prompt (ticket 21).
