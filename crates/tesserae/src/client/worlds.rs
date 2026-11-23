@@ -755,6 +755,11 @@ fn review_capture(
             });
         }
     }
+    if *frame == 40
+        && let Ok(notices) = std::env::var("TESSERAE_SCREENSHOT_NOTICE")
+    {
+        super::capture::notify_each(&mut commands, &notices);
+    }
     let Some(shot) = shot else {
         return;
     };

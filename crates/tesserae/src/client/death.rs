@@ -132,7 +132,7 @@ fn receive(
             ui::notify_for(
                 &mut commands,
                 &respawn_notice(was),
-                ui::Tone::Change,
+                ui::Tone::Info,
                 RESPAWN_NOTICE_S,
             );
             for mut cursor in &mut cursor {

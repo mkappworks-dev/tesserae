@@ -124,7 +124,7 @@ pub(super) fn save(
         super::menu_ui::notify(
             &mut commands,
             "Could not save your preferences",
-            super::menu_ui::Tone::Alert,
+            super::menu_ui::Tone::Error,
         );
     }
 }

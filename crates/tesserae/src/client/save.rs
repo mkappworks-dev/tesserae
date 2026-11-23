@@ -122,7 +122,7 @@ fn notice(mut commands: Commands, mut status: ResMut<SaveStatus>) {
         return;
     }
     if let Some(message) = status.notice.take() {
-        super::menu_ui::notify_for(&mut commands, &message, super::menu_ui::Tone::Alert, 8.0);
+        super::menu_ui::notify(&mut commands, &message, super::menu_ui::Tone::Error);
     }
 }
 

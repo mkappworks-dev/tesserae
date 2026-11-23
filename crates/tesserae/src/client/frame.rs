@@ -309,6 +309,8 @@ pub(super) fn plugin(app: &mut App) {
     }
 }
 
+pub(super) const PROMPT_BAR_PX: f32 = 40.0;
+
 /// The bottom bar: `place` at the left and the screen's prompts in the middle.
 pub(super) fn prompt_bar<A: Bundle>(
     root: &mut ChildSpawnerCommands,
@@ -319,7 +321,7 @@ pub(super) fn prompt_bar<A: Bundle>(
         BackgroundColor(theme::band()),
         BorderColor::all(theme::band_rule()),
         Node {
-            height: Val::Px(40.0),
+            height: Val::Px(PROMPT_BAR_PX),
             flex_shrink: 0.0,
             padding: UiRect::horizontal(Val::Px(theme::SCREEN_PAD_X)),
             align_items: AlignItems::Center,

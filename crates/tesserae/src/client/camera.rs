@@ -340,7 +340,7 @@ fn fly(
         let level = preferences.speed_level.next();
         preferences.speed_level = level;
         pending.0 = Some(super::view::SAVE_AFTER_S);
-        super::menu_ui::notify(&mut commands, level.label(), super::menu_ui::Tone::Change);
+        super::menu_ui::notify(&mut commands, level.label(), super::menu_ui::Tone::Info);
     }
     intents.write(MovementIntent {
         cancelled: !playing || actions.started(Action::Respawn),
@@ -658,7 +658,8 @@ mod tests {
             .iter(app.world())
             .map(|text| text.0.clone())
             .collect();
-        assert_eq!(toasts, ["Speed 1"], "each press names the new level");
+        assert_eq!(toasts.len(), 5, "each press names the new level");
+        assert_eq!(toasts.last().map(String::as_str), Some("Speed 1"));
         // Nothing but another press changes it, a stop and a respawn included.
         app.update();
         let after = app

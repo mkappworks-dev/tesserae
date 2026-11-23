@@ -556,6 +556,19 @@ const FULL_NOTICE: Color = Color::srgba_u8(11, 11, 13, 0xcc);
 pub(super) const FULL_NOTICE_EDGE: Color = Color::srgba_u8(0xd6, 0xc8, 0x8f, 0x80);
 pub(super) const FULL_NOTICE_INK: Color = Color::srgb_u8(0xea, 0xdf, 0xb4);
 pub(super) const NOTICE_CARD_INK: Color = Color::srgb_u8(0xf1, 0xf0, 0xed);
+/// A toast's icon by tone; the card itself is the same for every tone.
+pub(super) const TOAST_INFO: Color = Color::srgb_u8(0xa8, 0xb5, 0xbd);
+pub(super) const TOAST_DONE: Color = Color::srgb_u8(0x8f, 0xc2, 0x7a);
+pub(super) const TOAST_COUNT: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1a);
+
+/// A toast's fill: the menu sheet's shade, opaque under stronger contrast.
+pub(super) fn toast_fill() -> Color {
+    if stronger_contrast() {
+        notice_card()
+    } else {
+        sheet_shade()
+    }
+}
 pub(super) const DEATH_SCRIM: [Color; 2] = [
     Color::srgba_u8(0x1c, 0x08, 0x08, 0x4d),
     Color::srgba_u8(0x0a, 0x03, 0x03, 0xa6),
