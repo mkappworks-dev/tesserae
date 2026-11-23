@@ -1481,7 +1481,11 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     type_into(&mut app, Field::Sky, "#0a141e");
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
-    assert!(shown(&mut app, "1 enabled"));
+    assert!(shown(&mut app, "Meadow") && shown(&mut app, "Customised"));
+    assert!(
+        !shown(&mut app, "Ash flats"),
+        "Review lists the Biomes left on"
+    );
     act(&mut app, Act::Create);
     let edits = created(&app).biomes.expect("the edits are stored");
     assert_eq!(
@@ -3349,4 +3353,22 @@ fn ctrl_or_cmd_enter_and_start_move_on_from_anywhere_and_create_on_review() {
     assert_eq!(labels, ["Select", "Create", "Back"]);
     chord(&mut app, KeyCode::ControlLeft, KeyCode::Enter);
     assert_eq!(created(&app).game.unwrap().id, "terra");
+}
+
+#[test]
+fn review_shows_the_terrain_and_the_seed_number_the_world_will_use_with_a_copy_control() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.init_resource::<Assets<Image>>();
+    app.insert_resource(Previewer(fake_terrain));
+    app.update();
+    new_world(&mut app);
+    type_into(&mut app, Field::Seed, "hello there");
+    let number = launcher(&app).form.seed().unwrap().to_string();
+    act(&mut app, Act::Step(Step::Review));
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    assert!(shown(&mut app, &number), "the number, not the words");
+    assert_eq!(controls(&mut app, &Act::CopyResolved), 1);
+    drawn(&mut app);
+    assert!(terrain_shown(&mut app).is_some(), "beside the sections");
 }

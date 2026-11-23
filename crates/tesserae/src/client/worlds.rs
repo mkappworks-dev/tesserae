@@ -285,7 +285,7 @@ impl BiomesDraft {
     }
 
     /// Whether the player changed Biome `at` beyond turning it on or off.
-    fn customised(&self, at: usize) -> bool {
+    pub(super) fn customised(&self, at: usize) -> bool {
         let (Some(choice), Some(declared)) = (self.choices.get(at), self.declared.biomes.get(at))
         else {
             return false;
@@ -439,7 +439,6 @@ struct Launcher {
 /// A row that shows or hides the settings under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Disclosure {
-    BiomeParameters,
     WorldInformation,
     ManageWorld,
 }

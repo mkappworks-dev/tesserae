@@ -51,7 +51,10 @@ pub(super) struct TerrainPicture;
 /// What the preview should show now, or `None` to leave it as it is: off its steps,
 /// before the Game is read, or while the seed or a Climate size does not parse.
 fn wanted(l: &Launcher) -> Option<Inputs> {
-    if !matches!(l.screen, Screen::Create(Step::World | Step::Biomes)) {
+    if !matches!(
+        l.screen,
+        Screen::Create(Step::World | Step::Biomes | Step::Review)
+    ) {
         return None;
     }
     let (ids, source) = l.terrain.as_ref()?;
