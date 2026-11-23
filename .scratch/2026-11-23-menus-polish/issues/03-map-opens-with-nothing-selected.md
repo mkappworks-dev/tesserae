@@ -1,6 +1,6 @@
 # 03: Map opens with nothing selected
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -12,7 +12,9 @@ Opening the Map clears the Waypoint selection, so the Map opens centred on the P
 
 ## Acceptance criteria
 
-- [ ] Opening the Map leaves no Waypoint selected and no Edit or Remove prompt
-- [ ] The view still follows the Player on open
+- [x] Opening the Map leaves no Waypoint selected and no Edit or Remove prompt
+- [x] The view still follows the Player on open
 
 ## Comments
+
+Opening also drops a pan from the last visit (`centre = None`), so the view follows the Player even if the window was closed while panned.

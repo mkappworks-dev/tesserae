@@ -603,6 +603,7 @@ type Blockers<'w> = (
 pub(super) fn toggle(
     mut actions: ResMut<Actions>,
     mut window: ResMut<MapWindow>,
+    mut marks: ResMut<Marks>,
     (menu, docked, settings, ui, inventory, allowed): Blockers,
     focused: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
@@ -628,12 +629,14 @@ pub(super) fn toggle(
     if window.open {
         close(&mut window, &mut cursor);
     } else {
-        open(&mut window, &mut cursor);
+        open(&mut window, &mut marks, &mut cursor);
     }
 }
 
-fn open(window: &mut MapWindow, cursor: &mut CursorOptions) {
+fn open(window: &mut MapWindow, marks: &mut Marks, cursor: &mut CursorOptions) {
     window.open = true;
+    window.centre = None;
+    marks.select(None);
     window.pointer = None;
     cursor.grab_mode = CursorGrabMode::None;
     cursor.visible = true;
