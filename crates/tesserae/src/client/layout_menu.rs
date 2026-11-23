@@ -1675,4 +1675,85 @@ mod tests {
             "the total out of 256"
         );
     }
+
+    /// The real frame: Layout key, a shape, Enter to aim, then Place on the right button.
+    #[test]
+    fn right_mouse_lays_the_layout_after_enter_aims_from_the_full_panel() {
+        use super::super::layout;
+        use crate::server::edit::LayoutIntent;
+        let mut app = app();
+        app.init_resource::<super::super::edit::Hotbar>()
+            .init_resource::<super::super::input::UiInput>()
+            .init_resource::<Time>()
+            .add_message::<LayoutIntent>()
+            .add_systems(
+                Update,
+                (
+                    toggle
+                        .before(super::super::input::resolve)
+                        .before(super::super::camera::grab_cursor),
+                    keys.after(toggle),
+                    super::super::input::resolve.after(toggle),
+                    super::super::camera::grab_cursor,
+                    layout::intercept.after(super::super::input::resolve),
+                    layout::send.after(layout::intercept),
+                ),
+            );
+        app.world_mut()
+            .resource_mut::<super::super::edit::Hotbar>()
+            .outside = Some(super::super::edit::Holding::solid(
+            8,
+            tesserae_core::SHAPE_FULL_CUBE,
+        ));
+        app.world_mut().spawn((
+            super::super::camera::FlyCamera::default(),
+            GlobalTransform::IDENTITY,
+        ));
+        let tap = |app: &mut App, press: &dyn Fn(&mut App, bool)| -> usize {
+            press(app, true);
+            app.update();
+            let mut sent = app
+                .world_mut()
+                .resource_mut::<Messages<LayoutIntent>>()
+                .drain()
+                .count();
+            press(app, false);
+            app.update();
+            app.update();
+            sent += app
+                .world_mut()
+                .resource_mut::<Messages<LayoutIntent>>()
+                .drain()
+                .count();
+            sent
+        };
+        let key = |code: KeyCode| {
+            move |app: &mut App, down: bool| {
+                let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                keys.clear();
+                if down {
+                    keys.press(code)
+                } else {
+                    keys.release(code)
+                }
+            }
+        };
+        let right = |app: &mut App, down: bool| {
+            let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse.clear();
+            if down {
+                mouse.press(MouseButton::Right)
+            } else {
+                mouse.release(MouseButton::Right)
+            }
+        };
+        app.update();
+        tap(&mut app, &key(KeyCode::KeyL));
+        assert!(menu(&app).open);
+        tap(&mut app, &key(KeyCode::Digit1));
+        tap(&mut app, &key(KeyCode::Enter));
+        assert!(!menu(&app).open, "Enter aims");
+        assert_eq!(cursor(&mut app).0, CursorGrabMode::Locked);
+        assert_eq!(tap(&mut app, &right), 1, "RMB lays the layout");
+    }
 }
