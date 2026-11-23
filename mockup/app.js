@@ -757,11 +757,16 @@ function biomesForm() {
 function climateMap(b) {
   return `<div class="climate-plot"><div class="climate-map" data-climate-map aria-label="Climate: temperature left to right, humidity bottom to top"><span class="corner wet">Wet</span><span class="corner dry">Dry</span>${state.biomes.map((x, i) => (i === state.selected ? "" : `<button type="button" class="climate-dot ${x.enabled ? "" : "off"}" data-action="edit-biome" data-value="${i}" style="left:${x.t * 100}%;bottom:${x.h * 100}%;--swatch:${x.swatch}" aria-label="Edit ${esc(x.name)}" title="${esc(x.name)}"></button>`)).join("")}<button type="button" class="climate-dot current" data-climate-handle style="left:${b.t * 100}%;bottom:${b.h * 100}%;--swatch:${b.swatch}" aria-label="${esc(b.name)}: drag or use arrow keys to move"><span>${esc(b.name)}</span></button></div><div class="axis-x"><span>Cold</span><span>Temperature</span><span>Warm</span></div></div>`;
 }
+/* One line each: label, slider, value. A controller needs exact values the map cannot give. */
+function slideRow(label, key, value, { min, max, step, format }) {
+  return `<label class="slide-row"><span>${label}</span><input type="range" data-bind="${key}" min="${min}" max="${max}" step="${step}" value="${value}" aria-label="${label}"><output data-for="${key}">${format(value)}</output></label>`;
+}
 function biomeEditor() {
   const b = state.biomes[state.selected];
+  const fixed = (v) => Number(v).toFixed(2);
   const pick = (label, key, value, options) =>
-    `<div class="field-label"><span>${label}</span>${customSelect(label, key, value, options)}</div>`;
-  return `<section class="biome-panel" aria-label="Edit ${esc(b.name)}"><header class="panel-head"><div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${climateMap(b)}<div class="two-col">${rangeField("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01 })}${rangeField("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01 })}</div></div><div class="panel-section">${rangeField("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface, ["Grass", "Sand", "Snow", "Melon"])}${pick("Soil", "biome.soil", b.soil, ["Dirt", "Sand", "Mud", "Melon"])}${pick("Rock", "biome.rock", b.rock, ["Stone", "Melon"])}</div><div class="panel-section"><span class="form-label">Atmosphere</span>${[
+    `<div class="pick-row"><span>${label}</span>${customSelect(label, key, value, options)}</div>`;
+  return `<section class="biome-panel compact" aria-label="Edit ${esc(b.name)}"><header class="panel-head">${biomeThumb(b, state.selected)}<div><h3 tabindex="-1">${esc(b.name)}</h3><small class="muted" data-biome-status>${b.custom ? "Customised" : "Game defaults"}</small></div><button type="button" class="field-action panel-close" data-action="close-biome" aria-label="Close" title="Close">${icon("close", 18)}</button></header><div class="panel-body"><div class="panel-section"><span class="form-label">Climate</span>${slideRow("Temperature", "biome.t", b.t, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Humidity", "biome.h", b.h, { min: 0, max: 1, step: 0.01, format: fixed })}${slideRow("Caves", "biome.caves", b.caves, { min: 0, max: 4, step: 0.1, format: (v) => (Number(v) === 0 ? "Off" : "× " + Number(v).toFixed(1)) })}${climateMap(b)}</div><div class="panel-section"><span class="form-label">Ground</span>${pick("Surface", "biome.surface", b.surface, ["Grass", "Sand", "Snow", "Melon"])}${pick("Soil", "biome.soil", b.soil, ["Dirt", "Sand", "Mud", "Melon"])}${pick("Rock", "biome.rock", b.rock, ["Stone", "Melon"])}</div><div class="panel-section"><span class="form-label">Atmosphere</span><div class="color-pair">${[
     ["Sky", "sky"],
     ["Fog", "fog"],
   ]
@@ -771,7 +776,7 @@ function biomeEditor() {
     )
     .join(
       "",
-    )}</div></div><footer class="panel-foot">${button("Reset", "reset-biome", { small: true, ghost: true, disabled: !b.custom })}${button("Done", "close-biome", { primary: true })}</footer></section>`;
+    )}</div></div></div><footer class="panel-foot">${button("Reset", "reset-biome", { small: true, ghost: true, disabled: !b.custom })}${button("Done", "close-biome", { primary: true })}</footer></section>`;
 }
 function reviewForm() {
   const enabled = state.biomes
@@ -1668,7 +1673,7 @@ function markCustom() {
     list.innerHTML = biomeList();
     syncBulk();
   }
-  const status = $("[data-biome-status]");
+  const status = $("small[data-biome-status]");
   if (status) status.textContent = "Customised";
   const reset = $('[data-action="reset-biome"]');
   if (reset) reset.disabled = false;

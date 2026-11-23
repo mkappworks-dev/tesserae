@@ -838,3 +838,68 @@
   gap: 10px;
   padding: 12px 0;
 }
+.biome-panel.compact .panel-head {
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 8px 16px;
+}
+.biome-panel.compact .panel-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.biome-panel.compact .panel-head .world-preview {
+  width: 72px;
+  height: 40px;
+  flex-shrink: 0;
+}
+.biome-panel.compact .panel-head h3 {
+  margin: 0 0 2px;
+}
+.biome-panel.compact .panel-section {
+  gap: 8px;
+  padding: 10px 0;
+}
+.biome-panel.compact .climate-plot {
+  margin-top: 4px;
+}
+.biome-panel.compact .climate-plot .climate-map {
+  aspect-ratio: 3 / 1;
+}
+.biome-panel.compact .axis-x {
+  margin-top: 4px;
+}
+.slide-row,
+.pick-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.pick-row {
+  grid-template-columns: 86px minmax(0, 1fr);
+}
+.slide-row input {
+  width: 100%;
+  margin: 0;
+}
+.slide-row output {
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pick-row .input,
+.pick-row .custom-select {
+  min-height: 32px;
+  margin: 0;
+}
+.color-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.biome-panel.compact .color-row {
+  min-height: 32px;
+}
