@@ -5,3 +5,4 @@ depends = ["strata", "flora"]
 declaration = "content.toml"
 category = "Plants"
 description = "Wheat, carrots, potatoes, berries, melons and pumpkins, with bread and pie"
+thumbnail = "thumbnail.png"

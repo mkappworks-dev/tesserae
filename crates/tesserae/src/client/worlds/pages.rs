@@ -2036,6 +2036,7 @@ fn pop_icon(
             return;
         }
         wrap.spawn((
+            frame::Popup,
             BackgroundColor(theme::RAISED),
             BorderColor::all(theme::edge()),
             GlobalZIndex(10),

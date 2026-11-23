@@ -267,3 +267,20 @@ fn every_shared_plant_resolves_against_the_tags_of_the_mods_loaded_with_it() {
         assert_eq!(t.vines.as_ref().unwrap().plant, "flora:vine");
     }
 }
+
+#[test]
+fn every_shipped_game_and_mod_declares_a_thumbnail() {
+    let scanned = scan(&checkout().join("mods")).unwrap();
+    assert!(scanned.rejected.is_empty(), "{:?}", scanned.rejected);
+    let games = fs::read_dir(checkout().join("games"))
+        .unwrap()
+        .map(|entry| crate::Found::read(&entry.unwrap().path()).unwrap());
+    for found in scanned.mods.into_iter().chain(games) {
+        let thumbnail = found.thumbnail().unwrap();
+        assert!(
+            thumbnail.is_some(),
+            "{} has no thumbnail",
+            found.manifest.id
+        );
+    }
+}

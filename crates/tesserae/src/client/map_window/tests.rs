@@ -809,6 +809,24 @@ mod waypoints {
     }
 
     #[test]
+    fn a_click_outside_the_popover_closes_it_as_cancel_does() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        adding_popover(&mut app);
+        crate::client::frame::testing::click_outside(&mut app);
+        assert_eq!(window(&app).pop, None);
+        assert!(window(&app).adding && is_open(&app));
+        assert!(intents(&mut app).is_empty());
+        send_list(&mut app, base_list());
+        control(&mut app, WpControl::Select(1));
+        crate::client::frame::testing::click_outside(&mut app);
+        assert_eq!(window(&app).pop, None);
+        assert!(is_open(&app));
+        assert!(intents(&mut app).is_empty());
+    }
+
+    #[test]
     fn at_my_position_adds_at_the_player_with_the_default_name_then_opens_its_edit_popover() {
         let mut app = app();
         declare(&mut app, kinds());
@@ -1185,6 +1203,24 @@ mod waypoints {
         );
         press(&mut app, KeyCode::Delete);
         assert_eq!(intents(&mut app), [WaypointIntent::Remove { id: 1 }]);
+    }
+
+    #[test]
+    fn the_map_opens_on_the_player_with_nothing_selected() {
+        let mut app = app();
+        declare(&mut app, kinds());
+        opened(&mut app);
+        send_list(&mut app, base_list());
+        focus_row(&mut app, 1);
+        app.world_mut().resource_mut::<MapWindow>().centre = Some(Vec2::new(500.0, 0.0));
+        press(&mut app, KeyCode::Escape);
+        assert!(!is_open(&app));
+
+        press(&mut app, KeyCode::KeyM);
+        app.update();
+        assert_eq!(app.world().resource::<Marks>().selected(), None);
+        assert_eq!(window(&app).centre, None, "the view follows the Player");
+        assert_eq!(prompts(&mut app), browsing(&[]));
     }
 
     #[test]
