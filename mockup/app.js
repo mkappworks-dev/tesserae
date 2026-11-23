@@ -627,20 +627,27 @@ function gameForm() {
     )
     .join("")}</div>`;
 }
+// The Client's `VOXEL_SIZES`, with what each costs.
+const VOXEL_SIZES = [
+  ["1", "1 m · default"],
+  ["0.5", "0.5 m · 2× finer, half the view distance"],
+  ["0.25", "0.25 m · 4× finer, a quarter of the view distance"],
+];
+function voxelPicks(value) {
+  const legend = "Voxel size · fixed at creation";
+  return `<fieldset class="mode-picks voxel-picks"><legend class="section-label">${legend}</legend><div class="segmented" role="radiogroup" aria-label="${legend}">${VOXEL_SIZES.map(
+    ([size]) =>
+      `<button type="button" role="radio" class="${value === size ? "selected" : ""}" data-action="pick-voxel" data-value="${size}" aria-checked="${value === size}" tabindex="${value === size ? 0 : -1}">${size} m</button>`,
+  ).join(
+    "",
+  )}</div><small class="mode-hint">${VOXEL_SIZES.find(([size]) => size === value)?.[1] || ""}</small></fieldset>`;
+}
 function worldForm() {
-  const voxels = [
-    { value: "1", label: "1 m · default" },
-    { value: "0.5", label: "0.5 m · 2× finer, half the view distance" },
-    {
-      value: "0.25",
-      label: "0.25 m · 4× finer, a quarter of the view distance",
-    },
-  ];
   const seedActions = [
     { name: "randomize", label: "Randomize seed", icon: "shuffle" },
     { name: "copy-seed", label: "Copy seed", icon: "copy" },
   ];
-  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}<div class="field-label"><span id="voxel-label">Voxel size · fixed at creation</span>${customSelect("Voxel size", "voxel", state.voxel, voxels)}</div><div class="field-label"><span>Climate scale · fixed at creation</span><div class="two-col">${textField("Temperature (m)", "tempSize", state.tempSize, { type: "number", min: 1, max: 100000, step: 1 })}${textField("Humidity (m)", "humiditySize", state.humiditySize, { type: "number", min: 1, max: 100000, step: 1 })}</div></div></div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
+  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}${voxelPicks(state.voxel)}<div class="field-label"><span>Climate scale · fixed at creation</span><div class="two-col">${textField("Temperature (m)", "tempSize", state.tempSize, { type: "number", min: 1, max: 100000, step: 1 })}${textField("Humidity (m)", "humiditySize", state.humiditySize, { type: "number", min: 1, max: 100000, step: 1 })}</div></div></div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
 }
 function required() {
   return games[state.game].required;
@@ -1226,6 +1233,17 @@ function action(name, value) {
     } else if (state.screen === "wizard" && state.step === 0) goStep(1);
     return;
   }
+  if (name === "pick-voxel") {
+    state.voxel = value;
+    state.dirty = true;
+    const y = $(".body").scrollTop;
+    render();
+    $(".body").scrollTop = y;
+    $(`[data-action="pick-voxel"][data-value="${value}"]`)?.focus({
+      preventScroll: true,
+    });
+    return;
+  }
   if (name === "randomize") {
     state.seed = randomSeed();
     state.dirty = true;
@@ -1686,6 +1704,7 @@ document.addEventListener("input", (e) => {
       : ["sky", "fog"].includes(key)
         ? v || null
         : v;
+    if (["sky", "fog"].includes(key)) pairAir(key);
     markCustom();
     const dot = $(".climate-map .current");
     if (dot) {
@@ -1695,6 +1714,19 @@ document.addEventListener("input", (e) => {
   } else state[k] = v;
   state.dirty = true;
 });
+/* Sky and Fog are one pair, as in the Client: a Biome borrows both or owns
+   both. Picking one fixes the other at the blend it was showing; clearing one
+   (Esc back to borrowed) clears both. */
+function pairAir(key) {
+  const i = state.selected,
+    b = state.biomes[i];
+  const other = key === "sky" ? "fog" : "sky";
+  const field = $(`[data-colour="biome.${other}"]`);
+  if (!b[key]) b[other] = null;
+  else if (!b[other]) b[other] = shownAir(state.biomes, i, other).hex;
+  else return;
+  if (field) showColour(field, b[other] || "");
+}
 function markCustom() {
   const b = state.biomes[state.selected];
   if (b.custom) return;
@@ -1742,6 +1774,20 @@ function moveClimate(e) {
     1 - (e.clientY - r.top) / r.height,
   );
 }
+// Left and Right pick the next Voxel size; at either end focus leaves the row.
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (!e.target.matches?.('[data-action="pick-voxel"]')) return;
+    const by = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    const next =
+      VOXEL_SIZES[VOXEL_SIZES.findIndex(([s]) => s === state.voxel) + by];
+    if (!by || !next) return;
+    e.preventDefault();
+    action("pick-voxel", next[0]);
+  },
+  true,
+);
 document.addEventListener("keydown", (e) => {
   if (!e.target.matches?.("[data-climate-handle]")) return;
   const step = e.shiftKey ? 0.1 : 0.01;
