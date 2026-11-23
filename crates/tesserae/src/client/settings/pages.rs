@@ -285,6 +285,31 @@ pub(super) fn select<T: PartialEq + Copy>(
     );
 }
 
+/// A row with a [`select`] whose chosen option's note, if it has one, the help strip shows after
+/// that option's label.
+pub(super) fn noted_select<T: PartialEq + Copy>(
+    card: &mut ChildSpawnerCommands,
+    title: &str,
+    help: &str,
+    current: T,
+    choices: impl IntoIterator<Item = (T, String, Option<&'static str>)>,
+    operation: impl Fn(T) -> Operation,
+) {
+    let choices: Vec<_> = choices.into_iter().collect();
+    let note = choices
+        .iter()
+        .find(|(value, ..)| *value == current)
+        .and_then(|(_, label, note)| Some((label.clone(), (*note)?)));
+    noted_row(card, title, help, note, |row| {
+        select(
+            row,
+            current,
+            choices.into_iter().map(|(value, label, _)| (value, label)),
+            operation,
+        )
+    });
+}
+
 pub(super) fn page(
     list: &mut ChildSpawnerCommands,
     settings: &Settings,
@@ -326,48 +351,46 @@ pub(super) fn behavior(
     ),
 ) {
     group(list, "MOVEMENT & BUILDING", |card| {
-        noted_row(
+        noted_select(
             card,
             "Sprint speed",
             "Sprint cycles through these and keeps the one you stop on.",
-            match p.speed_level {
-                SpeedLevel::Walk => Some("Walk: no sprint."),
-                SpeedLevel::One => Some("Speed 1: a brisk run."),
-                SpeedLevel::Two => None,
-                SpeedLevel::Three => Some("Speed 3: the fastest; hard to stop on an edge."),
-            },
-            |row| {
-                select(
-                    row,
-                    p.speed_level,
-                    [
-                        SpeedLevel::Walk,
-                        SpeedLevel::One,
-                        SpeedLevel::Two,
-                        SpeedLevel::Three,
-                    ]
-                    .map(|level| (level, level.label().to_owned())),
-                    Operation::Sprint,
-                )
-            },
+            p.speed_level,
+            [
+                SpeedLevel::Walk,
+                SpeedLevel::One,
+                SpeedLevel::Two,
+                SpeedLevel::Three,
+            ]
+            .map(|level| {
+                let note = match level {
+                    SpeedLevel::Walk => Some("no sprint."),
+                    SpeedLevel::One => Some("a brisk run."),
+                    SpeedLevel::Two => None,
+                    SpeedLevel::Three => Some("the fastest; hard to stop on an edge."),
+                };
+                (level, level.label().to_owned(), note)
+            }),
+            Operation::Sprint,
         );
-        noted_row(
+        noted_select(
             card,
             "Removal activation",
             "How Remove starts breaking a Voxel.",
-            Some(if p.tap_remove {
-                "Timed tap: one press starts it; press again to stop."
-            } else {
-                "Hold: keep the binding down until the Voxel breaks."
-            }),
-            |row| {
-                select(
-                    row,
-                    p.tap_remove,
-                    [(false, "Hold".into()), (true, "Timed tap".into())],
-                    Operation::Removal,
-                )
-            },
+            p.tap_remove,
+            [
+                (
+                    false,
+                    "Hold".into(),
+                    Some("keep the binding down until the Voxel breaks."),
+                ),
+                (
+                    true,
+                    "Timed tap".into(),
+                    Some("one press starts it; press again to stop."),
+                ),
+            ],
+            Operation::Removal,
         );
         setting_row(
             card,
@@ -470,87 +493,77 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
 pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allowed: bool) {
     let map_hint = |text: &'static str| if map_allowed { text } else { UNAVAILABLE };
     group(list, "WINDOW", |card| {
-        noted_row(
+        noted_select(
             card,
             "Window mode",
             "Borderless fullscreen covers the screen without changing its mode, so switching away is instant. Fullscreen takes over the display.",
-            (p.window_mode == WindowMode::Fullscreen)
-                .then_some("Fullscreen: switching to another app may flash the screen."),
-            |row| {
-                select(
-                    row,
-                    p.window_mode,
-                    WindowMode::ALL.map(|mode| (mode, mode.label().into())),
-                    Operation::WindowMode,
-                )
-            },
+            p.window_mode,
+            WindowMode::ALL.map(|mode| {
+                let note = (mode == WindowMode::Fullscreen)
+                    .then_some("switching to another app may flash the screen.");
+                (mode, mode.label().into(), note)
+            }),
+            Operation::WindowMode,
         );
     });
     group(list, "FRAME PRESENTATION", |card| {
-        noted_row(
+        noted_select(
             card,
             "Display sync",
             "Match frame presentation to your display. Synced is recommended and free of tearing; with sync off, frames may tear, so set a frame rate limit.",
-            (!p.display_sync).then_some("Sync off: set a frame rate limit too."),
-            |row| {
-                select(
-                    row,
-                    p.display_sync,
-                    [(true, "Display synced".into()), (false, "Sync off".into())],
-                    Operation::Sync,
-                )
-            },
+            p.display_sync,
+            [
+                (true, "Display synced".into(), None),
+                (
+                    false,
+                    "Sync off".into(),
+                    Some("set a frame rate limit too."),
+                ),
+            ],
+            Operation::Sync,
         );
-        noted_row(
+        noted_select(
             card,
             "Frame rate limit",
             "An optional ceiling, independent of display sync.",
-            p.fps_cap
-                .is_none()
-                .then_some("No limit: the GPU runs flat out, even in menus."),
-            |row| {
-                select(
-                    row,
-                    p.fps_cap,
-                    [Some(60), Some(120), Some(144), Some(240), Some(1000), None]
-                        .map(|cap| (cap, cap.map_or("No limit".into(), |n: u32| n.to_string()))),
-                    Operation::Cap,
-                )
-            },
+            p.fps_cap,
+            [Some(60), Some(120), Some(144), Some(240), Some(1000), None].map(|cap| match cap {
+                Some(n) => (cap, n.to_string(), None),
+                None => (
+                    cap,
+                    "No limit".into(),
+                    Some("the GPU runs flat out, even in menus."),
+                ),
+            }),
+            Operation::Cap,
         );
     });
     group(list, "IMAGE QUALITY", |card| {
-        noted_row(
+        noted_select(
             card,
             "Anti-aliasing",
             "Smooth voxel edges. MSAA costs more.",
-            (p.anti_aliasing == crate::client::anti_alias::AntiAliasing::Off)
-                .then_some("Off: sharpest and cheapest; edges shimmer."),
-            |row| {
-                select(
-                    row,
-                    p.anti_aliasing,
-                    crate::client::anti_alias::CHOICES.map(|aa| (aa, aa.label().to_owned())),
-                    Operation::AntiAliasing,
-                )
-            },
+            p.anti_aliasing,
+            crate::client::anti_alias::CHOICES.map(|aa| {
+                let note = (aa == crate::client::anti_alias::AntiAliasing::Off)
+                    .then_some("sharpest and cheapest; edges shimmer.");
+                (aa, aa.label().to_owned(), note)
+            }),
+            Operation::AntiAliasing,
         );
-        noted_row(
+        noted_select(
             card,
             "Render scale",
             "Lower values reduce rendering work. Menus stay sharp.",
-            (p.render_scale == 100).then_some("100%: native resolution."),
-            |row| {
-                select(
-                    row,
-                    p.render_scale,
-                    crate::client::render_scale::SCALES
-                        .iter()
-                        .rev()
-                        .map(|scale| (*scale, format!("{scale}%"))),
-                    Operation::Scale,
-                )
-            },
+            p.render_scale,
+            crate::client::render_scale::SCALES
+                .iter()
+                .rev()
+                .map(|&scale| {
+                    let note = (scale == 100).then_some("native resolution.");
+                    (scale, format!("{scale}%"), note)
+                }),
+            Operation::Scale,
         );
     });
     group(list, "MAP AND COMPASS", |card| {
@@ -731,7 +744,7 @@ pub(super) fn binding_rows(
             RowHelp {
                 title: action_name(action).into(),
                 text: help.into(),
-                note: "",
+                note: None,
             },
             Node {
                 justify_content: JustifyContent::SpaceBetween,
@@ -855,20 +868,20 @@ pub(super) fn controller(
             "Ignore small right-stick movements.",
             |row| slider(row, Scalar::LookDeadzone, pad.look_deadzone),
         );
-        noted_row(
+        noted_select(
             card,
             "Crouch activation",
             "How the crouch button works.",
-            pad.toggle_crouch
-                .then_some("Toggle: press once to crouch, again to stand."),
-            |row| {
-                select(
-                    row,
-                    pad.toggle_crouch,
-                    [(false, "Hold".into()), (true, "Toggle".into())],
-                    Operation::PadCrouch,
-                )
-            },
+            pad.toggle_crouch,
+            [
+                (false, "Hold".into(), None),
+                (
+                    true,
+                    "Toggle".into(),
+                    Some("press once to crouch, again to stand."),
+                ),
+            ],
+            Operation::PadCrouch,
         );
         disclosure(
             card,

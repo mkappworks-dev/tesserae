@@ -13,8 +13,8 @@ use bevy::picking::hover::Hovered;
 pub(super) struct RowHelp {
     pub title: String,
     pub text: String,
-    /// On the current value, as "Value: what it does.", or empty.
-    pub note: &'static str,
+    /// On the current value: its label, and what it does.
+    pub note: Option<(String, &'static str)>,
 }
 
 pub(super) fn setting_row(
@@ -31,7 +31,7 @@ pub(super) fn noted_row(
     parent: &mut ChildSpawnerCommands,
     title: &str,
     help: &str,
-    note: Option<&'static str>,
+    note: Option<(String, &'static str)>,
     control: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     parent
@@ -39,7 +39,7 @@ pub(super) fn noted_row(
             RowHelp {
                 title: title.into(),
                 text: help.into(),
-                note: note.unwrap_or_default(),
+                note,
             },
             Node {
                 align_items: AlignItems::Center,
@@ -530,8 +530,8 @@ pub(super) fn show_help(
     }
     (*last_hovered, *last_focused) = (hovered, focused);
     let (title, text, note) = match row.and_then(|row| rows.get(row).ok()) {
-        Some((_, help, _)) => (help.title.as_str(), help.text.as_str(), help.note),
-        None => (settings.tab.label(), category_help(settings.tab), ""),
+        Some((_, help, _)) => (help.title.as_str(), help.text.as_str(), help.note.as_ref()),
+        None => (settings.tab.label(), category_help(settings.tab), None),
     };
     for mut shown in &mut titles {
         shown.set_if_neq(Text::new(title));
@@ -539,11 +539,12 @@ pub(super) fn show_help(
     for mut shown in &mut texts {
         shown.set_if_neq(Text::new(text));
     }
-    // "Walk: no sprint." shows "Walk" bold, then ": no sprint.".
-    let (value, rest) = note.find(": ").map_or((note, ""), |at| note.split_at(at));
+    let (value, rest) = note.map_or((String::new(), String::new()), |(value, rest)| {
+        (value.clone(), format!(": {rest}"))
+    });
     for (mut shown, mut node, children) in &mut notes {
-        shown.set_if_neq(Text::new(value));
-        let display = if note.is_empty() {
+        shown.set_if_neq(Text::new(value.clone()));
+        let display = if note.is_none() {
             bevy::ui::Display::None
         } else {
             bevy::ui::Display::Flex
@@ -554,7 +555,7 @@ pub(super) fn show_help(
         if let Some(mut span) = children.first().and_then(|c| spans.get_mut(*c).ok())
             && span.0 != rest
         {
-            span.0 = rest.into();
+            span.0.clone_from(&rest);
         }
     }
 }
