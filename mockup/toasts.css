@@ -4,8 +4,9 @@
   z-index: 9;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   width: max-content;
+  min-width: 220px;
   max-width: min(420px, calc(100% - 36px));
   pointer-events: none;
 }
@@ -17,15 +18,9 @@
   left: 50%;
   transform: translateX(-50%);
 }
-#toasts[data-pos="top-right"] {
-  align-items: flex-end;
-}
-#toasts[data-pos="bottom-left"] {
-  align-items: flex-start;
-}
 /* A slot collapses its row as it leaves, so the stack closes up instead of jumping. */
 .toast-slot {
-  --edge: #a8b5bd;
+  --tone: #a8b5bd;
   display: grid;
   grid-template-rows: 1fr;
   max-width: 100%;
@@ -49,10 +44,10 @@
   grid-template-rows: 0fr;
 }
 .toast-slot[data-tone="done"] {
-  --edge: #8fc27a;
+  --tone: #8fc27a;
 }
 .toast-slot:is([data-tone="refused"], [data-tone="error"]) {
-  --edge: #d6a95a;
+  --tone: #d6a95a;
 }
 .toast-card {
   min-height: 0;
@@ -61,22 +56,25 @@
   align-items: center;
   gap: 9px;
   margin: 3px 0;
-  padding: 9px 14px 9px 11px;
-  background: #0b0b0de6;
-  border: 2px solid #000;
-  border-left: 4px solid var(--edge);
-  border-radius: 6px;
-  box-shadow:
-    inset 0 0 0 1px #ffffff1f,
-    0 8px 24px #0007;
+  padding: 9px 14px 9px 12px;
+  background: rgb(10 11 12 / 0.9);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--edge, #64646b);
+  border-radius: 0;
   color: #f1f0ed;
   font-size: 13px;
   line-height: 1.35;
 }
+#toasts[data-scope="game"] .toast-card {
+  font-size: 14px;
+}
+.toast-text {
+  flex: 1;
+}
 .toast-icon {
   flex: none;
   fill: none;
-  stroke: var(--edge);
+  stroke: var(--tone);
   stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
