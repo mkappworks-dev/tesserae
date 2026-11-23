@@ -28,6 +28,8 @@ pub(super) const PRESETS: [(&str, [u8; 3]); 8] = [
 const WIDTH: f32 = 264.0;
 const GAP: f32 = 6.0;
 const SQUARE_HEIGHT: f32 = 132.0;
+/// Eight across the picker, inside its padding and border.
+const PRESET: f32 = (WIDTH - 22.0 - 7.0 * GAP) / 8.0;
 const HUE_HEIGHT: f32 = 16.0;
 /// One arrow's move on the square, as a fraction; Shift moves five.
 const STEP: f32 = 0.02;
@@ -217,6 +219,11 @@ pub(super) fn field(parent: &mut ChildSpawnerCommands, l: &Launcher, air: Air) {
     };
     let (shown, borrowed) = current(draft, draft.selected, air);
     let picking = l.biome_view.colour.as_ref().filter(|p| p.air == air);
+    let edge = if picking.is_some() {
+        theme::SAGE
+    } else {
+        theme::field_edge()
+    };
     parent
         .spawn(Node {
             flex_grow: 1.0,
@@ -229,12 +236,16 @@ pub(super) fn field(parent: &mut ChildSpawnerCommands, l: &Launcher, air: Air) {
                 TabIndex(0),
                 Act::ColourPop(air),
                 pages::Pick {
-                    fill: theme::FIELD,
-                    edge: theme::field_edge(),
-                    hover: Some((theme::FIELD_HOVER, theme::field_edge())),
+                    fill: if picking.is_some() {
+                        theme::FIELD_HOVER
+                    } else {
+                        theme::FIELD
+                    },
+                    edge,
+                    hover: Some((theme::FIELD_HOVER, edge)),
                 },
                 BackgroundColor(theme::FIELD),
-                BorderColor::all(theme::field_edge()),
+                BorderColor::all(edge),
                 Node {
                     flex_grow: 1.0,
                     min_width: Val::Px(0.0),
@@ -348,7 +359,9 @@ fn picker(wrap: &mut ChildSpawnerCommands, picking: &Picking, shown: [u8; 3]) {
                     BorderColor::all(rim()),
                     Node {
                         flex_grow: 1.0,
-                        aspect_ratio: Some(1.0),
+                        flex_basis: Val::Px(0.0),
+                        // Square: an aspect ratio does not resolve in a row sized by its width.
+                        height: Val::Px(PRESET),
                         border: UiRect::all(Val::Px(theme::RULE)),
                         border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                         ..default()
@@ -489,7 +502,9 @@ pub(super) fn paint_controls(launcher: Option<Res<Launcher>>, mut painted: Paint
             continue;
         };
         let (rgb, borrowed) = current(draft, draft.selected, air);
-        fill.set_if_neq(BackgroundColor(colour(rgb)));
+        if shown.is_none() {
+            fill.set_if_neq(BackgroundColor(colour(rgb)));
+        }
         if let (Some(mut text), Some(mut ink)) = (text, ink) {
             let (wanted, tint) = if borrowed {
                 (LAND_AROUND.to_owned(), theme::placeholder())

@@ -1,6 +1,6 @@
 # 26: Sky and Fog colour picker
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately); start after the review-fix lane
 merges, since both change the Biomes step's Sky and Fog rows
@@ -22,11 +22,24 @@ fields.
 
 ## Acceptance criteria
 
-- [ ] Sky and Fog show a swatch and hex, and open the picker by pointer, keys
+- [x] Sky and Fog show a swatch and hex, and open the picker by pointer, keys
       and controller
-- [ ] Presets, square, hue slider and hex field set the colour; the diorama
+- [x] Presets, square, hue slider and hex field set the colour; the diorama
       redraws live
-- [ ] Esc restores the starting colour; a click outside keeps the new one
-- [ ] The picker stays inside the window
+- [x] Esc restores the starting colour; a click outside keeps the new one
+- [x] The picker stays inside the window
 
 ## Comments
+
+- The picker lives in `client/worlds/colour.rs`. Its square, hue slider and
+  presets are `pad::Surface`s: every arrow, D-pad and stick direction on them
+  sends a `pad::Nudge` instead of moving focus, and the popup is a modal
+  `TabGroup`, so Tab and LB/RB move between its four parts.
+- `BiomesDraft::colours` and the "Write colours as #rrggbb." problem are gone:
+  a picker cannot hold an invalid colour. The closed controls repaint from the
+  draft every frame, which also fixes the review-fix gap where picking one
+  colour on a Biome borrowing the land's left the other showing the
+  placeholder until a rebuild.
+- Like the mockup, it opens above its row when the panel's visible body has no
+  room below, even if the window has; in a short window that can be over the
+  Climate section.

@@ -346,3 +346,17 @@ fn the_picker_hangs_above_its_control_and_left_of_the_window_edge_when_it_must()
     assert_ne!(node.bottom, Val::Auto, "it hangs from above its control");
     assert_eq!(node.left, Val::Px(-44.0), "inside the window's right edge");
 }
+
+#[test]
+fn only_the_swatch_takes_the_colour_not_the_hex_beside_it() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(1));
+    app.update();
+    let fills: Vec<Color> = app
+        .world_mut()
+        .query_filtered::<&BackgroundColor, With<Shown>>()
+        .iter(app.world())
+        .map(|f| f.0)
+        .collect();
+    assert_eq!(fills, [Color::NONE, Color::NONE]);
+}
