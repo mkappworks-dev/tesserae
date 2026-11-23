@@ -895,11 +895,19 @@
   min-height: 32px;
   margin: 0;
 }
-.color-pair {
+.color-stack {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 4px;
 }
 .biome-panel.compact .color-row {
   min-height: 32px;
+}
+
+.game .biome-card.selected {
+  background: #29292e;
+  border-color: #c0c7bb;
+  box-shadow: inset 3px 0 #c0c7bb;
+}
+.biome-panel.compact .climate-plot {
+  margin: 0 0 4px;
 }
