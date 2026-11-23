@@ -279,8 +279,37 @@ function ensureSettings() {
   state.settingsTab ||= "Behavior";
 }
 
-// Each row's explanation, collected while the tab is built, for the help panel.
-let settingsHelp = [];
+// What the help strip says while no row is focused.
+const CATEGORY_HELP = {
+  Behavior: "How moving, building and the mouse feel.",
+  "Key bindings": "The keys and buttons for every action. " + BINDING_HELP,
+  Controller: "Sticks, touch controls and controller buttons.",
+  Display: "The window, frame presentation and image quality.",
+  Distance: "How far and how sharply distant terrain is drawn.",
+  Audio: "The volume of each kind of sound.",
+  Accessibility: "Motion, contrast and text size.",
+};
+
+// A note on the current value, shown under its row's explanation.
+const VALUE_NOTES = {
+  sprint: {
+    Walk: "Walk: no sprint.",
+    "Speed 1": "Speed 1: a brisk run.",
+    "Speed 3": "Speed 3: the fastest; hard to stop on an edge.",
+  },
+  removal: {
+    Hold: "Hold: keep the binding down until the Voxel breaks.",
+    "Timed tap": "Timed tap: one press starts it; press again to stop.",
+  },
+  crouch: { Toggle: "Toggle: press once to crouch, again to stand." },
+  windowMode: {
+    Fullscreen: "Fullscreen: switching to another app may flash the screen.",
+  },
+  sync: { "Sync off": "Sync off: set a frame rate limit too." },
+  fps: { "No limit": "No limit: the GPU runs flat out, even in menus." },
+  aa: { Off: "Off: sharpest and cheapest; edges shimmer." },
+  renderScale: { "100%": "100%: native resolution." },
+};
 
 const optionLabel = (key, value) =>
   key === "textScale" ? `${Math.round(Number(value) * 100)}%` : String(value);
@@ -303,8 +332,8 @@ function settingsControl(
     settingsOptions[key] = options.map(String);
     control = `<button type="button" class="cycle" aria-label="${label}: ${esc(optionLabel(key, value))}" data-action="settings-cycle" data-value="${key}|1" data-cycle="${key}"><span class="cycle-arrow" data-action="settings-cycle" data-value="${key}|-1" aria-hidden="true">◀</span><span class="cycle-value">${esc(optionLabel(key, value))}</span><span class="cycle-arrow" aria-hidden="true">▶</span></button>`;
   }
-  settingsHelp.push([label, hint]);
-  return `<div class="setting-row" data-title="${esc(label)}" data-help="${esc(hint)}"><b>${label}</b>${control}</div>`;
+  const note = VALUE_NOTES[key]?.[String(value)] || "";
+  return `<div class="setting-row" data-title="${esc(label)}" data-help="${esc(hint)}" data-note="${esc(note)}"><b>${label}</b>${control}</div>`;
 }
 
 // The options each cycle selector steps through, by key.
@@ -458,7 +487,13 @@ function settingsBody() {
           ["Walk", "Speed 1", "Speed 2", "Speed 3"],
           "Sprint cycles through these and keeps the one you stop on.",
         ) +
-        row("Removal activation", "removal", "select", ["Hold", "Timed tap"]) +
+        row(
+          "Removal activation",
+          "removal",
+          "select",
+          ["Hold", "Timed tap"],
+          "How Remove starts breaking a Voxel.",
+        ) +
         row(
           "Repeat while held",
           "repeat",
@@ -481,10 +516,34 @@ function settingsBody() {
           [0.25, 3, 0.05],
           "Relative to the default mouse feel.",
         ) +
-        row("Invert vertical look", "invert", "toggle") +
-        row("Scroll direction", "scroll", "select", ["Standard", "Reversed"]) +
-        row("Scroll sensitivity", "scrollSpeed", "range", [0.25, 3, 0.05]) +
-        row("Show quick reference", "reference", "toggle") +
+        row(
+          "Invert vertical look",
+          "invert",
+          "toggle",
+          [],
+          "Moving the mouse up looks down.",
+        ) +
+        row(
+          "Scroll direction",
+          "scroll",
+          "select",
+          ["Standard", "Reversed"],
+          "Which way the wheel steps through quick slots.",
+        ) +
+        row(
+          "Scroll sensitivity",
+          "scrollSpeed",
+          "range",
+          [0.25, 3, 0.05],
+          "How far one wheel notch moves.",
+        ) +
+        row(
+          "Show quick reference",
+          "reference",
+          "toggle",
+          [],
+          "List the main bindings in the corner while you play.",
+        ) +
         (state.settingsDraft.reference
           ? `<p class="muted">${quickReference()}</p>`
           : "")
@@ -506,8 +565,20 @@ function settingsBody() {
     case "Controller":
       return (
         group("Sticks & buttons") +
-        row("Look sensitivity", "padLook", "range", [0.25, 3, 0.05]) +
-        row("Invert vertical look", "padInvert", "toggle") +
+        row(
+          "Look sensitivity",
+          "padLook",
+          "range",
+          [0.25, 3, 0.05],
+          "How fast the right stick turns the view.",
+        ) +
+        row(
+          "Invert vertical look",
+          "padInvert",
+          "toggle",
+          [],
+          "Pushing the right stick up looks down.",
+        ) +
         row(
           "Movement deadzone",
           "moveDeadzone",
@@ -515,18 +586,56 @@ function settingsBody() {
           [0.05, 0.5, 0.01],
           "Ignore small movements caused by stick drift.",
         ) +
-        row("Look deadzone", "lookDeadzone", "range", [0.05, 0.5, 0.01]) +
-        row("Crouch activation", "crouch", "select", ["Hold", "Toggle"]) +
+        row(
+          "Look deadzone",
+          "lookDeadzone",
+          "range",
+          [0.05, 0.5, 0.01],
+          "Ignore small right-stick movements.",
+        ) +
+        row(
+          "Crouch activation",
+          "crouch",
+          "select",
+          ["Hold", "Toggle"],
+          "How the crouch button works.",
+        ) +
         `<details><summary>Touch controls</summary>` +
-        row("Look sensitivity", "touchLook", "range", [0.25, 3, 0.05]) +
-        row("Invert vertical look", "touchInvert", "toggle") +
-        row("Layout", "touchLayout", "select", ["Normal", "Mirrored"]) +
-        row("Control size", "touchSize", "select", [
-          "Small",
-          "Normal",
-          "Enlarged",
-        ]) +
-        row("Control opacity", "touchOpacity", "range", [0.3, 1, 0.01]) +
+        row(
+          "Look sensitivity",
+          "touchLook",
+          "range",
+          [0.25, 3, 0.05],
+          "How fast dragging turns the view.",
+        ) +
+        row(
+          "Invert vertical look",
+          "touchInvert",
+          "toggle",
+          [],
+          "Dragging up looks down.",
+        ) +
+        row(
+          "Layout",
+          "touchLayout",
+          "select",
+          ["Normal", "Mirrored"],
+          "Mirrored puts the movement stick on the right.",
+        ) +
+        row(
+          "Control size",
+          "touchSize",
+          "select",
+          ["Small", "Normal", "Enlarged"],
+          "The size of the on-screen buttons.",
+        ) +
+        row(
+          "Control opacity",
+          "touchOpacity",
+          "range",
+          [0.3, 1, 0.01],
+          "How solid the on-screen buttons look.",
+        ) +
         `</details>` +
         group("Controller buttons") +
         Object.values(bindingGroups)
@@ -777,16 +886,13 @@ function settings() {
     "accessibility",
   ];
   const nav = `<nav class="rail settings-rail" aria-label="Settings categories"><div class="rail-title">SETTINGS</div>${settingsCategories.map((name, i) => `<button class="${state.settingsTab === name ? "active" : ""}" data-action="settings-category" data-value="${name}" ${state.settingsTab === name ? 'aria-current="page"' : ""}><span class="category-icon">${icon(icons[i])}</span><span class="nav-label">${name}</span><span class="nav-arrow">${icon("chevron", 12)}</span></button>`).join("")}</nav>`;
-  settingsHelp = [];
   const rows = settingsBody();
   const bindings = state.settingsTab === "Key bindings";
-  const [title, help] = bindings
-    ? ["Key bindings", BINDING_HELP]
-    : settingsHelp[0] || ["", ""];
   return frame({
     title: state.settingsTab,
     rail: nav,
-    body: `<div class="settings-layout"><div class="settings-rows">${rows}</div><aside class="settings-help" id="settings-help" aria-live="polite"><b>${esc(title)}</b><p>${esc(help)}</p></aside></div>`,
+    body: `<div class="settings-rows">${rows}</div>`,
+    strip: `<footer class="settings-help" id="settings-help" aria-live="polite"><b>${esc(state.settingsTab)}</b><p>${esc(CATEGORY_HELP[state.settingsTab])}</p><p class="settings-note"></p></footer>`,
     prompts: [
       ["Esc", "Back", "settings-back"],
       bindings && ["Q", "Previous", "settings-binding-step", "-1"],
@@ -796,16 +902,30 @@ function settings() {
   });
 }
 
+const SETTING_ROW = ".settings-rows [data-help]";
+
+// The latest of hover and focus wins; with neither on a row, the category speaks.
 function showSettingsHelp(row) {
-  const panel = $("#settings-help");
-  if (!panel || !row) return;
-  panel.querySelector("b").textContent = row.dataset.title;
-  panel.querySelector("p").textContent = row.dataset.help;
+  const strip = $("#settings-help");
+  if (!strip) return;
+  row ||= document.activeElement?.closest?.(SETTING_ROW);
+  const [title, help, note] = row
+    ? [row.dataset.title, row.dataset.help, row.dataset.note]
+    : [state.settingsTab, CATEGORY_HELP[state.settingsTab], ""];
+  const [name, text, noteText] = strip.children;
+  name.textContent = title;
+  text.textContent = help;
+  noteText.textContent = note || "";
 }
-for (const type of ["focusin", "mouseover"])
-  document.addEventListener(type, (e) =>
-    showSettingsHelp(e.target.closest?.(".settings-rows [data-help]")),
-  );
+document.addEventListener("focusin", (e) =>
+  showSettingsHelp(e.target.closest?.(SETTING_ROW)),
+);
+document.addEventListener("focusout", (e) => {
+  if (!e.relatedTarget) showSettingsHelp(null);
+});
+document.addEventListener("mouseover", (e) =>
+  showSettingsHelp(e.target.closest?.(SETTING_ROW)),
+);
 
 // Changes apply as they are made, as a game's options do. Display changes are
 // the exception: a mode the screen cannot show would leave the Player stranded,

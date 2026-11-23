@@ -471,6 +471,7 @@ function frame({
   secondary = "",
   rail = "",
   wide = false,
+  strip = "",
 }) {
   const large = Number(state.settings.textScale || 1) >= 1.5;
   const header = `<header class="sheet-header ${large ? "scrolling-header" : ""}">${eyebrow ? `<p class="eyebrow">${eyebrow}</p>` : ""}<h2>${title}</h2>${subtitle ? `<p class="muted">${subtitle}</p>` : ""}</header>`;
@@ -480,7 +481,7 @@ function frame({
       ? `<div class="sheet-actions">${secondary ? `<span class="sheet-secondary">${secondary}</span>` : ""}${primary}</div>`
       : ""
     : `<footer class="sheet-footer">${footer}</footer>`;
-  return `<div class="workspace${wide ? " wide" : ""}">${rail}<section class="sheet${prompts ? " menu-sheet" : ""}" aria-label="${esc(title)}">${large ? "" : header}<div class="body">${large ? header : ""}${body}</div>${end}</section></div>`;
+  return `<div class="workspace${wide ? " wide" : ""}">${rail}<section class="sheet${prompts ? " menu-sheet" : ""}" aria-label="${esc(title)}">${large ? "" : header}<div class="body">${large ? header : ""}${body}</div>${strip}${end}</section></div>`;
 }
 /* One bottom-bar prompt: a key cap and a label, clickable for the mouse. A
    prompt whose key is a letter or Delete also answers that key. */
