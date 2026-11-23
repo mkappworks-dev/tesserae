@@ -37,14 +37,8 @@ states set from the browser console where there is no route):
   filter checkbox shared its `data-biome-status` selector).
 - Inventory search: `/inventory` and `/inventory/crafting`. A search field
   under the tabs, always shown; / focuses it and the prompt bar shows / Search.
-- Layout-ready card: `/layout`, then Enter (Build). The card shows L Edit,
-  ⌫ Exit and RMB Place as key caps, nothing clickable.
-- Place Tool page: `/place` (also "Place Tool overlay" in the screen picker).
-  The Structures stage over the World with a Quick layout-style side panel:
-  Outside | Inside | Placing, the Game's Templates, Turn, the outcome and the
-  size and Voxel total. Prompt bar: ↑ ↓ Template, R Turn, V View, Enter Hold
-  (back to play with the Tool), Esc Exit. `/structures` is unchanged and now
-  shares its stage code; K from play still opens it.
+- Layout-ready card: now the Quick layout panel's compact size (see the tool panel comment below). `/layout`, then Enter (Aim). It shows L Edit, Esc Exit and RMB Place as key caps, nothing clickable.
+- Place Tool page: `/place` (also "Place Tool overlay" in the screen picker). The full place Tool panel over play: Outside | Inside | Placing, the Game's Templates, Turn, the outcome and the size and Voxel total, with the ghost in the World. Prompt bar: ↑ ↓ Template, R Turn, V View, Enter Aim, Esc Exit. `/structures` is unchanged and still shares its stage code, but K from play now opens the place Tool panel.
 - Ticket 13's behaviour: a press outside any open popup (Mods and Biomes
   filter and sort, World card menus, Settings and other selectors, the Map
   popover) closes it and is swallowed, so it presses nothing beneath. One
@@ -115,3 +109,5 @@ states set from the browser console where there is no route):
   it would run past the panel body's bottom, as Sky and Fog both do at
   1280×720. `colourField(label, bind, value)` in `mockup/colour-picker.js`;
   `placePopup` in `controls.js` now places both it and the dropdowns.
+
+- One panel per tool (replaces the Esc-steps note above): Quick layout and the place Tool each have one panel docked top right while the tool is in hand. It is full size while choosing (`/layout`, `/place`, over play with the hotbar and the ghost; no crosshair or hand) and compact while aiming in play, in the same spot with the same title row and key-cap row. The compact panel shows the selection (shape, Voxel count and size, or the Template, facing, size and Voxel count), the status line, and L/K Edit, Esc Exit, RMB Place. The full panel has an Aim button (Enter) and L/K Aim, Esc Exit. L or K opens a tool and toggles full and compact; Enter or Aim collapses; Esc or Backspace leaves from either size, except that with a preview pinned the first Esc cancels it (the caps read G Build, Esc Cancel, K Edit, and so does the reticle hint). Building a Structure (G near the pin, or Simulate's "Build the Structure (G)") unselects the Template and reopens the full panel with "Pick the next Template"; Enter and K do nothing until one is picked, and ↑ ↓ picks the next. Quick layout keeps its layout: RMB says "Plane laid out · 16 Voxels." and stays in aim. L does nothing with the place Tool in hand, and K does nothing with Quick layout on. The separate Layout-ready and place Tool HUD cards (`layoutStatus`, `structureHud`) are gone, and the minimap hides while either panel shows. Walked in headless Chrome at 1280×720.

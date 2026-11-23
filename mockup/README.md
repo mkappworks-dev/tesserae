@@ -352,10 +352,13 @@ runs a stream under every column a bridge spans in the open.
 - A Tool, not an Item: it takes a hand slot beside the hotbar. Use (G) opens the
   Template list, R turns the Structure a quarter, and Place (right mouse) lays
   the whole Structure or nothing. Z removes it in one step.
-- In play the HUD card shows the Template, its facing, size, tallies, outcome
-  and key hints, but no preview and no buttons: the cursor is grabbed, G and
-  right mouse do those jobs, and the ghost stands in the World. The list window
-  keeps its Place here and Put the Tool away buttons.
+- One panel for the Tool, docked right while it is in hand: full size to pick a
+  Template (`/place`, K from play), compact while aiming in play with the
+  Template, its facing, size, Voxel count, outcome and K Edit, Esc Exit, RMB
+  Place, but no buttons: the cursor is grabbed, so keys and right mouse do those
+  jobs. Building a Structure unselects the Template and reopens the full panel.
+  Quick layout's panel works the same way with L. The list window
+  (`/structures`) keeps its Place here and Put the Tool away buttons.
 - The ghost tints each cell by what placing it does: free, replaces ground,
   replaces water, or blocked. The Voxel tallies are for this World's Voxel size;
   a Template is authored on a 1.0 m grid and sampled to it.
