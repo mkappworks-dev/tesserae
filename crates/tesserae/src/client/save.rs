@@ -17,30 +17,23 @@ struct Action(SaveAction);
 #[derive(Component)]
 pub(super) struct ToList;
 
-/// The Menu's two ways out: back to the Worlds, or Save & Quit to the desktop.
-pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
-    return_buttons_as(parent, Kind::Plain);
+/// The pause menu's two ways out: back to the Worlds, or Save & Quit to the desktop.
+pub(super) fn return_items(list: &mut ChildSpawnerCommands) {
+    super::frame::list_item(list, "Return to Worlds", None, ToList);
+    super::frame::list_item(list, "Save & Quit", None, Action(SaveAction::SaveQuit));
 }
 
-pub(super) fn return_buttons_as(parent: &mut ChildSpawnerCommands, kind: Kind) {
+/// Back to the Worlds, saving first, as a button.
+pub(super) fn to_list_button(parent: &mut ChildSpawnerCommands, kind: Kind) -> Entity {
     buttons::button(
         parent,
         "Return to Worlds",
         ToList,
         ButtonStyle::Cinematic {
             kind,
-            align: Align::Glyph("→"),
+            align: Align::Centre,
         },
-    );
-    buttons::button(
-        parent,
-        "Save & Quit",
-        Action(SaveAction::SaveQuit),
-        ButtonStyle::Cinematic {
-            kind,
-            align: Align::Glyph("→"),
-        },
-    );
+    )
 }
 
 #[derive(Clone, PartialEq)]

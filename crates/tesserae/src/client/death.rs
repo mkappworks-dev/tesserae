@@ -418,7 +418,7 @@ fn render(
                                 },
                                 Pickable::IGNORE,
                             ));
-                            super::save::return_buttons_as(actions, Kind::Ghost);
+                            super::save::to_list_button(actions, Kind::Ghost);
                         });
                 });
         });

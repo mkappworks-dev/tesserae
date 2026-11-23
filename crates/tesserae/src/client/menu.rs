@@ -5,9 +5,9 @@
 //! While it is open the cursor is free, so mouse look is off and a click edits
 //! nothing: both already wait on a grabbed cursor.
 
-use crate::client::buttons::{self, Align, ButtonStyle, Eyebrow};
+use crate::client::buttons::{self, Align, ButtonStyle};
+use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
-use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -97,6 +97,8 @@ pub(super) enum Choice {
     Settings,
     Details,
     CloseDetails,
+    /// The prompt bar's Esc: closes World details, else resumes.
+    Back,
 }
 
 #[derive(Component)]
@@ -227,6 +229,12 @@ fn choose(
         Choice::Settings => {}
         Choice::Details => menu.details = true,
         Choice::CloseDetails => menu.details = false,
+        Choice::Back if menu.details => menu.details = false,
+        Choice::Back => {
+            if let Ok(mut cursor) = cursor.single_mut() {
+                resume(&mut menu, &mut cursor);
+            }
+        }
     }
 }
 
@@ -333,10 +341,10 @@ fn render(
     };
     let facts = facts.0.as_ref();
     let own = own.and_then(|o| o.0);
-    let mut focus = None;
     commands
         .spawn((
             MenuRoot,
+            super::frame::Frame,
             GlobalZIndex(8),
             BackgroundColor(if solid {
                 theme::SOLID_BACKGROUND
@@ -346,7 +354,7 @@ fn render(
             if solid {
                 BackgroundGradient::default()
             } else {
-                theme::shade()
+                pause_shade()
             },
             Node {
                 position_type: PositionType::Absolute,
@@ -366,162 +374,130 @@ fn render(
                     Val::Px(theme::SCREEN_PAD_TOP),
                     Val::Px(theme::SCREEN_PAD_BOTTOM),
                 ),
+                justify_content: JustifyContent::SpaceBetween,
                 ..default()
             })
-            .with_children(|screen| {
-                screen
-                    .spawn(Node {
-                        flex_grow: 1.0,
-                        padding: UiRect::horizontal(Val::Vw(5.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::SpaceBetween,
-                        ..default()
-                    })
-                    .with_children(|pause| {
-                        let resume = panel(
-                            pause,
-                            facts,
-                            own,
-                            (details, allowed.is_none_or(|a| a.0)),
-                            (&bindings, &labels),
-                        );
-                        if !details {
-                            focus = Some(resume);
-                        }
-                        let biome = cave
-                            .name(facts)
-                            .or_else(|| here.0.and_then(|i| facts.and_then(|f| f.biomes.get(i))))
-                            .map(|name| ui::declared_title(name));
-                        if let Some(biome) = biome {
-                            world_status(pause, facts, &biome);
-                        }
-                    });
+            .with_children(|pause| {
+                list(
+                    pause,
+                    facts,
+                    own,
+                    (details, allowed.is_none_or(|a| a.0)),
+                    (&bindings, &labels),
+                );
+                let biome = cave
+                    .name(facts)
+                    .or_else(|| here.0.and_then(|i| facts.and_then(|f| f.biomes.get(i))))
+                    .map(|name| ui::declared_title(name));
+                if let Some(biome) = biome {
+                    world_status(pause, facts, &biome);
+                }
             });
-            super::worlds::pages::footer(root, &place(facts));
+            use super::frame::{Cap, Prompt};
+            super::frame::prompt_bar(
+                root,
+                &place(facts),
+                vec![
+                    Prompt::new(Cap::Enter, "Select"),
+                    Prompt::new(Cap::Esc, "Back").act(Choice::Back),
+                ],
+            );
             if details {
-                focus = world_details(root, facts, own);
+                world_details(root, facts, own);
             }
         });
-    if let Some(entity) = focus {
-        commands.queue(move |world: &mut World| {
-            if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
-                focus.set(entity, FocusCause::Auto);
-            }
-        });
-    }
 }
 
-/// The Menu's panel; returns Resume, which takes focus.
-fn panel(
+/// The prototype's shade: dark behind the list, clear by the middle of the screen.
+fn pause_shade() -> BackgroundGradient {
+    BackgroundGradient::from(LinearGradient::to_right(vec![
+        ColorStop::new(Color::srgba_u8(6, 8, 7, 191), Val::Percent(0.0)),
+        ColorStop::new(Color::NONE, Val::Percent(55.0)),
+    ]))
+}
+
+/// The plain list under 'Paused'; Resume takes focus.
+fn list(
     pause: &mut ChildSpawnerCommands,
     facts: Option<&WorldFacts>,
     own: Option<GameMode>,
     (details, map_allowed): (bool, bool),
     (bindings, labels): (&super::actions::Bindings, &super::actions::Labels),
-) -> Entity {
-    let mut resume = Entity::PLACEHOLDER;
+) {
+    let shadow = TextShadow {
+        offset: Vec2::new(0.0, 2.0),
+        color: Color::BLACK.with_alpha(0.5),
+    };
     pause
         .spawn((
             TabGroup {
                 modal: !details,
                 ..default()
             },
-            cine::surface(theme::panel()),
-            cine::framed(Node {
-                width: Val::Px(theme::MENU_WIDTH),
-                padding: UiRect::all(Val::Px(25.0)),
+            Node {
                 flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                padding: UiRect::left(Val::Vw(4.0)),
                 flex_shrink: 0.0,
                 ..default()
-            }),
+            },
         ))
-        .with_children(|panel| {
-            panel
-                .spawn(Node {
-                    margin: UiRect::bottom(Val::Px(12.0)),
-                    ..default()
-                })
-                .with_children(|e| buttons::eyebrow(e, "TAKE A MOMENT", Eyebrow::Cinematic));
-            panel.spawn((
-                Text::new("Menu"),
-                theme::weighted(theme::TEXT_PANEL_TITLE, theme::BOOK),
-                bevy::text::LineHeight::RelativeToFont(1.2),
+        .with_children(|column| {
+            column.spawn((
+                Text::new("Paused"),
+                theme::weighted(44.0, theme::STRONG),
+                bevy::text::LetterSpacing::Px(-0.02 * 44.0),
                 TextColor(theme::INK),
-                Node {
-                    margin: UiRect::bottom(Val::Px(6.0)),
-                    ..default()
-                },
+                shadow,
                 Pickable::IGNORE,
             ));
             let place = facts
                 .and_then(|f| f.name.clone())
                 .unwrap_or_else(|| "Your World".into());
             let subtitle = match own {
-                Some(mode) => format!("{place} · {}", mode_name(mode)),
+                Some(mode) => format!("{place} \u{00b7} {}", mode_name(mode)),
                 None => place,
             };
-            ui::paragraph(panel, subtitle, theme::TEXT_SMALL, theme::muted());
-            panel
+            column
                 .spawn(Node {
+                    margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(6.0), Val::Px(24.0)),
+                    ..default()
+                })
+                .with_children(|line| {
+                    ui::paragraph(line, subtitle, theme::TEXT_SMALL, theme::muted());
+                });
+            column
+                .spawn(Node {
+                    width: Val::Px(340.0),
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    margin: UiRect::top(Val::Px(24.0)),
+                    row_gap: Val::Px(4.0),
                     ..default()
                 })
                 .with_children(|list| {
                     let key = |action| short_key(bindings.label(action, labels));
-                    resume = buttons::button(
-                        list,
-                        "Resume",
-                        Choice::Resume,
-                        glyph(Kind::Primary, &key(Action::ReleaseCursor)),
-                    );
-                    buttons::button(
-                        list,
-                        "Inventory",
-                        Choice::Inventory,
-                        glyph(Kind::Plain, &key(Action::Inventory)),
-                    );
-                    if map_allowed {
-                        buttons::button(
-                            list,
-                            "Map",
-                            Choice::Map,
-                            glyph(Kind::Plain, &key(Action::Map)),
-                        );
+                    let keyed = |list: &mut ChildSpawnerCommands, label, choice, action| {
+                        let item = super::frame::list_item(list, label, None, choice);
+                        let key = key(action);
+                        list.commands().entity(item).with_children(|item| {
+                            super::frame::key_cap(item, &key);
+                        });
+                        item
+                    };
+                    let resume = keyed(list, "Resume", Choice::Resume, Action::ReleaseCursor);
+                    if !details {
+                        list.commands()
+                            .entity(resume)
+                            .insert(super::frame::Autofocus);
                     }
-                    let settings = buttons::button(
-                        list,
-                        "Settings",
-                        Choice::Settings,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Plain,
-                            align: Align::Icon(ui::IconKind::Settings),
-                        },
-                    );
-                    // The gear sits at the right edge, as the other rows' glyphs do.
-                    list.commands().queue(move |world: &mut World| {
-                        if let Some(mut node) = world.get_mut::<Node>(settings) {
-                            node.justify_content = JustifyContent::SpaceBetween;
-                        }
-                    });
-                    buttons::button(
-                        list,
-                        "World details",
-                        Choice::Details,
-                        glyph(Kind::Plain, "↗"),
-                    );
-                    super::save::return_buttons(list);
+                    keyed(list, "Inventory", Choice::Inventory, Action::Inventory);
+                    if map_allowed {
+                        keyed(list, "Map", Choice::Map, Action::Map);
+                    }
+                    super::frame::list_item(list, "Settings", None, Choice::Settings);
+                    super::frame::list_item(list, "World details", None, Choice::Details);
+                    super::save::return_items(list);
                 });
         });
-    resume
-}
-
-fn glyph(kind: Kind, glyph: &str) -> ButtonStyle<'_> {
-    ButtonStyle::Cinematic {
-        kind,
-        align: Align::Glyph(glyph),
-    }
 }
 
 /// The prototype's key names are short: Esc, not Escape.
@@ -585,8 +561,7 @@ fn world_details(
     root: &mut ChildSpawnerCommands,
     facts: Option<&WorldFacts>,
     own: Option<GameMode>,
-) -> Option<Entity> {
-    let mut close = None;
+) {
     root.spawn((
         BackgroundColor(theme::overlay()),
         Node {
@@ -625,7 +600,7 @@ fn world_details(
                 dialog
                     .spawn(cine::dialog_actions())
                     .with_children(|actions| {
-                        close = Some(buttons::button(
+                        let close = buttons::button(
                             actions,
                             "Close",
                             Choice::CloseDetails,
@@ -633,11 +608,14 @@ fn world_details(
                                 kind: Kind::Primary,
                                 align: Align::Centre,
                             },
-                        ));
+                        );
+                        actions
+                            .commands()
+                            .entity(close)
+                            .insert(super::frame::Autofocus);
                     });
             });
     });
-    close
 }
 
 fn mode_name(mode: GameMode) -> &'static str {
@@ -713,6 +691,7 @@ mod tests {
             .init_resource::<super::super::drops::Looks>()
             .init_resource::<super::super::menu_ui::Searches>()
             .init_resource::<Time<Real>>()
+            .init_resource::<Time>()
             .init_resource::<super::super::edit::Catalogue>()
             .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<super::super::settings::Settings>()
@@ -734,6 +713,7 @@ mod tests {
                 super::super::inventory_window::plugin,
                 crate::server::inventory::plugin,
             ));
+        super::super::frame::testing::support(&mut app);
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -801,6 +781,83 @@ mod tests {
             .iter(app.world())
             .map(|t| t.0.clone())
             .collect()
+    }
+
+    fn find(app: &mut App, choice: Choice) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &Choice)>()
+            .iter(app.world())
+            .find_map(|(e, c)| (*c == choice).then_some(e))
+            .unwrap_or_else(|| panic!("no {choice:?} on screen"))
+    }
+
+    /// What a control says, its label first.
+    fn says(app: &mut App, control: Entity) -> Vec<String> {
+        let world = app.world();
+        world
+            .get::<Children>(control)
+            .into_iter()
+            .flat_map(|children| children.iter())
+            .flat_map(|child| {
+                std::iter::once(child)
+                    .chain(world.get::<Children>(child).into_iter().flatten().copied())
+            })
+            .filter_map(|e| world.get::<Text>(e).map(|t| t.0.clone()))
+            .collect()
+    }
+
+    fn focused(app: &App) -> Option<Entity> {
+        app.world().resource::<InputFocus>().get()
+    }
+
+    fn river_bend(app: &mut App) {
+        app.world_mut().write_message(WorldFacts {
+            name: Some("River bend".into()),
+            game: Some(("terra".into(), "0.1.0".into())),
+            voxel_size_m: 0.5,
+            seed: 42,
+            biomes: vec!["terra:ash_flats".into(), "terra:meadow".into()],
+            cave_biomes: Vec::new(),
+            default_mode: GameMode::Survival,
+            generator: 3,
+            temperature_size_m: 300.0,
+            humidity_size_m: 700.0,
+        });
+        app.world_mut()
+            .write_message(crate::server::game_mode::GameModeChanged(
+                GameMode::Creative,
+            ));
+        app.add_systems(Update, super::super::game_mode::receive);
+    }
+
+    #[test]
+    fn the_pause_menu_is_a_plain_list_under_paused_with_resume_focused() {
+        let mut app = app();
+        river_bend(&mut app);
+        press(&mut app, KeyCode::Tab);
+        let shown = texts(&mut app);
+        for line in ["Paused", "River bend \u{00b7} Creative"] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        let resume = find(&mut app, Choice::Resume);
+        assert_eq!(focused(&app), Some(resume));
+        assert_eq!(says(&mut app, resume), ["Resume", "Esc"]);
+        let inventory = find(&mut app, Choice::Inventory);
+        assert_eq!(says(&mut app, inventory), ["Inventory", "I"]);
+        let map = find(&mut app, Choice::Map);
+        assert_eq!(says(&mut app, map), ["Map", "M"]);
+        let details = find(&mut app, Choice::Details);
+        assert_eq!(says(&mut app, details), ["World details"]);
+        for line in ["Settings", "Return to Worlds", "Save & Quit"] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        assert_eq!(
+            super::super::frame::testing::prompts(&mut app),
+            [
+                ("Enter".into(), "Select".into()),
+                ("Esc".into(), "Back".into())
+            ]
+        );
     }
 
     #[test]
