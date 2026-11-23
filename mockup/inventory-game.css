@@ -47,28 +47,25 @@
   font-size: 13px;
   font-weight: 600;
 }
-.side-head-search {
+.side-search-field {
+  position: relative;
   display: flex;
-  flex: 1;
-  justify-content: flex-end;
   align-items: center;
-  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--muted);
 }
-.side-head-search .input {
+.side-search-field svg {
+  position: absolute;
+  left: 10px;
+  pointer-events: none;
+}
+.side-search-field .input {
   flex: 1;
   min-width: 0;
-  min-height: 32px;
+  min-height: 34px;
   margin: 0;
+  padding-left: 34px;
   font-size: 13px;
-}
-.game .side-head .side-search-toggle {
-  position: static;
-  transform: none;
-  width: 32px;
-  height: 32px;
-  min-height: 0;
-  padding: 0;
-  flex-shrink: 0;
 }
 .inv-panel .side-grid {
   flex: 1;
