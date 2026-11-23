@@ -365,9 +365,15 @@
   min-height: 32px !important;
 }
 .layout-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 2px;
   color: var(--muted);
+  font-size: 12px;
 }
 .layout-keys kbd {
+  margin: 0 4px 0 0;
   font-size: 10px;
 }
 .layout-workspace:has(.layout-toolbar) {
