@@ -1748,6 +1748,32 @@ fn an_edited_biome_is_marked_customised_and_its_preview_redraws() {
 }
 
 #[test]
+fn reset_restores_the_open_biome_and_reset_all_restores_every_biome() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::SelectBiome(0));
+    slide(&mut app, Knob::Caves, 3.0);
+    act(&mut app, Act::SelectBiome(1));
+    slide(&mut app, Knob::Temperature, 0.9);
+    act(&mut app, Act::ToggleBiome(1));
+    act(&mut app, Act::ResetBiome);
+    assert_eq!(
+        edited(&app, 1),
+        BiomeChoice {
+            enabled: false,
+            ..declared("t:meadow", 0.3)
+        },
+        "Reset keeps the Biome off"
+    );
+    assert_eq!(slider_value(&mut app, Knob::Temperature), 0.3);
+    assert_eq!(biome_tag(&mut app, 1), "Terra");
+    assert_eq!(edited(&app, 0).cave_scale, Some(3.0), "only the open Biome");
+    act(&mut app, Act::ResetBiomes);
+    act(&mut app, Act::ConfirmReset);
+    assert_eq!(edited(&app, 0), declared("t:ash_flats", 0.7));
+    assert_eq!(edited(&app, 1), declared("t:meadow", 0.3));
+}
+
+#[test]
 fn no_biome_left_holds_the_biomes_step() {
     let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
     act(&mut app, Act::ToggleBiome(0));
