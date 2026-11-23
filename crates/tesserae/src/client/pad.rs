@@ -317,6 +317,8 @@ type Focusables<'w, 's> = Query<
         Without<super::frame::PointerOnly>,
     ),
 >;
+type Readers<'w, 's> =
+    Query<'w, 's, (&'static ComputedNode, &'static mut ScrollPosition), With<Reader>>;
 type Sliders<'w, 's> = Query<
     'w,
     's,
@@ -384,10 +386,9 @@ fn navigate(
     (input, ownership, labels, settings, keys): Context,
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
-    focusables: Focusables,
+    (focusables, mut readers): (Focusables, Readers),
     (groups, parents, disabled, sliders, tabs, typing, steppers, planes): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
-    mut readers: Query<(&ComputedNode, &mut ScrollPosition), With<Reader>>,
 ) {
     let owner = ownership.owner;
     if !matches!(
