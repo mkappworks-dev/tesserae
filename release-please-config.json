@@ -12,23 +12,9 @@
       "package-name": "tesserae",
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
+      "release-as": "0.1.0",
       "extra-files": [
         { "type": "toml", "path": "Cargo.toml", "jsonpath": "$.workspace.package.version" },
-        {
-          "type": "toml",
-          "path": "Cargo.lock",
-          "jsonpath": "$.package[?(@.name=='tesserae')].version"
-        },
-        {
-          "type": "toml",
-          "path": "Cargo.lock",
-          "jsonpath": "$.package[?(@.name=='tesserae-core')].version"
-        },
-        {
-          "type": "toml",
-          "path": "Cargo.lock",
-          "jsonpath": "$.package[?(@.name=='tesserae-mods')].version"
-        },
         {
           "type": "toml",
           "path": "crates/tesserae/Cargo.toml",
