@@ -323,11 +323,12 @@ document.addEventListener("input", (e) => {
 
 /* One rule for every menu popup: a press outside it closes it and does nothing
    else, so it cannot also press whatever lies beneath. Its own button still
-   toggles it, and Esc still closes it. */
+   toggles it, and Esc still closes it. The Map popover is exempt: a click on
+   the Map moves its point or opens another marker, as map.js handles it. */
 let swallowClick = false;
 function openPopups() {
   return [
-    ...document.querySelectorAll(".pop-wrap.open, .kebab.open, #map-pop"),
+    ...document.querySelectorAll(".pop-wrap.open, .kebab.open"),
     ...(openSelect ? [$("#select-layer"), openSelect.trigger] : []),
   ].filter(Boolean);
 }
@@ -335,7 +336,6 @@ function closePopups() {
   if (state.pop) closePop();
   closeCardMenus(null);
   closeSelect();
-  if (state.map?.pop) mapPopCancel();
 }
 document.addEventListener(
   "pointerdown",
