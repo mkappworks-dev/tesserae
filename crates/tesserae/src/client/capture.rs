@@ -281,10 +281,13 @@ pub(super) fn plugin(app: &mut App) {
     if let Some(menu) = std::env::var_os("TESSERAE_SCREENSHOT_MENU") {
         app.insert_resource(super::menu::Menu::opened(menu == "details"));
     }
-    // `TESSERAE_SCREENSHOT_LAYOUT` opens the Layout menu with the mode on.
-    if std::env::var_os("TESSERAE_SCREENSHOT_LAYOUT").is_some() {
-        app.insert_resource(super::layout::LayoutMode::turned_on())
-            .insert_resource(super::layout_menu::LayoutMenu::opened());
+    // `TESSERAE_SCREENSHOT_LAYOUT` opens the Layout menu with the mode on; `=ready` turns the
+    // mode on with the menu closed, so the HUD card shows.
+    if let Some(layout) = std::env::var_os("TESSERAE_SCREENSHOT_LAYOUT") {
+        app.insert_resource(super::layout::LayoutMode::turned_on());
+        if layout != "ready" {
+            app.insert_resource(super::layout_menu::LayoutMenu::opened());
+        }
     }
     // `TESSERAE_SCREENSHOT_INVENTORY` opens the Inventory window; `=crafting`
     // brings the Crafting tab to the front, `=station` the Workbench's pane,

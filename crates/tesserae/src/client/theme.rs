@@ -62,7 +62,7 @@ pub(super) const CHECK_BOTTOM: Color = Color::srgb_u8(0x13, 0x14, 0x16);
 pub(super) const CHECK_RING: Color = Color::srgb_u8(0x5a, 0x5d, 0x63);
 pub(super) const CHECK_RING_ON: Color = Color::srgb_u8(0xe6, 0xee, 0xdb);
 /// A native range input's unfilled track, which the prototype leaves to Chrome.
-pub(super) const TRACK: Color = Color::srgb_u8(0xef, 0xef, 0xef);
+pub(super) const TRACK: Color = Color::srgb_u8(0x3b, 0x3b, 0x3b);
 /// Under the launcher until it has scenery of its own.
 pub(super) const SCENE: Color = Color::srgb_u8(0x24, 0x2c, 0x32);
 /// Behind every menu when Simple menu background is on.
@@ -349,7 +349,6 @@ pub(super) fn shade() -> BackgroundGradient {
 pub(super) const SCREEN_PAD_TOP: f32 = 28.0;
 pub(super) const SCREEN_PAD_BOTTOM: f32 = 22.0;
 pub(super) const WORKSPACE_MAX: f32 = 1180.0;
-pub(super) const WORKSPACE_GAP: f32 = 24.0;
 pub(super) const RAIL_WIDTH: f32 = 224.0;
 pub(super) const RAIL_ENTRY_HEIGHT: f32 = 48.0;
 /// "You are here" on the World, under the Menu.

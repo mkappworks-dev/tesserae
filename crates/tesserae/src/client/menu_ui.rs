@@ -379,7 +379,7 @@ type ShellContext<'w> = (
     Option<Res<'w, super::menu::Facts>>,
 );
 
-/// The Settings frame: the category rail beside a sheet whose body the page
+/// The Settings frame: the category rail, part of the sheet, beside the body the page
 /// fills, over the scenery, with the prompt bar below. It is rebuilt only
 /// when the category or the look changes, so a page rebuild keeps its place.
 fn shell(
@@ -475,7 +475,6 @@ fn shell(
                     flex_grow: 1.0,
                     max_width: Val::Px(theme::WORKSPACE_MAX),
                     min_height: Val::Px(0.0),
-                    column_gap: Val::Px(theme::WORKSPACE_GAP),
                     ..default()
                 })
                 .with_children(|workspace| {
@@ -512,19 +511,19 @@ fn shell(
 pub(super) struct RailEntry;
 
 fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
-    use super::cinematic as cine;
     workspace
         .spawn((
-            cine::surface(theme::panel()),
-            cine::framed(Node {
+            BackgroundColor(theme::SHEET_SHADE),
+            BorderColor::all(theme::edge()),
+            Node {
                 width: Val::Px(theme::RAIL_WIDTH),
                 flex_shrink: 0.0,
-                align_self: AlignSelf::FlexStart,
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(7.0),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(20.0)),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(28.0)),
+                border: UiRect::right(Val::Px(theme::RULE)),
                 ..default()
-            }),
+            },
         ))
         .with_children(|nav| {
             nav.spawn((
@@ -885,10 +884,12 @@ pub(super) enum IconKind {
     /// The seed field's Randomize and Copy.
     Shuffle,
     Copy,
+    /// The Inventory's Catalogue tab.
+    Grid,
 }
-const ICONS: usize = 31;
+const ICONS: usize = 32;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 28] = [
+const DRAWN: [IconKind; 29] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -917,6 +918,7 @@ const DRAWN: [IconKind; 28] = [
     IconKind::Sort,
     IconKind::Shuffle,
     IconKind::Copy,
+    IconKind::Grid,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1221,6 +1223,12 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
         IconKind::Dismiss => {
             stroke(segment(v(6.0, 6.0), v(18.0, 18.0)).min(segment(v(18.0, 6.0), v(6.0, 18.0))))
         }
+        IconKind::Grid => stroke(
+            [v(6.5, 6.5), v(17.5, 6.5), v(6.5, 17.5), v(17.5, 17.5)]
+                .into_iter()
+                .map(|centre| rounded(centre, Vec2::splat(3.5), 0.0))
+                .fold(f32::MAX, f32::min),
+        ),
         IconKind::Layout => stroke(
             [v(6.5, 6.5), v(17.5, 6.5), v(6.5, 17.5)]
                 .into_iter()
