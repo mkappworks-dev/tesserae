@@ -392,38 +392,43 @@ fn worlds(
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
-    let sheet = frame::MenuSheet::<()> {
+    let sheet = frame::MenuSheet {
         title: "Worlds",
         subtitle: None,
-        primary: None,
         height: frame::SheetHeight::Content,
     };
-    frame::menu_sheet(main, sheet, (), |body| {
-        if let Some(card) = &l.card {
-            failure(body, card);
-            gap(body, 20.0);
-        }
-        if installed.game.is_none() {
-            ui::paragraph(body, NO_GAME, theme::TEXT_SMALL, theme::WARNING);
-            gap(body, 14.0);
-        }
-        if l.entries.len() > SEARCH_FROM {
-            body.spawn(Node {
-                max_width: Val::Px(420.0),
-                flex_shrink: 0.0,
-                ..default()
-            })
-            .with_children(|f| {
-                text_field(f, Field::Search, &l.search, "", "Find a World\u{2026}");
-            });
-            gap(body, 14.0);
-            list_scroll(body, scroll, |slots| {
-                world_slots(slots, l, installed, thumbnails, &mut focus);
-            });
-        } else {
-            world_slots(body, l, installed, thumbnails, &mut focus);
-        }
-    });
+    frame::sheet_with_foot(
+        main,
+        sheet,
+        (),
+        |body| {
+            if let Some(card) = &l.card {
+                failure(body, card);
+                gap(body, 20.0);
+            }
+            if installed.game.is_none() {
+                ui::paragraph(body, NO_GAME, theme::TEXT_SMALL, theme::WARNING);
+                gap(body, 14.0);
+            }
+            if l.entries.len() > SEARCH_FROM {
+                body.spawn(Node {
+                    max_width: Val::Px(420.0),
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|f| {
+                    text_field(f, Field::Search, &l.search, "", "Find a World\u{2026}");
+                });
+                gap(body, 14.0);
+                list_scroll(body, scroll, |slots| {
+                    world_slots(slots, l, installed, thumbnails, &mut focus);
+                });
+            } else {
+                world_slots(body, l, installed, thumbnails, &mut focus);
+            }
+        },
+        |_| {},
+    );
     focus
 }
 
@@ -837,45 +842,51 @@ fn library_page(
     thumbnails: &Thumbnails,
     scroll: Vec2,
 ) -> Option<Entity> {
-    let sheet = frame::MenuSheet::<()> {
+    let sheet = frame::MenuSheet {
         title: "Mods",
         subtitle: None,
-        primary: None,
         height: frame::SheetHeight::Content,
     };
-    frame::menu_sheet(main, sheet, page_scroll(scroll), |body| {
-        if installed.mods.is_empty() {
-            cine::notice(body, "No Mods are installed. Add them to the Mods folder.");
-        }
-        for (i, m) in installed.mods.iter().enumerate() {
-            if i > 0 {
-                gap(body, 8.0);
+    frame::sheet_with_foot(
+        main,
+        sheet,
+        page_scroll(scroll),
+        |body| {
+            if installed.mods.is_empty() {
+                cine::notice(body, "No Mods are installed. Add them to the Mods folder.");
             }
-            let (category, about) = installed.about(&m.id);
-            mod_card(
-                body,
-                ModCard {
-                    act: None,
-                    check: None,
-                    picture: Some(picture(installed, thumbnails, &m.id)),
-                    border: theme::edge(),
-                    title: ui::title(&m.id),
-                    detail: about.unwrap_or_default().to_owned(),
-                    adds: installed.summary(&m.id).and_then(adds),
-                    tag: category.map(|c| (c.to_owned(), theme::category_ink())),
-                },
-            );
-        }
-        for line in &installed.rejected {
-            gap(body, 8.0);
-            ui::paragraph(
-                body,
-                format!("Skipped: {line}"),
-                theme::TEXT_SMALL,
-                theme::WARNING,
-            );
-        }
-    })
+            for (i, m) in installed.mods.iter().enumerate() {
+                if i > 0 {
+                    gap(body, 8.0);
+                }
+                let (category, about) = installed.about(&m.id);
+                mod_card(
+                    body,
+                    ModCard {
+                        act: None,
+                        check: None,
+                        picture: Some(picture(installed, thumbnails, &m.id)),
+                        border: theme::edge(),
+                        title: ui::title(&m.id),
+                        detail: about.unwrap_or_default().to_owned(),
+                        adds: installed.summary(&m.id).and_then(adds),
+                        tag: category.map(|c| (c.to_owned(), theme::category_ink())),
+                    },
+                );
+            }
+            for line in &installed.rejected {
+                gap(body, 8.0);
+                ui::paragraph(
+                    body,
+                    format!("Skipped: {line}"),
+                    theme::TEXT_SMALL,
+                    theme::WARNING,
+                );
+            }
+        },
+        |_| {},
+    );
+    None
 }
 
 /// Edit World, laid out as Create World: the name and Game mode beside the saved picture and
@@ -895,9 +906,11 @@ fn edit(
     workspace(main, |w| {
         frame::sheet_with_actions(
             w,
-            "Edit World",
-            None,
-            frame::SheetHeight::Content,
+            frame::MenuSheet {
+                title: "Edit World",
+                subtitle: None,
+                height: frame::SheetHeight::Content,
+            },
             page_scroll(scroll),
             |body| {
                 problem(body, l.problem.as_ref());
@@ -2898,9 +2911,11 @@ fn trust(
     let mut back = None;
     frame::sheet_with_actions(
         main,
-        &title,
-        Some(subtitle),
-        frame::SheetHeight::Content,
+        frame::MenuSheet {
+            title: &title,
+            subtitle: Some(subtitle),
+            height: frame::SheetHeight::Content,
+        },
         page_scroll(scroll),
         |col| {
             problem(col, l.problem.as_ref());
@@ -2963,9 +2978,9 @@ fn step_frame(
             frame::MenuSheet {
                 title,
                 subtitle,
-                primary: Some((primary.0.as_str(), primary.1)),
                 height: frame::SheetHeight::Steps,
             },
+            Some((primary.0.as_str(), primary.1)),
             scroll,
             body,
         );

@@ -497,9 +497,11 @@ fn shell(
                     rail(workspace, tab);
                     frame::sheet_with_foot(
                         workspace,
-                        tab.label(),
-                        None,
-                        frame::SheetHeight::Steps,
+                        frame::MenuSheet {
+                            title: tab.label(),
+                            subtitle: None,
+                            height: frame::SheetHeight::Steps,
+                        },
                         (),
                         |body| {
                             body.spawn((

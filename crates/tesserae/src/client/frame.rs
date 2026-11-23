@@ -430,13 +430,12 @@ fn spawn_prompt<A: Bundle>(row: &mut ChildSpawnerCommands, prompt: Prompt<A>) {
     });
 }
 
-/// A menu screen's sheet: its title over the scenery, an optional one-line
-/// subtitle, and at most one main button. Back and every other action go in
-/// the prompt bar.
-pub(super) struct MenuSheet<'a, A> {
+/// A menu screen's sheet: its title over the scenery and an optional one-line
+/// subtitle. Back and every other action go in the prompt bar.
+#[derive(Clone, Copy)]
+pub(super) struct MenuSheet<'a> {
     pub title: &'a str,
     pub subtitle: Option<&'a str>,
-    pub primary: Option<(&'a str, A)>,
     pub height: SheetHeight,
 }
 
@@ -449,17 +448,18 @@ pub(super) enum SheetHeight {
     Steps,
 }
 
-/// Spawns the sheet with `body` scrolling inside it, and returns the main button. `scroll` goes on
-/// the scrolling body, for a screen that keeps its place there.
+/// Spawns the sheet with `body` scrolling inside it and at most one main button, which it returns.
+/// `scroll` goes on the scrolling body, for a screen that keeps its place there.
 pub(super) fn menu_sheet<A: Bundle>(
     main: &mut ChildSpawnerCommands,
-    sheet: MenuSheet<A>,
+    sheet: MenuSheet,
+    primary: Option<(&str, A)>,
     scroll: impl Bundle,
     body: impl FnOnce(&mut ChildSpawnerCommands),
 ) -> Option<Entity> {
-    let mut primary = None;
-    let slot = &mut primary;
-    let actions = sheet.primary.map(|(label, act)| {
+    let mut button = None;
+    let slot = &mut button;
+    let actions = primary.map(|(label, act)| {
         move |actions: &mut ChildSpawnerCommands| {
             *slot = Some(super::buttons::button(
                 actions,
@@ -469,30 +469,20 @@ pub(super) fn menu_sheet<A: Bundle>(
             ));
         }
     });
-    sheet_with_actions(
-        main,
-        sheet.title,
-        sheet.subtitle,
-        sheet.height,
-        scroll,
-        body,
-        actions,
-    );
-    primary
+    sheet_with_actions(main, sheet, scroll, body, actions);
+    button
 }
 
 /// The sheet with its own row of buttons at the bottom, right-aligned unless `actions` lays
 /// them out otherwise.
 pub(super) fn sheet_with_actions(
     main: &mut ChildSpawnerCommands,
-    title: &str,
-    subtitle: Option<&str>,
-    height: SheetHeight,
+    sheet: MenuSheet,
     scroll: impl Bundle,
     body: impl FnOnce(&mut ChildSpawnerCommands),
     actions: Option<impl FnOnce(&mut ChildSpawnerCommands)>,
 ) {
-    sheet_with_foot(main, title, subtitle, height, scroll, body, |s| {
+    sheet_with_foot(main, sheet, scroll, body, |s| {
         if let Some(actions) = actions {
             s.spawn(Node {
                 justify_content: JustifyContent::FlexEnd,
@@ -508,9 +498,11 @@ pub(super) fn sheet_with_actions(
 /// The sheet with `foot` spawned edge to edge under the scrolling body.
 pub(super) fn sheet_with_foot(
     main: &mut ChildSpawnerCommands,
-    title: &str,
-    subtitle: Option<&str>,
-    height: SheetHeight,
+    MenuSheet {
+        title,
+        subtitle,
+        height,
+    }: MenuSheet,
     scroll: impl Bundle,
     body: impl FnOnce(&mut ChildSpawnerCommands),
     foot: impl FnOnce(&mut ChildSpawnerCommands),
@@ -1273,9 +1265,9 @@ mod tests {
                     MenuSheet {
                         title: "Choose a Game",
                         subtitle: Some("It shapes the land."),
-                        primary: Some(("Next", Act::Play)),
                         height: SheetHeight::Steps,
                     },
+                    Some(("Next", Act::Play)),
                     (),
                     |body| {
                         list_item(body, "Terra", None, Act::Other);
