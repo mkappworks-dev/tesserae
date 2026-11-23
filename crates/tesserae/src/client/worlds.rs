@@ -421,8 +421,6 @@ struct Launcher {
     biome_view: BiomeView,
     /// The control the last act came from, focused again when its page is rebuilt.
     refocus: Option<Act>,
-    /// Disclosure rows the player has flipped from how they start.
-    flipped: std::collections::BTreeSet<Disclosure>,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
@@ -437,17 +435,7 @@ struct Launcher {
 }
 
 /// A row that shows or hides the settings under it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum Disclosure {
-    WorldInformation,
-    ManageWorld,
-}
-
 impl Launcher {
-    fn open(&self, row: Disclosure) -> bool {
-        self.flipped.contains(&row)
-    }
-
     fn entry(&self, path: &Path) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == path)
     }
@@ -525,8 +513,9 @@ pub(super) enum Act {
     Step(Step),
     KeepEditing,
     DiscardSetup,
-    DefaultMode(GameMode),
-    OwnMode(GameMode),
+    /// Edit World's one Game mode: the World's default and the Player's own, while the Player is
+    /// its only Player.
+    EditMode(GameMode),
     ToggleBiome(usize),
     SelectBiome(usize),
     CycleGround(Layer),
@@ -547,7 +536,6 @@ pub(super) enum Act {
     /// Trusts what a [`Screen::StepTrust`] dialog lists, then moves on.
     TrustStep,
     Dismiss,
-    Disclose(Disclosure),
     /// Opens or closes a popup beside the Mods search.
     ModPop(Pop),
     ModCategory(String),
@@ -923,7 +911,6 @@ fn start(
         biome_search: String::new(),
         biome_view: BiomeView::default(),
         refocus: None,
-        flipped: Default::default(),
         problem: None,
         clashes: Default::default(),
         version: 0,
@@ -994,6 +981,12 @@ fn keys(
             KeyCode::SuperRight,
         ]);
     let start = pad.is_some_and(|pad| pad.navigation.just_pressed(GamepadButton::Start));
+    if matches!(launcher.screen, Screen::Edit(_)) && chord {
+        // The focused control took the same Enter; saving wins.
+        queue.0.clear();
+        queue.0.push(Act::SaveName);
+        return;
+    }
     if let Screen::Create(step) = launcher.screen
         && (chord || start)
         && !launcher.form.biomes.as_ref().is_some_and(|d| d.resetting)
@@ -1222,8 +1215,7 @@ fn handle(
             | Act::DeleteHighlighted
             | Act::ShowFolder
             | Act::CopySeed
-            | Act::DefaultMode(..)
-            | Act::OwnMode(..)
+            | Act::EditMode(..)
             | Act::SaveName
             | Act::ConfirmDelete => on_edit_world(l, &mut cx, act),
             Act::New
@@ -1254,8 +1246,7 @@ fn handle(
             | Act::Settings
             | Act::Quit
             | Act::Back
-            | Act::Dismiss
-            | Act::Disclose(..) => navigate(l, &mut cx, act),
+            | Act::Dismiss => navigate(l, &mut cx, act),
             Act::ModPop(..)
             | Act::ModCategory(..)
             | Act::ModSelectedOnly
@@ -1297,12 +1288,6 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
         Act::Quit => {
             cx.relaunch.0 = None;
             cx.exit.write(AppExit::Success);
-        }
-        Act::Disclose(row) => {
-            if !l.flipped.remove(&row) {
-                l.flipped.insert(row);
-            }
-            l.version += 1;
         }
         Act::Back if l.mod_view.pop.is_some() => {
             l.refocus = l.mod_view.pop.take().map(Act::ModPop);

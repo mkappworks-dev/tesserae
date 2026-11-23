@@ -252,7 +252,6 @@ fn delete_defaults_to_cancel_refuses_an_open_world_then_removes_it() {
     app.update();
     act(&mut app, Act::Worlds);
     act(&mut app, Act::Edit(path.clone()));
-    act(&mut app, Act::Disclose(Disclosure::ManageWorld));
     act(&mut app, Act::Delete);
     app.update();
     assert_eq!(focused_act(&app), Some(Act::Back));
@@ -1232,7 +1231,6 @@ fn only_dialogs_trap_focus_so_the_empty_list_can_reach_create() {
     act(&mut listed, Act::Worlds);
     act(&mut listed, Act::Edit(path));
     assert_eq!(trapping(&mut listed), 0);
-    act(&mut listed, Act::Disclose(Disclosure::ManageWorld));
     act(&mut listed, Act::Delete);
     listed.update();
     assert_eq!(trapping(&mut listed), 1);
@@ -1295,10 +1293,6 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
     );
     app.update();
     app.update();
-    app.world_mut()
-        .resource_mut::<Launcher>()
-        .flipped
-        .insert(Disclosure::ManageWorld);
     let play = format!("{:?}", Act::Play(path.clone()));
     let screens: [(&str, Screen, Option<Act>, Vec<&str>); 7] = [
         (
@@ -1324,7 +1318,13 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             "edit",
             Screen::Worlds,
             Some(Act::Edit(path.clone())),
-            vec!["Rename", "SaveName", "Delete", "ShowFolder", "Back"],
+            vec![
+                "Rename",
+                "EditMode(Survival)",
+                "CopySeed",
+                "ReCreate",
+                "SaveName",
+            ],
         ),
         (
             "delete",
@@ -2171,7 +2171,6 @@ fn deleting_a_world_removes_its_thumbnail_with_it() {
     act(&mut app, Act::Worlds);
     assert_eq!(slot_picture(&mut app, &path), Some(grey));
     act(&mut app, Act::Edit(path.clone()));
-    act(&mut app, Act::Disclose(Disclosure::ManageWorld));
     act(&mut app, Act::Delete);
     act(&mut app, Act::ConfirmDelete);
     assert!(!path.join(library::THUMBNAIL).exists());
@@ -2302,8 +2301,7 @@ fn edit_world_renames_without_touching_the_save_and_records_modes_for_the_next_o
         assert!(shown(&mut app, locked), "{locked} is shown locked");
     }
     type_into(&mut app, Field::Rename, "New name");
-    act(&mut app, Act::DefaultMode(GameMode::Survival));
-    act(&mut app, Act::OwnMode(GameMode::Survival));
+    act(&mut app, Act::EditMode(GameMode::Survival));
     act(&mut app, Act::SaveName);
     assert_eq!(launcher(&app).screen, Screen::Worlds);
     let saved = library::read(&path).unwrap().unwrap();
@@ -2327,8 +2325,7 @@ fn edit_world_renames_without_touching_the_save_and_records_modes_for_the_next_o
     );
 
     act(&mut app, Act::Edit(path.clone()));
-    act(&mut app, Act::DefaultMode(GameMode::Creative));
-    act(&mut app, Act::OwnMode(GameMode::Creative));
+    act(&mut app, Act::EditMode(GameMode::Creative));
     act(&mut app, Act::SaveName);
     assert!(
         library::read(&path)
@@ -2619,8 +2616,6 @@ fn pad_to_edit(app: &mut App, pad: Entity, path: &Path) {
     reach(app, pad, Act::Play(path.to_owned()));
     tap(app, pad, GamepadButton::West);
     assert_eq!(launcher(app).screen, Screen::Edit(path.to_owned()));
-    reach(app, pad, Act::Disclose(Disclosure::ManageWorld));
-    tap(app, pad, GamepadButton::South);
 }
 
 #[test]
@@ -2629,14 +2624,12 @@ fn a_controller_deletes_only_after_confirming_with_cancel_focused_first() {
     let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
     let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     pad_to_edit(&mut app, pad, &path);
-    reach(&mut app, pad, Act::Delete);
-    tap(&mut app, pad, GamepadButton::South);
+    tap(&mut app, pad, GamepadButton::North);
     assert_eq!(focused_act(&app), Some(Act::Back));
     tap(&mut app, pad, GamepadButton::South);
     assert_eq!(launcher(&app).screen, Screen::Edit(path.clone()));
     assert!(path.exists());
-    reach(&mut app, pad, Act::Delete);
-    tap(&mut app, pad, GamepadButton::South);
+    tap(&mut app, pad, GamepadButton::North);
     reach(&mut app, pad, Act::ConfirmDelete);
     tap(&mut app, pad, GamepadButton::South);
     assert!(!path.exists());
@@ -2648,8 +2641,7 @@ fn the_press_that_opens_delete_does_not_also_answer_it() {
     let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
     let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     pad_to_edit(&mut app, pad, &path);
-    reach(&mut app, pad, Act::Delete);
-    pad_button(&mut app, pad, GamepadButton::South, 1.0);
+    pad_button(&mut app, pad, GamepadButton::North, 1.0);
     for _ in 0..4 {
         app.update();
     }
@@ -3371,4 +3363,88 @@ fn review_shows_the_terrain_and_the_seed_number_the_world_will_use_with_a_copy_c
     assert_eq!(controls(&mut app, &Act::CopyResolved), 1);
     drawn(&mut app);
     assert!(terrain_shown(&mut app).is_some(), "beside the sections");
+}
+
+#[test]
+fn each_review_section_opens_its_step_with_the_draft_intact() {
+    let (mut app, _worlds) =
+        to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]));
+    act(&mut app, Act::ToggleBiome(0));
+    act(&mut app, Act::Next);
+    assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    let draft = launcher(&app).form.clone();
+    for step in [Step::Game, Step::World, Step::Mods, Step::Biomes] {
+        assert_eq!(
+            controls(&mut app, &Act::Step(step)),
+            2,
+            "the rail and the {step:?} section"
+        );
+        act(&mut app, Act::Step(step));
+        assert_eq!(launcher(&app).screen, Screen::Create(step));
+        act(&mut app, Act::Step(Step::Review));
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+        assert!(
+            launcher(&app).form.unchanged_from(&draft),
+            "{step:?} kept the draft"
+        );
+    }
+}
+
+#[test]
+fn edit_world_is_framed_with_its_prompts_shows_the_seed_and_saves_on_ctrl_enter() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Old", true)).unwrap();
+    let (mut app, _pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.add_plugins((
+        bevy::input_focus::InputDispatchPlugin,
+        bevy::ui_widgets::ButtonPlugin,
+    ));
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path.clone()));
+    assert!(!header_shown(&mut app), "in the frame");
+    let prompts: Vec<(String, String)> = [
+        ("Ctrl+Enter", "Save"),
+        ("D", "New World with these settings"),
+        ("F", "Show folder"),
+        ("Del", "Delete"),
+        ("Esc", "Cancel"),
+    ]
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .to_vec();
+    assert_eq!(frame::testing::prompts(&mut app), prompts);
+    assert!(shown(&mut app, "42"));
+    assert_eq!(controls(&mut app, &Act::CopySeed), 1);
+    assert_eq!(
+        controls(&mut app, &Act::ReCreate),
+        2,
+        "the button and its prompt"
+    );
+    type_into(&mut app, Field::Rename, "Fresh");
+    chord(&mut app, KeyCode::SuperLeft, KeyCode::Enter);
+    assert_eq!(launcher(&app).screen, Screen::Worlds);
+    assert_eq!(library::read(&path).unwrap().unwrap().name, "Fresh");
+}
+
+#[test]
+fn edit_world_shows_one_game_mode_that_sets_the_worlds_default_and_the_players_own() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Solo", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path.clone()));
+    assert_eq!(controls(&mut app, &Act::EditMode(GameMode::Survival)), 1);
+    assert!(
+        !shown(&mut app, "Default game mode"),
+        "no one else can join"
+    );
+    act(&mut app, Act::EditMode(GameMode::Survival));
+    act(&mut app, Act::SaveName);
+    assert_eq!(
+        library::read(&path).unwrap().unwrap().mode_changes,
+        library::ModeChanges {
+            default: Some(GameMode::Survival),
+            own: Some(GameMode::Survival),
+        }
+    );
 }

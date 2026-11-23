@@ -48,12 +48,11 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 copy(cx.commands, cx.clipboard.as_deref_mut(), seed);
             }
         }
-        Act::DefaultMode(mode) => {
-            l.modes.default = mode;
-            l.version += 1;
-        }
-        Act::OwnMode(mode) => {
-            l.modes.own = mode;
+        Act::EditMode(mode) => {
+            l.modes = Modes {
+                default: mode,
+                own: mode,
+            };
             l.version += 1;
         }
         Act::SaveName => {

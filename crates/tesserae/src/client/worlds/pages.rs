@@ -49,7 +49,10 @@ pub(super) fn spawn(
         screen => screen.clone(),
     };
     // Screens move onto the frame one at a time; the rest keep the old header and footer.
-    let framed = matches!(page, Screen::Title | Screen::Worlds | Screen::Create(_));
+    let framed = matches!(
+        page,
+        Screen::Title | Screen::Worlds | Screen::Create(_) | Screen::Edit(_)
+    );
     let mut root = commands.spawn((
         Root,
         TabGroup::default(),
@@ -99,7 +102,7 @@ pub(super) fn spawn(
                 Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
                 Screen::Create(Step::Review) => review(main, l, installed, thumbnails, scroll),
                 Screen::Delete(_) | Screen::Discard(_) | Screen::StepTrust { .. } => None,
-                Screen::Edit(path) => edit(main, l, installed, path, scroll),
+                Screen::Edit(path) => edit(main, l, installed, thumbnails, path, scroll),
                 Screen::Trust(next) => trust(main, l, installed, next, scroll),
                 Screen::Opening(name) => {
                     opening(main, name);
@@ -108,7 +111,7 @@ pub(super) fn spawn(
             };
         });
         if framed {
-            frame::prompt_bar(root, SCENERY_PLACE, prompts(&page, l));
+            frame::prompt_bar(root, SCENERY_PLACE, prompts(&page, l, installed));
         } else {
             footer(root, SCENERY_PLACE);
         }
@@ -126,7 +129,7 @@ pub(super) fn spawn(
 }
 
 /// What the prompt bar offers on a framed screen.
-fn prompts(page: &Screen, l: &Launcher) -> Vec<frame::Prompt<Act>> {
+fn prompts(page: &Screen, l: &Launcher, installed: &Installed) -> Vec<frame::Prompt<Act>> {
     use frame::{Cap, Prompt};
     match page {
         Screen::Worlds => {
@@ -157,6 +160,22 @@ fn prompts(page: &Screen, l: &Launcher) -> Vec<frame::Prompt<Act>> {
                 Prompt::new(Cap::CtrlEnter, forward).act(act),
                 Prompt::new(Cap::Esc, back).act(Act::Back),
             ]
+        }
+        Screen::Edit(path) => {
+            let mut prompts = vec![Prompt::new(Cap::CtrlEnter, "Save").act(Act::SaveName)];
+            if recreatable(l.entry(path), installed) {
+                prompts.push(
+                    Prompt::new(Cap::Letter('D'), "New World with these settings")
+                        .act(Act::ReCreate)
+                        .pad(GamepadButton::West),
+                );
+            }
+            prompts.extend([
+                Prompt::new(Cap::Letter('F'), "Show folder").act(Act::ShowFolder),
+                Prompt::new(Cap::Del, "Delete").act(Act::Delete),
+                Prompt::new(Cap::Esc, "Cancel").act(Act::Back),
+            ]);
+            prompts
         }
         _ => vec![
             Prompt::new(Cap::Tab, "Navigate"),
@@ -1020,239 +1039,208 @@ fn library_page(
     focus
 }
 
+/// Edit World, laid out as Create World: the name and Game mode beside the saved picture and
+/// what was fixed at creation.
 fn edit(
     main: &mut ChildSpawnerCommands,
     l: &Launcher,
     installed: &Installed,
+    thumbnails: &Thumbnails,
     path: &Path,
     scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
     let entry = l.entry(path);
     let details = entry.and_then(Entry::details);
+    let recreate = recreatable(entry, installed);
     workspace(main, |w| {
-        cine::sheet(
+        frame::sheet_with_actions(
             w,
-            Sheet {
-                eyebrow: "MAIN MENU / WORLDS / EDIT",
-                title: "Edit World",
-                subtitle: "Keep your place. Make it easier to find.",
-            },
+            "Edit World",
+            None,
             page_scroll(scroll),
             |body| {
                 problem(body, l.problem.as_ref());
-                focus = Some(field(
-                    body,
-                    "World name",
-                    Field::Rename,
-                    &l.rename,
-                    "Renaming keeps your terrain and progress.",
-                    "",
-                ));
-                match details {
-                    Some(d) => {
-                        section(body, |r| {
-                            section_text(r, "Generation settings");
-                            cine::pill(r, "Locked");
-                        });
-                        columns(body, 16.0, |c| {
-                            locked(c, "Game", game_label(d.game.as_ref()));
-                            locked(c, "Voxel size (m)", d.voxel_size_m.to_string());
-                        });
-                        gap(body, 18.0);
-                        body.spawn(Node {
-                            column_gap: Val::Px(10.0),
-                            align_items: AlignItems::FlexEnd,
-                            flex_shrink: 0.0,
+                body.spawn(Node {
+                    column_gap: Val::Px(EDIT_GAP),
+                    align_items: AlignItems::FlexStart,
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|split| {
+                    split
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(20.0),
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            min_width: Val::Px(0.0),
                             ..default()
                         })
-                        .with_children(|r| {
-                            r.spawn(Node {
-                                flex_grow: 1.0,
-                                flex_direction: FlexDirection::Column,
-                                min_width: Val::Px(0.0),
-                                ..default()
-                            })
-                            .with_children(|c| locked(c, "World seed", d.seed.to_string()));
-                            buttons::button(
-                                r,
-                                "Copy",
-                                Act::CopySeed,
-                                ButtonStyle::Small { kind: Kind::Ghost },
-                            );
-                        });
-                        gap(body, 18.0);
-                        columns(body, 16.0, |c| {
-                            locked(
-                                c,
-                                "Mods",
-                                if d.mods.is_empty() {
-                                    "None".to_owned()
-                                } else {
-                                    d.mods
-                                        .iter()
-                                        .map(|m| ui::title(&m.id))
-                                        .collect::<Vec<_>>()
-                                        .join(" \u{00b7} ")
-                                },
-                            );
-                            locked(
-                                c,
-                                "Biomes",
-                                match &d.biomes {
-                                    Some(edits) => {
-                                        format!("{} changed at creation", edits.biomes.len())
-                                    }
-                                    None => "As the Game declared them".to_owned(),
-                                },
-                            );
-                        });
-                        gap(body, 18.0);
-                        mode_picks(
-                            body,
-                            "Default game mode",
-                            "For Players joining this World for the first time. Changing it moves nobody.",
-                            l.modes.default,
-                            Act::DefaultMode,
-                            false,
-                        );
-                        gap(body, 18.0);
-                        mode_picks(
-                            body,
-                            "Your game mode",
-                            "Switching to Survival keeps what you carry. Health and hunger start full.",
-                            l.modes.own,
-                            Act::OwnMode,
-                            true,
-                        );
-                        if !d.mode_changes.is_empty() {
+                        .with_children(|fields| {
+                            focus = Some(field(
+                                fields,
+                                "World name",
+                                Field::Rename,
+                                &l.rename,
+                                "Renaming keeps your terrain and progress.",
+                                "",
+                            ));
+                            let Some(d) = details else {
+                                ui::paragraph(
+                                    fields,
+                                    "No details are recorded. Saving a name repairs them from the save.",
+                                    theme::TEXT_SMALL,
+                                    theme::muted(),
+                                );
+                                return;
+                            };
+                            fields
+                                .spawn(Node {
+                                    flex_direction: FlexDirection::Column,
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                })
+                                .with_children(|picks| {
+                                    mode_picks(
+                                        picks,
+                                        "Game mode",
+                                        "",
+                                        l.modes.own,
+                                        Act::EditMode,
+                                        true,
+                                    );
+                                });
+                            let waiting = modes(d) != saved_modes(d) || l.modes != modes(d);
                             ui::paragraph(
-                                body,
-                                "Mode changes take effect when the World next opens.",
+                                fields,
+                                if waiting {
+                                    "Mode changes take effect when the World next opens."
+                                } else {
+                                    "Switching to Survival keeps what you carry. Health and hunger start full."
+                                },
                                 theme::TEXT_SMALL,
                                 theme::muted(),
                             );
-                        }
-                        for line in &installed.unmet(d) {
-                            ui::paragraph(body, line, theme::TEXT_SMALL, theme::WARNING);
-                        }
-                    }
-                    None => ui::paragraph(
-                        body,
-                        "No details are recorded. Saving a name repairs them from the save.",
-                        theme::TEXT_SMALL,
-                        theme::muted(),
-                    ),
-                }
-                notice(
-                    body,
-                    "This World keeps the Biomes and generator it was created with. To change its setup, create a new World from these settings.",
-                );
-                let same_game = details.is_some_and(|d| {
-                    d.game.is_some() && d.game == installed.game && installed.unmet(d).is_empty()
+                            for line in &installed.unmet(d) {
+                                ui::paragraph(fields, line, theme::TEXT_SMALL, theme::WARNING);
+                            }
+                        });
+                    split
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            width: Val::Px(EDIT_ASIDE),
+                            flex_shrink: 0.0,
+                            ..default()
+                        })
+                        .with_children(|aside| {
+                            label(aside, "Terrain preview");
+                            gap(aside, 8.0);
+                            world_picture(
+                                aside,
+                                thumbnails,
+                                path,
+                                Node {
+                                    width: Val::Px(EDIT_ASIDE),
+                                    aspect_ratio: Some(16.0 / 9.0),
+                                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                                    ..default()
+                                },
+                            );
+                            if let Some(d) = details {
+                                gap(aside, 18.0);
+                                label(aside, "Fixed at creation");
+                                gap(aside, 8.0);
+                                value_rows(aside, fixed_rows(d));
+                            }
+                        });
                 });
-                if same_game && !entry.is_some_and(Entry::incomplete) {
-                    body.spawn(Node {
-                        align_self: AlignSelf::FlexStart,
-                        flex_shrink: 0.0,
+            },
+            Some(|actions: &mut ChildSpawnerCommands| {
+                actions
+                    .spawn(Node {
+                        flex_grow: 1.0,
+                        justify_content: JustifyContent::SpaceBetween,
+                        column_gap: Val::Px(12.0),
+                        // The buttons span the form column, so Save changes ends where the fields do.
+                        margin: UiRect::right(Val::Px(EDIT_ASIDE + EDIT_GAP)),
                         ..default()
                     })
-                    .with_children(|r| {
-                        buttons::button(
-                            r,
-                            "Create from these settings",
-                            Act::ReCreate,
-                            ButtonStyle::Cinematic {
-                                kind: Kind::Plain,
-                                align: Align::After("\u{2197}"),
-                            },
-                        );
+                    .with_children(|row| {
+                        if recreate {
+                            buttons::button(
+                                row,
+                                "New World with these settings",
+                                Act::ReCreate,
+                                ButtonStyle::Cinematic {
+                                    kind: Kind::Plain,
+                                    align: Align::Centre,
+                                },
+                            );
+                        } else {
+                            row.spawn(Node::default());
+                        }
+                        buttons::button(row, "Save changes", Act::SaveName, ButtonStyle::Primary);
                     });
-                }
-                if let Some(d) = details {
-                    disclosure(
-                        body,
-                        "World information",
-                        l.open(Disclosure::WorldInformation),
-                        Act::Disclose(Disclosure::WorldInformation),
-                        |c| {
-                            let mut lines = vec![
-                                format!("Created {}", relative(d.created_unix_s)),
-                                format!("Last played {}", relative(d.last_played_unix_s)),
-                            ];
-                            if let Some(climate) = d.biomes.as_ref().and_then(|b| b.climate) {
-                                lines.push(format!(
-                                    "Climate size {} m / {} m",
-                                    climate.temperature_size_m, climate.humidity_size_m
-                                ));
-                            }
-                            ui::paragraph(c, lines.join("\n"), theme::TEXT_SMALL, theme::muted());
-                        },
-                    );
-                }
-                disclosure(
-                    body,
-                    "Manage World",
-                    l.open(Disclosure::ManageWorld),
-                    Act::Disclose(Disclosure::ManageWorld),
-                    |c| {
-                        ui::paragraph(
-                            c,
-                            format!("Folder: {}", entry.map(Entry::folder).unwrap_or_default()),
-                            theme::TEXT_SMALL,
-                            theme::muted(),
-                        );
-                        gap(c, 8.0);
-                        small_button(c, "Show folder", Act::ShowFolder, Kind::Ghost);
-                        gap(c, 8.0);
-                        ui::paragraph(
-                            c,
-                            "Deleting moves its folder to the Trash, where you can restore it.",
-                            theme::TEXT_SMALL,
-                            theme::muted(),
-                        );
-                        gap(c, 8.0);
-                        small_button(c, "Delete World", Act::Delete, Kind::Danger);
-                    },
-                );
-            },
-            |f| {
-                buttons::button(
-                    f,
-                    "Cancel",
-                    Act::Back,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Ghost,
-                        align: Align::Centre,
-                    },
-                );
-                footer_hint(f, "Generation is pinned");
-                buttons::button(
-                    f,
-                    "Save changes",
-                    Act::SaveName,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Primary,
-                        align: Align::Centre,
-                    },
-                );
-            },
+            }),
         );
     });
     focus
 }
 
-/// A small button at its natural width in a column.
-fn small_button(parent: &mut ChildSpawnerCommands, label: &str, act: Act, kind: Kind) {
-    parent
-        .spawn(Node {
-            align_self: AlignSelf::FlexStart,
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|r| {
-            buttons::button(r, label, act, ButtonStyle::Small { kind });
-        });
+/// Edit World's preview column; wide enough for a 20-digit seed and its copy control.
+const EDIT_ASIDE: f32 = 320.0;
+const EDIT_GAP: f32 = 32.0;
+
+/// Whether a new World can start from this one's settings: the same Game and Mod versions are
+/// installed, so nothing in it would silently change.
+pub(super) fn recreatable(entry: Option<&Entry>, installed: &Installed) -> bool {
+    let same = entry.and_then(Entry::details).is_some_and(|d| {
+        d.game.is_some() && d.game == installed.game && installed.unmet(d).is_empty()
+    });
+    same && !entry.is_some_and(Entry::incomplete)
+}
+
+/// What Edit World shows as fixed when the World was created.
+fn fixed_rows(d: &Sidecar) -> Vec<(&'static str, Value)> {
+    let mut rows = vec![
+        ("Game", Value::Text(game_label(d.game.as_ref()))),
+        ("Seed", Value::Seed(d.seed, Act::CopySeed)),
+        ("Voxel size", Value::Text(format!("{} m", d.voxel_size_m))),
+    ];
+    if let Some(c) = d.biomes.as_ref().and_then(|b| b.climate) {
+        rows.push((
+            "Climate scale",
+            Value::Text(format!(
+                "{} m \u{00b7} {} m",
+                c.temperature_size_m, c.humidity_size_m
+            )),
+        ));
+    }
+    rows.push((
+        "Mods",
+        Value::Text(if d.mods.is_empty() {
+            "None".to_owned()
+        } else {
+            d.mods
+                .iter()
+                .map(|m| ui::title(&m.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }),
+    ));
+    rows.push((
+        "Biomes",
+        Value::Text(match &d.biomes {
+            Some(edits) => format!(
+                "{} enabled",
+                edits.biomes.iter().filter(|b| b.enabled).count()
+            ),
+            None => "As the Game declared them".to_owned(),
+        }),
+    ));
+    rows.push(("Created", Value::Text(relative(d.created_unix_s))));
+    rows
 }
 
 /// Equal columns side by side.
@@ -1272,34 +1260,6 @@ fn columns(
             ..default()
         })
         .with_children(children);
-}
-
-/// A value fixed when the World was created, shown as a disabled field.
-fn locked(parent: &mut ChildSpawnerCommands, title: &str, value: String) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            min_width: Val::Px(0.0),
-            ..default()
-        })
-        .with_children(|c| {
-            label(c, title);
-            c.spawn((
-                BackgroundColor(theme::FIELD_LOCKED),
-                BorderColor::all(theme::FIELD_LOCKED_EDGE),
-                Node {
-                    height: Val::Px(theme::CONTROL_HEIGHT),
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(0.0)),
-                    border: UiRect::all(Val::Px(theme::RULE)),
-                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
-                    align_items: AlignItems::Center,
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-            ))
-            .with_children(|f| ui::text(f, value, theme::TEXT_BODY, theme::FIELD_LOCKED_INK));
-        });
 }
 
 /// Creative and Survival as two cards, each with what it means unless `compact`.
@@ -1436,13 +1396,6 @@ fn problem(parent: &mut ChildSpawnerCommands, message: Option<&String>) {
     }
 }
 
-/// A quiet note, with the space the prototype leaves around one.
-fn notice(parent: &mut ChildSpawnerCommands, value: impl Into<String>) {
-    gap(parent, 14.0);
-    cine::notice(parent, value);
-    gap(parent, 19.0);
-}
-
 fn text_field(
     parent: &mut ChildSpawnerCommands,
     field: Field,
@@ -1554,76 +1507,6 @@ fn section_text(parent: &mut ChildSpawnerCommands, value: &str) {
         TextColor(theme::muted()),
         Pickable::IGNORE,
     ));
-}
-
-/// A section label's row, with the space the prototype gives one.
-fn section(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn(Node {
-            column_gap: Val::Px(8.0),
-            align_items: AlignItems::Center,
-            margin: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(25.0), Val::Px(12.0)),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(children);
-}
-
-/// A row under a rule that shows or hides what follows it.
-fn disclosure(
-    parent: &mut ChildSpawnerCommands,
-    title: &str,
-    open: bool,
-    act: Act,
-    content: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    parent
-        .spawn((
-            BorderColor::all(theme::edge()),
-            Node {
-                flex_direction: FlexDirection::Column,
-                margin: UiRect::top(Val::Px(20.0)),
-                padding: UiRect::top(Val::Px(14.0)),
-                border: UiRect::top(Val::Px(theme::RULE)),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|d| {
-            d.spawn((
-                bevy::ui_widgets::Button,
-                TabIndex(0),
-                act,
-                Pick {
-                    fill: Color::NONE,
-                    edge: Color::NONE,
-                    hover: None,
-                },
-                Node {
-                    column_gap: Val::Px(6.0),
-                    align_items: AlignItems::Center,
-                    padding: UiRect::vertical(Val::Px(3.0)),
-                    margin: UiRect::bottom(Val::Px(12.0)),
-                    ..default()
-                },
-            ))
-            .with_children(|summary| {
-                ui::icon(
-                    summary,
-                    if open {
-                        IconKind::Expanded
-                    } else {
-                        IconKind::Collapsed
-                    },
-                    theme::INK,
-                    12.0,
-                );
-                ui::text(summary, title, theme::TEXT_BODY, theme::INK);
-            });
-            if open {
-                content(d);
-            }
-        });
 }
 
 fn form(
