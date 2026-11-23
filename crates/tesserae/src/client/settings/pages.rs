@@ -107,6 +107,19 @@ type FocusTree<'w, 's> = (
     Query<'w, 's, (), Focusable>,
 );
 type Focusable = (With<TabIndex>, Without<bevy::ui::InteractionDisabled>);
+type Parts<'w, 's> = (
+    Query<'w, 's, Entity, With<Panel>>,
+    Query<'w, 's, Entity, With<Page>>,
+    Query<'w, 's, Entity, With<crate::client::menu_ui::SettingsBody>>,
+    Query<'w, 's, &'static ScrollPosition, With<SettingsScroll>>,
+);
+/// Each category's scroll, the category shown, and the place of the
+/// focused control.
+type Memory<'s> = (
+    Local<'s, [Vec2; Tab::ORDER.len()]>,
+    Local<'s, Option<Tab>>,
+    Local<'s, Option<usize>>,
+);
 
 /// A page's controls in the order focus meets them.
 fn controls(
@@ -126,18 +139,9 @@ fn controls(
 pub(in crate::client) fn render(
     mut commands: Commands,
     mut settings: ResMut<Settings>,
-    (panels, pages, body): (
-        Query<Entity, With<Panel>>,
-        Query<Entity, With<Page>>,
-        Query<Entity, With<crate::client::menu_ui::SettingsBody>>,
-    ),
+    (panels, pages, body, scrolls): Parts,
     (labels, active, map_allowed, distances): RenderData,
-    scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
-    (mut positions, mut previous, mut remembered): (
-        Local<[Vec2; Tab::ORDER.len()]>,
-        Local<Option<Tab>>,
-        Local<Option<usize>>,
-    ),
+    (mut positions, mut previous, mut remembered): Memory,
     (context, pressed): RenderContext,
     (focus, children, parents, focusable): FocusTree,
 ) {
