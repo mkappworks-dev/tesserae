@@ -24,33 +24,12 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             l.initial = l.form.clone();
             l.show(Screen::Create(Step::Game));
         }
-        Act::ReCreate => {
-            let Some(details) = l.selected().and_then(Entry::details).cloned() else {
-                return;
-            };
-            // A different Game or Mod version would silently change the content.
-            if details.game.is_none() || !cx.installed.unmet(&details).is_empty() {
-                return;
+        Act::ReCreate if unsaved(l) => {
+            if let Screen::Edit(path) = l.screen.clone() {
+                l.show(Screen::SaveFirst(path));
             }
-            let copy = format!("{} (copy)", details.name);
-            l.form = Form {
-                name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
-                seed: details.seed.to_string(),
-                voxel_size_m: details.voxel_size_m,
-                game_mode: details.game_mode,
-                game: details.game.as_ref().map(|g| g.id.clone()),
-                mods: details.mods.iter().map(|m| m.id.clone()).collect(),
-                seeded: details.biomes.clone(),
-                ..Form::default()
-            };
-            if let Some(game) = l.form.game.clone() {
-                l.clashes = cx.installed.clashes(&game, &l.form.mods);
-            }
-            l.initial = l.form.clone();
-            // Through the Game step's Trust and read, as Next from it would.
-            l.show(Screen::Create(Step::Game));
-            go(l, cx.installed, cx.previewer, Step::World);
         }
+        Act::ReCreate => recreate(l, cx),
         Act::CopyResolved => {
             if let Ok(seed) = l.form.seed() {
                 copy(cx.commands, cx.clipboard.as_deref_mut(), seed);
@@ -184,6 +163,36 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
     }
 }
 
+/// Opens Create World on Review with a World's settings and a fresh name.
+pub(super) fn recreate(l: &mut Launcher, cx: &mut Acting) {
+    let Some(details) = l.selected().and_then(Entry::details).cloned() else {
+        return;
+    };
+    // A different Game or Mod version would silently change the content.
+    if details.game.is_none() || !cx.installed.unmet(&details).is_empty() {
+        return;
+    }
+    let copy = format!("{} \u{2014} new world", details.name);
+    l.form = Form {
+        name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
+        seed: details.seed.to_string(),
+        voxel_size_m: details.voxel_size_m,
+        game_mode: modes(&details).default,
+        game: details.game.as_ref().map(|g| g.id.clone()),
+        mods: details.mods.iter().map(|m| m.id.clone()).collect(),
+        seeded: details.biomes.clone(),
+        ..Form::default()
+    };
+    if let Some(game) = l.form.game.clone() {
+        l.clashes = cx.installed.clashes(&game, &l.form.mods);
+    }
+    l.initial = l.form.clone();
+    // On Review, an exact copy is one press away and any change one jump back to its step.
+    // It passes every step's Trust and read on the way, as the rail would.
+    l.show(Screen::Create(Step::Game));
+    go(l, cx.installed, cx.previewer, Step::Review);
+}
+
 /// Moves Create World to `target`. Moving forward passes every step before it,
 /// so an invalid one holds the player there with its message.
 pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Previewer, target: Step) {
@@ -213,7 +222,8 @@ pub(super) fn go(l: &mut Launcher, installed: &mut Installed, previewer: Preview
     if current <= Step::Mods && target > Step::Biomes && !mods_trusted(l, installed, target) {
         return;
     }
-    if target == Step::Biomes && !read_biomes(l, installed, previewer) {
+    // Review lists the Biomes, so a jump past the Biomes step reads them too.
+    if target >= Step::Biomes && !read_biomes(l, installed, previewer) {
         return;
     }
     l.show(Screen::Create(target));

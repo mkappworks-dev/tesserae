@@ -344,6 +344,31 @@ pub(super) fn menu_sheet_with<A: Bundle>(
     body: impl FnOnce(&mut ChildSpawnerCommands),
 ) -> Option<Entity> {
     let mut primary = None;
+    let slot = &mut primary;
+    let actions = sheet.primary.map(|(label, act)| {
+        move |actions: &mut ChildSpawnerCommands| {
+            *slot = Some(super::buttons::button(
+                actions,
+                label,
+                act,
+                super::buttons::ButtonStyle::Primary,
+            ));
+        }
+    });
+    sheet_with_actions(main, sheet.title, sheet.subtitle, scroll, body, actions);
+    primary
+}
+
+/// The sheet with its own row of buttons at the bottom, right-aligned unless `actions` lays
+/// them out otherwise.
+pub(super) fn sheet_with_actions(
+    main: &mut ChildSpawnerCommands,
+    title: &str,
+    subtitle: Option<&str>,
+    scroll: impl Bundle,
+    body: impl FnOnce(&mut ChildSpawnerCommands),
+    actions: Option<impl FnOnce(&mut ChildSpawnerCommands)>,
+) {
     main.spawn((
         BackgroundGradient(vec![
             LinearGradient::to_right(vec![
@@ -370,13 +395,13 @@ pub(super) fn menu_sheet_with<A: Bundle>(
         })
         .with_children(|header| {
             header.spawn((
-                Text::new(sheet.title),
+                Text::new(title),
                 theme::weighted(34.0, theme::STRONG),
                 bevy::text::LetterSpacing::Px(-0.02 * 34.0),
                 TextColor(theme::INK),
                 Pickable::IGNORE,
             ));
-            if let Some(subtitle) = sheet.subtitle {
+            if let Some(subtitle) = subtitle {
                 ui::paragraph(header, subtitle, theme::TEXT_SMALL, theme::muted());
             }
         });
@@ -392,24 +417,16 @@ pub(super) fn menu_sheet_with<A: Bundle>(
             },
         ))
         .with_children(body);
-        if let Some((label, act)) = sheet.primary {
+        if let Some(actions) = actions {
             s.spawn(Node {
                 justify_content: JustifyContent::FlexEnd,
                 padding: UiRect::new(Val::Px(32.0), Val::Px(32.0), Val::Px(0.0), Val::Px(24.0)),
                 flex_shrink: 0.0,
                 ..default()
             })
-            .with_children(|actions| {
-                primary = Some(super::buttons::button(
-                    actions,
-                    label,
-                    act,
-                    super::buttons::ButtonStyle::Primary,
-                ));
-            });
+            .with_children(actions);
         }
     });
-    primary
 }
 
 /// A plain menu list's item: the label, and an optional detail at the right
