@@ -43,6 +43,7 @@ function placeToast() {
     },
     gap = 10;
   stack.dataset.pos = pos;
+  stack.dataset.scope = ingame ? "game" : "menu";
   stack.style.top =
     stack.style.bottom =
     stack.style.left =
