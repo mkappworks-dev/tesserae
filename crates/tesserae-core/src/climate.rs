@@ -321,7 +321,8 @@ impl ClimateField {
     }
 
     /// Continuous in position, so colour never steps where [`Self::biome_at`] does. A Biome that
-    /// declares no colours has [`SkyFog::DEFAULT`]. `None` where no Biome is considered.
+    /// declares no colours takes its neighbours'; [`SkyFog::DEFAULT`] where none declares any.
+    /// `None` only in a World with no Biomes.
     #[allow(
         clippy::disallowed_methods,
         reason = "display only: the sky and fog blend is not generation"
@@ -334,9 +335,12 @@ impl ClimateField {
         (site, (dt, dh)): (Site, (f32, f32)),
     ) -> Option<SkyFogBlend> {
         let selectors = biomes.selectors();
-        // Among the Biomes `biome_at` chooses from there: those of the land's shape that admit the
-        // column, else the rest, so the sky over a mountain is its own.
-        let ranged_here = selectors.iter().any(|s| s.is_ranged() && s.admits(&site));
+        // Among the coloured Biomes `biome_at` chooses from there: those of the land's shape that
+        // admit the column, else the rest, so a coloured mountain has its own sky and a colourless
+        // one keeps the land's around it.
+        let ranged_here = biomes.as_slice().iter().enumerate().any(|(i, b)| {
+            b.sky_fog.is_some() && selectors[i].is_ranged() && selectors[i].admits(&site)
+        });
         let considered = |i: usize| {
             if ranged_here {
                 selectors[i].is_ranged() && selectors[i].admits(&site)
@@ -350,8 +354,11 @@ impl ClimateField {
                 .iter()
                 .enumerate()
                 .filter(move |&(i, _)| considered(i))
-                .map(|(_, b)| (b, b.sky_fog.unwrap_or(SkyFog::DEFAULT)))
+                .filter_map(|(_, b)| Some((b, b.sky_fog?)))
         };
+        if coloured().next().is_none() {
+            return (!biomes.as_slice().is_empty()).then(|| SkyFog::DEFAULT.into());
+        }
         // Unwarped: the warp varies fast to roughen a border, and the air would shimmer with it.
         let mut c = self.at(x_m, z_m);
         c.temperature += dt;
@@ -1227,7 +1234,7 @@ pub struct SkyFog {
 }
 
 impl SkyFog {
-    /// A Biome that declares none has these, and so does a World with no Biomes.
+    /// Where no Biome in the blend declares colours, and in a World with no Biomes.
     pub const DEFAULT: SkyFog = SkyFog {
         sky: [0x87, 0xce, 0xeb],
         fog: [0xff, 0xff, 0xff],
@@ -1239,6 +1246,16 @@ impl SkyFog {
 pub struct SkyFogBlend {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
+}
+
+impl From<SkyFog> for SkyFogBlend {
+    fn from(c: SkyFog) -> Self {
+        let unit = |bytes: [u8; 3]| bytes.map(|v| f32::from(v) / 255.0);
+        SkyFogBlend {
+            sky: unit(c.sky),
+            fog: unit(c.fog),
+        }
+    }
 }
 
 /// Wide enough that a walk never sees a step, narrow enough that a region's middle is its own.

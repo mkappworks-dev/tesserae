@@ -321,7 +321,9 @@ function render() {
       ? `<kbd>Tab</kbd> Menu <kbd>I</kbd> Inventory <kbd>C</kbd> Catalogue ${state.mapForbidden ? "" : "<kbd>M</kbd> Map "}<kbd>L</kbd> Layout`
       : state.screen === "death"
         ? "<kbd>Enter</kbd> Respawn <kbd>Tab</kbd> Navigate"
-        : "<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back";
+        : state.screen === "home" || state.screen === "pause"
+          ? `<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back <button type="button" class="prompt" data-action="${state.screen === "home" ? "quit" : "save-quit"}" data-key="Q"><kbd>Q</kbd> ${state.screen === "home" ? "Quit" : "Save &amp; Quit"}</button>`
+          : "<kbd>Tab</kbd> Navigate <kbd>Enter</kbd> Select <kbd>Esc</kbd> Back";
   const screen = $("#screen");
   const hadFocus = screen.contains(document.activeElement);
   screenPrompts = null;
@@ -469,6 +471,7 @@ function frame({
   secondary = "",
   rail = "",
   wide = false,
+  strip = "",
 }) {
   const large = Number(state.settings.textScale || 1) >= 1.5;
   const header = `<header class="sheet-header ${large ? "scrolling-header" : ""}">${eyebrow ? `<p class="eyebrow">${eyebrow}</p>` : ""}<h2>${title}</h2>${subtitle ? `<p class="muted">${subtitle}</p>` : ""}</header>`;
@@ -478,7 +481,7 @@ function frame({
       ? `<div class="sheet-actions">${secondary ? `<span class="sheet-secondary">${secondary}</span>` : ""}${primary}</div>`
       : ""
     : `<footer class="sheet-footer">${footer}</footer>`;
-  return `<div class="workspace${wide ? " wide" : ""}">${rail}<section class="sheet${prompts ? " menu-sheet" : ""}" aria-label="${esc(title)}">${large ? "" : header}<div class="body">${large ? header : ""}${body}</div>${end}</section></div>`;
+  return `<div class="workspace${wide ? " wide" : ""}">${rail}<section class="sheet${prompts ? " menu-sheet" : ""}" aria-label="${esc(title)}">${large ? "" : header}<div class="body">${large ? header : ""}${body}</div>${strip}${end}</section></div>`;
 }
 /* One bottom-bar prompt: a key cap and a label, clickable for the mouse. A
    prompt whose key is a letter or Delete also answers that key. */
@@ -2058,7 +2061,7 @@ const prototypeScreens = [
   { value: "vegetation", label: "Vegetation (step 18b)" },
   { value: "map", label: "Map (step 19)" },
   { value: "structures", label: "Structures" },
-  { value: "toasts", label: "Toasts (study)" },
+  { value: "toasts", label: "Toasts" },
 ];
 $("#bar-mode").outerHTML = customSelect(
   "Your mode",

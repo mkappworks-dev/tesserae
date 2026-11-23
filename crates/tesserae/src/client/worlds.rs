@@ -99,6 +99,8 @@ enum Screen {
     Edit(PathBuf),
     /// Leaving Edit World for a new World with unsaved changes, which asks first.
     SaveFirst(PathBuf),
+    /// Cancelling Edit World with unsaved changes, which asks first.
+    DiscardEdits(PathBuf),
     Delete(PathBuf),
     Trust(Next),
     /// Trust asked in a dialog over step `on`, which moves on to `to` once granted.
@@ -514,6 +516,7 @@ pub(super) enum Act {
     Step(Step),
     KeepEditing,
     DiscardSetup,
+    DiscardEdits,
     /// Edit World's one Game mode: the World's default and the Player's own, while the Player is
     /// its only Player.
     EditMode(GameMode),
@@ -1253,6 +1256,7 @@ fn handle(
             | Act::SaveName
             | Act::DontSave
             | Act::SaveAndContinue
+            | Act::DiscardEdits
             | Act::ConfirmDelete => on_edit_world(l, &mut cx, act),
             Act::New
             | Act::ReCreate
@@ -1345,7 +1349,10 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             Screen::Discard(step) | Screen::StepTrust { on: step, .. } => {
                 l.show(Screen::Create(step))
             }
-            Screen::Delete(path) | Screen::SaveFirst(path) => l.show(Screen::Edit(path)),
+            Screen::Delete(path) | Screen::SaveFirst(path) | Screen::DiscardEdits(path) => {
+                l.show(Screen::Edit(path))
+            }
+            Screen::Edit(path) if unsaved(l) => l.show(Screen::DiscardEdits(path)),
             Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
             Screen::Worlds | Screen::Library => l.show(Screen::Title),
             Screen::Opening(_) | Screen::Title => {}
