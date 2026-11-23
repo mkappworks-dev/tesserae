@@ -39,3 +39,8 @@ breadcrumbs, footer bars and their styles and code paths.
   `buttons::Align` and `Eyebrow`, and the theme constants only they used.
 - Not touched: the in-game structure menu's own card header and footer
   (`structure_menu.rs`) is a panel, not launcher chrome.
+- Review fixes: the decision above is reverted. The spec says Trust is never on
+  Enter alone, so the page has Back and the primary button side by side with
+  Back focused, and the prompt bar shows Tab Navigate and Esc Back (no Enter
+  prompt). The mockup's "Enter Trust and open" prompt still disagrees with the
+  spec.

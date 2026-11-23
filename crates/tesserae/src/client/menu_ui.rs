@@ -487,6 +487,7 @@ fn shell(
                             subtitle: None,
                             primary: None,
                         },
+                        (),
                         |body| {
                             body.spawn((
                                 SettingsBody,

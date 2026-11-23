@@ -1125,12 +1125,14 @@ mod tests {
         assert_eq!(backdrop(&mut app).alpha(), 1.0);
     }
 
-    /// A World folder holding a 2×1 grey thumbnail; returns its pixels.
+    /// A World folder holding a grey thumbnail; returns its pixels.
     fn saved_picture(folder: &std::path::Path) -> Vec<u8> {
+        use tesserae_core::terrain_preview::Frame;
         std::fs::create_dir_all(folder).unwrap();
-        let rgba = [90, 90, 90, 255].repeat(2);
+        let (width, height) = (Frame::CREATE.width, Frame::CREATE.height);
+        let rgba = [90, 90, 90, 255].repeat((width * height) as usize);
         let mut bytes = Vec::new();
-        let mut encoder = png::Encoder::new(&mut bytes, 2, 1);
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
         encoder.set_color(png::ColorType::Rgba);
         let mut writer = encoder.write_header().unwrap();
         writer.write_image_data(&rgba).unwrap();

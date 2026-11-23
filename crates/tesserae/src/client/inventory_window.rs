@@ -1986,7 +1986,7 @@ mod tests {
             ])
         );
         let (texts, _, _) = tooltip(&mut app).expect("a tooltip");
-        assert_eq!(texts[..2], ["Sand".to_string(), "t:sand · solid".into()]);
+        assert_eq!(texts[..2], ["Sand".to_string(), "t:sand · Solid".into()]);
         activate(&mut app, CatalogueControl::Tile(SAND));
         assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("64"));
         app.world_mut()

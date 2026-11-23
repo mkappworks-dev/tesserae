@@ -47,17 +47,30 @@ impl Found {
         let Some(name) = &self.manifest.thumbnail else {
             return Ok(None);
         };
-        let refused = |reason: String| ModError::Manifest {
-            who: self.manifest.id.clone(),
-            reason: format!("thumbnail {reason}"),
-        };
+        let refused = |reason| refused(&self.manifest.id, reason);
         let bytes = crate::artwork::read(&self.dir, name, MAX_THUMBNAIL_BYTES).map_err(refused)?;
-        let rgba = crate::artwork::decode(&bytes, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
-            .map_err(|reason| refused(format!("`{name}` {reason}")))?;
-        Ok(Some(Thumbnail {
-            width: THUMBNAIL_WIDTH,
-            height: THUMBNAIL_HEIGHT,
+        Thumbnail::decode(&bytes, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT)
+            .map(Some)
+            .map_err(|reason| refused(format!("`{name}` {reason}")))
+    }
+}
+
+impl Thumbnail {
+    /// Decodes a PNG that must be exactly `width` by `height`, under the same bounds as a Mod's.
+    pub fn decode(bytes: &[u8], width: u32, height: u32) -> Result<Self, String> {
+        let rgba = crate::artwork::decode(bytes, width, height)?;
+        Ok(Self {
+            width,
+            height,
             rgba,
-        }))
+        })
+    }
+}
+
+/// A thumbnail the named Mod's Manifest points at but that cannot be used.
+pub(crate) fn refused(who: &str, reason: String) -> ModError {
+    ModError::Manifest {
+        who: who.to_owned(),
+        reason: format!("thumbnail {reason}"),
     }
 }

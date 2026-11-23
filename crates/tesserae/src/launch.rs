@@ -408,32 +408,12 @@ impl Installed {
         self.summaries.get(id)
     }
 
-    /// The summary as one line, such as `2 Materials · 2 Shapes · 1 fluid`; kinds it adds none
-    /// of are left out.
-    pub fn adds(&self, id: &str) -> Option<String> {
-        let s = self.summary(id)?;
-        let count = |n: usize, one: &str| match n {
-            0 => None,
-            1 => Some(format!("1 {one}")),
-            n => Some(format!("{n} {one}s")),
-        };
-        let parts: Vec<String> = [
-            count(s.materials, "Material"),
-            count(s.shapes, "Shape"),
-            count(s.fluids, "fluid"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
-    }
-
     /// The decoded thumbnail of an installed Mod or Game, read from disk on each call. The scan
     /// already refused a folder whose thumbnail was bad, so a failure here is a file changed since.
     pub fn thumbnail(&self, id: &str) -> Option<tesserae_mods::Thumbnail> {
         let found = self.found.iter().find(|f| f.manifest.id == id)?;
         found.thumbnail().unwrap_or_else(|e| {
-            eprintln!("{e}");
+            warn!("{e}");
             None
         })
     }
@@ -680,19 +660,16 @@ mod tests {
     }
 
     #[test]
-    fn a_mods_summary_line_counts_what_it_declares_and_leaves_out_none() {
+    fn a_mods_summary_counts_what_it_declares() {
         let (root, installed) = shared_mods("summary");
-        let lines = ["timber", "frost", "hearth"].map(|id| installed.adds(id));
+        let counts = ["timber", "frost", "hearth"].map(|id| {
+            installed
+                .summary(id)
+                .map(|s| (s.materials, s.shapes, s.fluids))
+        });
         let _ = std::fs::remove_dir_all(&root);
-        assert_eq!(
-            lines,
-            [
-                Some("2 Materials \u{b7} 2 Shapes".to_owned()),
-                Some("4 Materials \u{b7} 1 Shape \u{b7} 1 fluid".to_owned()),
-                Some("2 Materials \u{b7} 1 fluid".to_owned()),
-            ]
-        );
-        assert_eq!(Installed::fake(None, &[]).adds("timber"), None);
+        assert_eq!(counts, [Some((2, 2, 0)), Some((4, 1, 1)), Some((2, 0, 1))]);
+        assert_eq!(Installed::fake(None, &[]).summary("timber"), None);
     }
 
     #[test]

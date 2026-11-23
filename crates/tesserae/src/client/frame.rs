@@ -350,17 +350,9 @@ pub(super) struct MenuSheet<'a, A> {
     pub primary: Option<(&'a str, A)>,
 }
 
-/// Spawns the sheet with `body` scrolling inside it, and returns the main button.
+/// Spawns the sheet with `body` scrolling inside it, and returns the main button. `scroll` goes on
+/// the scrolling body, for a screen that keeps its place there.
 pub(super) fn menu_sheet<A: Bundle>(
-    main: &mut ChildSpawnerCommands,
-    sheet: MenuSheet<A>,
-    body: impl FnOnce(&mut ChildSpawnerCommands),
-) -> Option<Entity> {
-    menu_sheet_with(main, sheet, (), body)
-}
-
-/// [`menu_sheet`] with `scroll` on the scrolling body, for a screen that keeps its place there.
-pub(super) fn menu_sheet_with<A: Bundle>(
     main: &mut ChildSpawnerCommands,
     sheet: MenuSheet<A>,
     scroll: impl Bundle,
@@ -395,8 +387,8 @@ pub(super) fn sheet_with_actions(
     main.spawn((
         BackgroundGradient(vec![
             LinearGradient::to_right(vec![
-                ColorStop::new(Color::srgba_u8(10, 11, 12, 230), Val::Percent(0.0)),
-                ColorStop::new(Color::srgba_u8(10, 11, 12, 199), Val::Percent(100.0)),
+                ColorStop::new(theme::SHEET_SHADE, Val::Percent(0.0)),
+                ColorStop::new(theme::SHEET_SHADE_FAR, Val::Percent(100.0)),
             ])
             .into(),
         ]),
@@ -501,9 +493,6 @@ pub(super) fn list_item(
         .id()
 }
 
-/// Darker than the prototype's 0.72 alpha because the UI blends in linear light.
-const ITEM_LIT: Color = Color::srgba_u8(10, 11, 12, 230);
-
 type ItemPaint = (
     Entity,
     Has<InteractionDisabled>,
@@ -522,7 +511,11 @@ fn paint_items(
     let ringed = ui::visible_focus(Some(&focus), Some(&visible));
     for (entity, disabled, mut fill, mut outline, children) in &mut items {
         let lit = focus.get() == Some(entity);
-        fill.set_if_neq(BackgroundColor(if lit { ITEM_LIT } else { Color::NONE }));
+        fill.set_if_neq(BackgroundColor(if lit {
+            theme::SHEET_SHADE
+        } else {
+            Color::NONE
+        }));
         let ring = if ringed == Some(entity) {
             theme::FOCUS
         } else {
@@ -1085,6 +1078,7 @@ mod tests {
                         subtitle: Some("It shapes the land."),
                         primary: Some(("Next", Act::Play)),
                     },
+                    (),
                     |body| {
                         list_item(body, "Terra", None, Act::Other);
                     },

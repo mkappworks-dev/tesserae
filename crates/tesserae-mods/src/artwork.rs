@@ -45,7 +45,7 @@ pub(crate) fn read(dir: &Path, name: &str, max_bytes: u64) -> Result<Vec<u8>, St
 /// Straight-alpha sRGBA8 pixels of a PNG that is exactly `width` by `height`.
 pub(crate) fn decode(bytes: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     let mut decoder = Decoder::new(Cursor::new(bytes));
-    // Before any allocation: a 64 by 64 target never needs more than its own RGBA bytes plus slack.
+    // Before any allocation: an image of the expected size never needs more than its RGBA bytes plus slack.
     decoder.set_limits(Limits {
         bytes: (width as usize * height as usize * 4) * 2 + 4096,
     });

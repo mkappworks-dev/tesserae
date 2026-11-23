@@ -2,17 +2,15 @@
 //! never runs a Generator.
 
 use std::collections::HashMap;
-use std::io::{self, Cursor};
+use std::io;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bevy::tasks::AsyncComputeTaskPool;
 use tesserae_core::terrain_preview::{Frame, Image as Picture, Source};
+use tesserae_mods::Thumbnail;
 
 use super::*;
-
-/// Well above any `Frame` a thumbnail is drawn at, so a huge file is refused before allocating.
-const MAX_PIXELS: usize = 1024 * 1024;
 
 /// Draws the new World's terrain and saves it beside the sidecar. Detached: the World opens
 /// meanwhile, and a quit before it lands leaves the neutral picture.
@@ -47,26 +45,9 @@ fn write(dir: &Path, picture: &Picture) -> io::Result<()> {
     std::fs::rename(partial, dir.join(library::THUMBNAIL))
 }
 
-fn read(file: &Path) -> Result<Picture, String> {
+fn read(file: &Path) -> Result<Thumbnail, String> {
     let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
-    let mut decoder = png::Decoder::new(Cursor::new(bytes));
-    decoder.set_limits(png::Limits {
-        bytes: MAX_PIXELS * 4,
-    });
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
-    let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
-    let mut rgba = vec![0; reader.output_buffer_size().ok_or("too large")?];
-    let frame = reader.next_frame(&mut rgba).map_err(|e| e.to_string())?;
-    if (frame.color_type, frame.bit_depth) != (png::ColorType::Rgba, png::BitDepth::Eight) {
-        return Err("not 8-bit RGBA".into());
-    }
-    rgba.truncate(frame.buffer_size());
-    Ok(Picture {
-        centre_m: [0.0; 2],
-        width: frame.width,
-        height: frame.height,
-        rgba,
-    })
+    Thumbnail::decode(&bytes, Frame::CREATE.width, Frame::CREATE.height)
 }
 
 /// Each listed World's decoded thumbnail, with the file time it was read at.
@@ -117,7 +98,7 @@ impl Pictures {
         let handle = read(&file)
             .inspect_err(|e| warn!("Thumbnail {} unreadable: {e}", file.display()))
             .ok()
-            .map(|picture| images.add(terrain::image(picture)));
+            .map(|t| images.add(rgba_image(t.width, t.height, t.rgba)));
         self.0.insert(folder.to_owned(), (modified, handle));
     }
 }
