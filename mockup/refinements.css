@@ -649,3 +649,8 @@
   margin-top: 8px;
   font-size: calc(13px * var(--text-scale));
 }
+.game .section-note {
+  margin: -6px 0 12px;
+  color: var(--muted);
+  font-size: calc(13px * var(--text-scale));
+}

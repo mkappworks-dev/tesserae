@@ -13,6 +13,7 @@ const settingsDefaults = {
   moveDeadzone: 0.15,
   lookDeadzone: 0.15,
   crouch: "Toggle",
+  menuRumble: true,
   touchLook: 1,
   touchInvert: false,
   touchLayout: "Normal",
@@ -36,6 +37,7 @@ const settingsDefaults = {
   music: 50,
   effects: 100,
   ambient: 70,
+  interface: 100,
   footsteps: 100,
   landings: 100,
   breaking: 100,
@@ -475,7 +477,9 @@ function refreshDistance() {
 
 function settingsBody() {
   const row = settingsControl;
-  const group = (name) => `<p class="section-label">${name}</p>`;
+  const group = (name, note = "") =>
+    `<p class="section-label">${name}</p>` +
+    (note ? `<p class="section-note">${note}</p>` : "");
   switch (state.settingsTab) {
     case "Behavior":
       return (
@@ -599,6 +603,13 @@ function settingsBody() {
           "select",
           ["Hold", "Toggle"],
           "How the crouch button works.",
+        ) +
+        row(
+          "Rumble on menu press",
+          "menuRumble",
+          "toggle",
+          [],
+          "A short rumble when a controller button presses something in a menu.",
         ) +
         `<details><summary>Touch controls</summary>` +
         row(
@@ -750,7 +761,7 @@ function settingsBody() {
           "effects",
           "range",
           [0, 100, 1],
-          "All action sounds. Each sound below is relative to this; set one to 0 to mute it.",
+          "All action sounds in the World. Each Sound effects row is relative to this.",
         ) +
         row(
           "Ambient",
@@ -766,7 +777,14 @@ function settingsBody() {
           [0, 100, 1],
           "Occasional tracks, with silence between them.",
         ) +
-        `<details class="audio-details"><summary>Fine-tune sound effects</summary>` +
+        row(
+          "Interface",
+          "interface",
+          "range",
+          [0, 100, 1],
+          "Menu clicks and other menu sounds, apart from Effects. 0 mutes them.",
+        ) +
+        group("Sound effects", "Each is relative to Effects; 0 mutes it.") +
         row(
           "Footsteps",
           "footsteps",
@@ -836,8 +854,7 @@ function settingsBody() {
           "range",
           [0, 100, 1],
           "Feedback when you take damage or die.",
-        ) +
-        `</details>`
+        )
       );
     case "Accessibility":
       return (
@@ -1058,6 +1075,7 @@ function settingsAction(name, value) {
         "effects",
         "ambient",
         "music",
+        "interface",
         "footsteps",
         "landings",
         "breaking",
