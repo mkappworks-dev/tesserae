@@ -372,6 +372,7 @@ function render() {
   if (state.screen === "play") mapPlayMount();
   drawWorldPreviews();
   syncBulk();
+  padUnderToolbar();
   if (screenPrompts)
     document.querySelector(".game-footer>span:nth-child(2)").innerHTML =
       promptBar(screenPrompts);
@@ -540,7 +541,7 @@ function library() {
   // Search earns its place only once the slots no longer fit on one screen.
   const search =
     worlds.length > 8
-      ? `<div class="search-line"><input class="input" aria-label="Find a World" data-bind="worldSearch" placeholder="Find a World…" value="${esc(state.search)}"></div>`
+      ? `<div class="list-toolbar"><div class="search-line"><input class="input" aria-label="Find a World" data-bind="worldSearch" placeholder="Find a World…" value="${esc(state.search)}"></div></div>`
       : "";
   return frame({
     title: "Worlds",
@@ -660,7 +661,7 @@ function modsForm() {
   const open = (name) => (state.pop === name ? " open" : "");
   const filter = `<div class="pop-wrap${open("filter")}" data-pop="filter">${iconButton("filter", "Filter Mods", "filter", active)}<div class="pop" role="dialog" aria-label="Filter Mods"><p class="pop-title">Category</p>${cats.map((c) => `<label class="pop-row"><input type="checkbox" data-mod-cat="${esc(c)}" ${state.modFilter.includes(c) ? "checked" : ""}><span>${esc(c)}</span><span class="muted">${modCatalog.filter((m) => m.category === c).length}</span></label>`).join("")}<p class="pop-title">Show</p><label class="pop-row"><input type="checkbox" data-mod-only ${state.modOnly ? "checked" : ""}><span>Selected only</span></label><div class="pop-foot">${button("Reset", "mod-filter-reset", { small: true, primary: !!active, ghost: !active, disabled: !active })}</div></div></div>`;
   const sort = `<div class="pop-wrap${open("sort")}" data-pop="sort">${iconButton("sort", "Sort Mods", "sort")}<div class="pop" role="dialog" aria-label="Sort Mods"><div role="radiogroup" aria-label="Sort by">${MOD_SORTS.map(([id, label]) => `<button type="button" role="radio" aria-checked="${state.modSort === id}" class="pop-row pop-choice" data-action="mod-sort" data-value="${id}"><span>${label}</span><span class="pop-check">${state.modSort === id ? "✓" : ""}</span></button>`).join("")}</div></div></div>`;
-  return `<div class="search-line"><input class="input" aria-label="Search Mods" data-bind="modSearch" value="${esc(state.search)}" placeholder="Search installed Mods…">${filter}${sort}</div><div id="mod-results">${modCards()}</div>`;
+  return `<div class="list-toolbar"><div class="search-line"><input class="input" aria-label="Search Mods" data-bind="modSearch" value="${esc(state.search)}" placeholder="Search installed Mods…">${filter}${sort}</div><div id="mod-bulk">${modBulk()}</div></div><div id="mod-results">${modCards()}</div>`;
 }
 function visibleMods() {
   const q = state.search.toLowerCase();
@@ -680,17 +681,27 @@ function visibleMods() {
   };
   return list.sort(by[state.modSort] || by.name);
 }
+function modBulk() {
+  const visible = visibleMods();
+  if (!visible.length) return "";
+  const chosen = visible.filter(modOn).length;
+  return `<div class="bulk-bar"><label class="bulk-toggle"><input type="checkbox" data-bulk="mods" data-state="${chosen === visible.length ? "all" : chosen ? "some" : "none"}" aria-label="Select all shown Mods"><span class="muted">${chosen} of ${visible.length} selected</span></label></div>`;
+}
 function modCards() {
   const visible = visibleMods();
   if (!visible.length)
     return '<div class="empty-state">No matching Mods.</div>';
-  const chosen = visible.filter(modOn).length;
-  return `<div class="bulk-bar"><label class="bulk-toggle"><input type="checkbox" data-bulk="mods" data-state="${chosen === visible.length ? "all" : chosen ? "some" : "none"}" aria-label="Select all shown Mods"><span class="muted">${chosen} of ${visible.length} selected</span></label></div>${visible
+  return visible
     .map(
       (m) =>
         `<label class="mod-card"><input type="checkbox" data-mod="${m.id}" ${modOn(m) ? "checked" : ""} ${required().includes(m.id) ? "disabled" : ""}>${modThumb(m.id)}<span><b>${m.name}</b><small>${m.description}<br>${modAdds(m.id)}</small></span>${required().includes(m.id) ? '<span class="pill">Required</span>' : `<span class="pill">${esc(m.category)}</span>`}</label>`,
     )
-    .join("")}`;
+    .join("");
+}
+function refreshMods() {
+  $("#mod-bulk").innerHTML = modBulk();
+  $("#mod-results").innerHTML = modCards();
+  syncBulk();
 }
 const BIOME_SORTS = [
   ["default", "Game order"],
@@ -717,19 +728,27 @@ function visibleBiomes() {
   };
   return list.sort(by[state.bSort] || by.default);
 }
-function biomeList() {
+function biomeBulk() {
   const visible = visibleBiomes();
   const on = visible.filter(({ b }) => b.enabled).length;
   const mark = on === visible.length ? "all" : on ? "some" : "none";
-  const bar = `<div class="bulk-bar bulk-split"><label class="bulk-toggle"><input type="checkbox" data-bulk="biomes" data-state="${visible.length ? mark : "none"}" aria-label="Enable all shown biomes"><span class="muted">${on} of ${visible.length} enabled</span></label>${button("Reset all", "reset-biomes", { small: true, ghost: true })}</div>`;
+  return `<div class="bulk-bar bulk-split"><label class="bulk-toggle"><input type="checkbox" data-bulk="biomes" data-state="${visible.length ? mark : "none"}" aria-label="Enable all shown biomes"><span class="muted">${on} of ${visible.length} enabled</span></label>${button("Reset all", "reset-biomes", { small: true, ghost: true })}</div>`;
+}
+function biomeList() {
+  const visible = visibleBiomes();
   if (!visible.length)
-    return `${bar}<div class="empty-state">No matching biomes.</div>`;
-  return `${bar}<div class="biome-list">${visible
+    return '<div class="empty-state">No matching biomes.</div>';
+  return `<div class="biome-list">${visible
     .map(
       ({ b: x, i }) =>
         `<div class="biome-card ${i === state.biomeEdit ? "selected" : ""}"><input aria-label="Enable ${esc(x.name)}" type="checkbox" data-biome-enable="${i}" ${x.enabled ? "checked" : ""}>${biomeThumb(x, i)}<button data-action="edit-biome" data-value="${i}"><b>${esc(x.name)}</b><small>${x.custom ? "Customised" : state.game}</small></button><button type="button" class="field-action biome-edit" data-action="edit-biome" data-value="${i}" aria-label="Edit ${esc(x.name)}" title="Edit">${icon("pencil", 16)}</button></div>`,
     )
     .join("")}</div>`;
+}
+function refreshBiomes() {
+  $("#biome-bulk").innerHTML = biomeBulk();
+  $("#biome-results").innerHTML = biomeList();
+  syncBulk();
 }
 function biomesForm() {
   const b = state.biomes[state.selected];
@@ -749,7 +768,7 @@ function biomesForm() {
     )}<p class="pop-title">Show</p><label class="pop-row"><input type="checkbox" data-biome-custom ${state.bCustom ? "checked" : ""}><span>Customised only</span></label><div class="pop-foot">${button("Reset", "biome-filter-reset", { small: true, primary: !!active, ghost: !active, disabled: !active })}</div></div></div>`;
   const sort = `<div class="pop-wrap${open("sort")}" data-pop="sort">${iconButton("sort", "Sort biomes", "sort")}<div class="pop" role="dialog" aria-label="Sort biomes"><div role="radiogroup" aria-label="Sort by">${BIOME_SORTS.map(([id, label]) => `<button type="button" role="radio" aria-checked="${state.bSort === id}" class="pop-row pop-choice" data-action="biome-sort" data-value="${id}"><span>${label}</span><span class="pop-check">${state.bSort === id ? "✓" : ""}</span></button>`).join("")}</div></div></div>`;
   const editing = state.biomeEdit != null;
-  return `<div class="world-form${editing ? " editing" : ""}"><div class="form-main"><div class="search-line"><input class="input" aria-label="Search biomes" data-bind="biomeSearch" value="${esc(state.bSearch)}" placeholder="Search biomes…">${filter}${sort}</div><div id="biome-results">${biomeList()}</div></div><aside class="form-aside">${editing ? biomeEditor() : `<span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this World")}`}</aside></div>`;
+  return `<div class="world-form${editing ? " editing" : ""}"><div class="form-main"><div class="list-toolbar"><div class="search-line"><input class="input" aria-label="Search biomes" data-bind="biomeSearch" value="${esc(state.bSearch)}" placeholder="Search biomes…">${filter}${sort}</div><div id="biome-bulk">${biomeBulk()}</div></div><div id="biome-results">${biomeList()}</div></div><aside class="form-aside">${editing ? biomeEditor() : `<span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this World")}`}</aside></div>`;
 }
 function climateMap(b) {
   return `<div class="climate-plot"><div class="climate-map" data-climate-map aria-label="Climate: temperature left to right, humidity bottom to top"><span class="corner wet">Wet</span><span class="corner dry">Dry</span>${state.biomes.map((x, i) => (i === state.selected ? "" : `<button type="button" class="climate-dot ${x.enabled ? "" : "off"}" data-action="edit-biome" data-value="${i}" style="left:${x.t * 100}%;bottom:${x.h * 100}%;--swatch:${x.swatch}" aria-label="Edit ${esc(x.name)}" title="${esc(x.name)}"></button>`)).join("")}<button type="button" class="climate-dot current" data-climate-handle style="left:${b.t * 100}%;bottom:${b.h * 100}%;--swatch:${b.swatch}" aria-label="${esc(b.name)}: drag or use arrow keys to move"><span>${esc(b.name)}</span></button></div><div class="axis-x"><span>Cold</span><span>Temperature</span><span>Warm</span></div></div>`;
@@ -1633,14 +1652,12 @@ document.addEventListener("input", (e) => {
   }
   if (k === "biomeSearch") {
     state.bSearch = v;
-    $("#biome-results").innerHTML = biomeList();
-    syncBulk();
+    refreshBiomes();
     return;
   }
   if (k === "modSearch") {
     state.search = v;
-    $("#mod-results").innerHTML = modCards();
-    syncBulk();
+    refreshMods();
     return;
   }
   if (k === "sound") {
@@ -1678,11 +1695,7 @@ function markCustom() {
   const b = state.biomes[state.selected];
   if (b.custom) return;
   b.custom = true;
-  const list = $("#biome-results");
-  if (list) {
-    list.innerHTML = biomeList();
-    syncBulk();
-  }
+  if ($("#biome-results")) refreshBiomes();
   const status = $("small[data-biome-status]");
   if (status) status.textContent = "Customised";
   const reset = $('[data-action="reset-biome"]');
@@ -1739,6 +1752,13 @@ document.addEventListener("keydown", (e) => {
   e.preventDefault();
   setClimate(b.t + move[0], b.h + move[1]);
 });
+// Focus moving through a list scrolls the row clear of the sticky toolbar, not under it.
+function padUnderToolbar() {
+  const bar = $(".list-toolbar");
+  const list =
+    bar?.closest(".world-form.editing .form-main") || bar?.closest(".body");
+  if (list) list.style.scrollPaddingTop = bar.offsetHeight + "px";
+}
 function syncBulk() {
   document.querySelectorAll("[data-bulk]").forEach((box) => {
     box.checked = box.dataset.state === "all";
