@@ -165,7 +165,7 @@ fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
     new_world(&mut app);
     type_into(&mut app, Field::Name, "  Ridge ");
     type_into(&mut app, Field::Seed, "-1");
-    act(&mut app, Act::Voxel(0.25));
+    step(&mut app, Act::VoxelStep(1), -1);
     finish(&mut app);
     let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
         panic!("no World to open");
@@ -668,15 +668,6 @@ fn the_prompt_bar_shows_controller_buttons_after_controller_input_and_keys_after
     );
 }
 
-fn resolved(app: &mut App) -> String {
-    app.world_mut()
-        .query_filtered::<&Text, With<Resolved>>()
-        .single(app.world())
-        .unwrap()
-        .0
-        .clone()
-}
-
 #[test]
 fn a_new_form_opens_with_its_random_seed_in_the_field() {
     let worlds = Directory::new();
@@ -685,35 +676,22 @@ fn a_new_form_opens_with_its_random_seed_in_the_field() {
     new_world(&mut app);
     let form = &launcher(&app).form;
     assert_eq!(form.seed, form.random_seed.to_string());
-    let random = form.random_seed;
-    assert_eq!(resolved(&mut app), format!("Seed: {random}"));
     act(&mut app, Act::Back);
     act(&mut app, Act::Back);
     assert!(
         matches!(launcher(&app).screen, Screen::Worlds),
         "an untouched form leaves without asking"
     );
-    new_world(&mut app);
-    type_into(&mut app, Field::Seed, "ridge");
-    assert!(resolved(&mut app).starts_with("Seed from these words: "));
 }
 
 #[test]
-fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
+fn a_blank_seed_creates_the_world_with_the_random_seed() {
     let worlds = Directory::new();
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     new_world(&mut app);
     type_into(&mut app, Field::Seed, "");
-    let shown = app
-        .world_mut()
-        .query_filtered::<&Text, With<Resolved>>()
-        .single(app.world())
-        .unwrap()
-        .0
-        .clone();
     let random = launcher(&app).form.random_seed;
-    assert_eq!(shown, format!("Random seed: {random}"));
     finish(&mut app);
     let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
         panic!("no World to open");
@@ -1389,7 +1367,8 @@ fn tab_and_shift_tab_reach_every_control_on_each_screen() {
             Some(Act::Edit(path.clone())),
             vec![
                 "Rename",
-                "EditMode(Survival)",
+                // Tab reaches the chosen Game mode; Left and Right the other.
+                "EditMode(Creative)",
                 "CopySeed",
                 "ReCreate",
                 "SaveName",
@@ -3614,4 +3593,95 @@ fn a_mods_summary_line_names_each_kind_it_adds_and_leaves_out_none() {
         Some("2 Materials \u{b7} 2 Fluids")
     );
     assert_eq!(pages::adds(&summary(0, 0, 0)), None);
+}
+
+/// Left (`by` -1) or Right (+1) on the control that carries `on`, as `pad::navigate` sends it.
+fn step(app: &mut App, on: Act, by: i32) {
+    let entity = app
+        .world_mut()
+        .query::<(Entity, &Act)>()
+        .iter(app.world())
+        .find_map(|(e, a)| (*a == on).then_some(e))
+        .unwrap_or_else(|| panic!("no {on:?} control on screen"));
+    app.world_mut()
+        .trigger(super::super::pad::Step { entity, by });
+    app.update();
+}
+
+#[test]
+fn left_and_right_change_the_game_mode_and_keep_the_focus_on_it() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    step(&mut app, Act::Mode(GameMode::Creative), 1);
+    assert_eq!(launcher(&app).form.game_mode, GameMode::Survival);
+    assert_eq!(focused_act(&app), Some(Act::Mode(GameMode::Survival)));
+    step(&mut app, Act::Mode(GameMode::Survival), 1);
+    assert_eq!(
+        launcher(&app).form.game_mode,
+        GameMode::Survival,
+        "Right stays on the last"
+    );
+    step(&mut app, Act::Mode(GameMode::Survival), -1);
+    assert_eq!(launcher(&app).form.game_mode, GameMode::Creative);
+    assert_eq!(focused_act(&app), Some(Act::Mode(GameMode::Creative)));
+}
+
+#[test]
+fn voxel_size_is_one_selector_that_left_right_and_enter_step_through() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    assert!(shown(&mut app, "1 m \u{b7} default"));
+    act(&mut app, Act::VoxelStep(1));
+    assert_eq!(launcher(&app).form.voxel_size_m, 0.5);
+    assert!(shown(
+        &mut app,
+        "0.5 m \u{b7} 2\u{d7} finer, half the view distance"
+    ));
+    step(&mut app, Act::VoxelStep(1), 1);
+    assert_eq!(launcher(&app).form.voxel_size_m, 0.25);
+    assert_eq!(focused_act(&app), Some(Act::VoxelStep(1)));
+    step(&mut app, Act::VoxelStep(1), 1);
+    assert_eq!(launcher(&app).form.voxel_size_m, 1.0, "it wraps");
+    step(&mut app, Act::VoxelStep(1), -1);
+    assert_eq!(launcher(&app).form.voxel_size_m, 0.25);
+}
+
+#[test]
+fn the_world_step_says_only_what_the_chosen_mode_means() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    for gone in [
+        "Give it a name",
+        "Every Player starts",
+        "Seed: ",
+        "Gather what you place",
+    ] {
+        assert!(!shown(&mut app, gone), "{gone}");
+    }
+    assert!(shown(&mut app, "Take any Material from the Catalogue"));
+    act(&mut app, Act::Mode(GameMode::Survival));
+    assert!(shown(&mut app, "Gather what you place"));
+    assert!(!shown(&mut app, "Take any Material from the Catalogue"));
+}
+
+#[test]
+fn left_and_right_change_edit_worlds_game_mode() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Old", true)).unwrap();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path));
+    act(&mut app, Act::EditMode(GameMode::Creative));
+    step(&mut app, Act::EditMode(GameMode::Creative), 1);
+    assert_eq!(launcher(&app).modes.own, GameMode::Survival);
+    assert_eq!(focused_act(&app), Some(Act::EditMode(GameMode::Survival)));
+    step(&mut app, Act::EditMode(GameMode::Survival), -1);
+    assert_eq!(launcher(&app).modes.own, GameMode::Creative);
 }

@@ -529,7 +529,8 @@ pub(super) enum Act {
     ResetBiomes,
     ConfirmReset,
     KeepBiomes,
-    Voxel(f32),
+    /// Steps the Voxel size by this many sizes, wrapping; the selector itself carries `1`.
+    VoxelStep(i32),
     Mode(GameMode),
     PickGame(usize),
     ToggleMod(usize),
@@ -560,6 +561,23 @@ pub(super) enum Act {
     SelectShownBiomes,
 }
 
+impl Act {
+    /// What Left (`by` -1) or Right (+1) does on a [`super::pad::Stepper`] that carries this act.
+    fn stepped(&self, by: i32) -> Option<Act> {
+        let mode = if by < 0 {
+            GameMode::Creative
+        } else {
+            GameMode::Survival
+        };
+        match self {
+            Act::Mode(_) => Some(Act::Mode(mode)),
+            Act::EditMode(_) => Some(Act::EditMode(mode)),
+            Act::VoxelStep(_) => Some(Act::VoxelStep(by)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub(super) struct Queue(pub(super) Vec<Act>);
 
@@ -576,9 +594,6 @@ enum Field {
     TemperatureSize,
     HumiditySize,
 }
-
-#[derive(Component)]
-struct Resolved;
 
 #[derive(Component)]
 struct Root;
@@ -765,6 +780,7 @@ fn logic(app: &mut App) {
         .init_resource::<Thumbnails>()
         .init_resource::<terrain::TerrainPreview>()
         .add_observer(activate)
+        .add_observer(step)
         .add_observer(slide)
         .add_observer(biomes::press_map)
         .add_observer(biomes::drag_map)
@@ -956,6 +972,16 @@ fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     }
 }
 
+fn step(event: On<super::pad::Step>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
+    if let Some(act) = acts
+        .get(event.entity)
+        .ok()
+        .and_then(|a| a.stepped(event.by))
+    {
+        queue.0.push(act);
+    }
+}
+
 /// Closes the open Mods or Biomes popup back onto its icon.
 fn close_pop(l: &mut Launcher) {
     let icon = (l.mod_view.pop.take().map(Act::ModPop))
@@ -1047,7 +1073,6 @@ fn keys(
 fn sync_fields(
     fields: Query<(&Field, &EditableText), Changed<EditableText>>,
     launcher: Option<ResMut<Launcher>>,
-    mut resolved: Query<&mut Text, With<Resolved>>,
 ) {
     let Some(mut launcher) = launcher else {
         return;
@@ -1075,12 +1100,6 @@ fn sync_fields(
             Field::Search => launcher.bypass_change_detection().search = value,
             Field::ModSearch => launcher.bypass_change_detection().mod_search = value,
             Field::BiomeSearch => launcher.bypass_change_detection().biome_search = value,
-        }
-    }
-    for mut text in &mut resolved {
-        let wanted = launcher.form.seed_label();
-        if text.0 != wanted {
-            text.0 = wanted;
         }
     }
 }
@@ -1177,15 +1196,6 @@ impl Form {
             .map(|seed| seed.unwrap_or(self.random_seed))
             .map_err(|e| format!("Seed {e}"))
     }
-
-    fn seed_label(&self) -> String {
-        match self.seed() {
-            Ok(seed) if self.seed.trim().is_empty() => format!("Random seed: {seed}"),
-            Ok(seed) if self.seed.trim().parse::<i128>().is_ok() => format!("Seed: {seed}"),
-            Ok(seed) => format!("Seed from these words: {seed}"),
-            Err(e) => e,
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1265,7 +1275,7 @@ fn handle(
             | Act::KeepBiomes
             | Act::KeepEditing
             | Act::DiscardSetup
-            | Act::Voxel(..)
+            | Act::VoxelStep(..)
             | Act::Mode(..)
             | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
