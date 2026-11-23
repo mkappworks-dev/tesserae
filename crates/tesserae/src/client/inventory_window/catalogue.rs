@@ -38,6 +38,9 @@ pub(super) enum CatalogueControl {
 #[derive(Component)]
 pub(super) struct SearchBox;
 
+/// The side pane's search, whichever pane it is.
+pub(super) type Search = Or<(With<SearchBox>, With<super::crafting::RecipeSearch>)>;
+
 #[derive(Component)]
 pub(super) struct Tiles;
 
@@ -207,10 +210,7 @@ pub(super) struct SearchToggle;
 pub(super) fn show_search(
     searches: Res<Searches>,
     focus: Option<Res<InputFocus>>,
-    fields: Query<
-        (Entity, Has<SearchBox>),
-        Or<(With<SearchBox>, With<super::crafting::RecipeSearch>)>,
-    >,
+    fields: Query<(Entity, Has<SearchBox>), Search>,
     mut slots: Query<&mut Node, (With<SearchSlot>, Without<SearchToggle>)>,
     mut toggles: Query<&mut Node, With<SearchToggle>>,
 ) {

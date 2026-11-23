@@ -348,7 +348,7 @@ fn activate(
     mut window: ResMut<InventoryWindow>,
     (held, open, pointed): (Res<Held>, Res<container::Open>, Res<tip::Pointed>),
     keys: Res<ButtonInput<KeyCode>>,
-    searches: Query<Entity, Or<(With<catalogue::SearchBox>, With<crafting::RecipeSearch>)>>,
+    searches: Query<Entity, catalogue::Search>,
     mut focus: ResMut<InputFocus>,
     mut intents: MessageWriter<InventoryIntent>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,

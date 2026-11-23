@@ -1,6 +1,7 @@
 //! What the pointer or focus is on: the tooltip that names it, the prompts
 //! that say what each input does to it, and the keys that act on it.
 
+use bevy::input::gamepad::GamepadButton;
 use bevy::input_focus::InputFocus;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
@@ -359,20 +360,21 @@ fn places_as(tip: &mut ChildSpawnerCommands, material: MaterialId, shapes: &[Sha
     if shapes.is_empty() {
         return;
     }
+    tip.spawn((
+        detail_line("Places as".into(), theme::muted()),
+        Node {
+            margin: UiRect::top(Val::Px(8.0)),
+            ..default()
+        },
+    ));
     tip.spawn(Node {
-        align_items: AlignItems::Center,
+        flex_wrap: FlexWrap::Wrap,
         column_gap: Val::Px(4.0),
-        margin: UiRect::top(Val::Px(8.0)),
+        row_gap: Val::Px(4.0),
+        margin: UiRect::top(Val::Px(4.0)),
         ..default()
     })
     .with_children(|row| {
-        row.spawn((
-            look::label("Places as", TIP_DETAIL_PX, theme::REGULAR, theme::muted()),
-            Node {
-                margin: UiRect::right(Val::Px(4.0)),
-                ..default()
-            },
-        ));
         for &shape in shapes {
             row.spawn((
                 Node {
@@ -459,7 +461,9 @@ pub(super) fn prompts(
                 let mut slot = vec![
                     Prompt::new(Cap::Text("⇧ Click"), "Quick move"),
                     Prompt::new(Cap::Text("Right-click"), "Split"),
-                    Prompt::new(Cap::Letter('Q'), "Drop").act(Control::Drop),
+                    Prompt::new(Cap::Letter('Q'), "Drop")
+                        .act(Control::Drop)
+                        .pad(GamepadButton::North),
                     Prompt::new(Cap::Text("1–9"), "To hotbar"),
                 ];
                 if wanted.chest {
@@ -470,7 +474,11 @@ pub(super) fn prompts(
                 } else {
                     Control::Sort
                 };
-                slot.push(Prompt::new(Cap::Letter('S'), "Sort").act(sort));
+                slot.push(
+                    Prompt::new(Cap::Letter('S'), "Sort")
+                        .act(sort)
+                        .pad(GamepadButton::West),
+                );
                 slot
             }
         };

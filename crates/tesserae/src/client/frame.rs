@@ -152,10 +152,6 @@ impl<A: Bundle> Prompt<A> {
 
     /// The controller button that also fires it: X for a screen's secondary
     /// action, Y for its destructive or reset one.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the screens that move onto the frame use it")
-    )]
     pub(super) fn pad(self, button: GamepadButton) -> Self {
         Self {
             pad: Some(button),
