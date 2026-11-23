@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Menus polish
 
@@ -113,3 +113,14 @@ bugs are fixed.
 - Trust in dev builds, which still trust the bundled Games.
 
 ## Comments
+
+Implemented on `feat/app-icon-and-game-menus` (tickets 01–28). The mockup was
+updated first for each change and approved before the Client followed. Beyond
+the tickets, small user-requested fixes landed without tickets (named in their
+commit messages): Ground lists offer only ground Materials, the place Tool's
+ghost is lighter with no edge rim, Quick layout cannot open over the place Tool,
+World details is see-through, Voxel size is three options, Create World's Next
+is instant (reads run in the background behind "Reading…"), the Server confirms
+a built Structure, and Quick layout opens on Count and shows its refusals. Two
+rounds of code review and mockup comparison followed; their findings were fixed
+or recorded in the tickets' Comments.
