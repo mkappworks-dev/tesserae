@@ -14,7 +14,11 @@ suggest emissive Materials (lava) lit while the rest has no light yet, so a
 Chunk may be drawn before its Sky light arrives. Diagnose first; that guess is
 not confirmed.
 
-Loading terrain either draws lit correctly or does not draw until it can.
+Cause (diagnosed): a coarse Chunk was sent before a ground or water neighbour
+at its level, and the dark beds and cave floors beneath showed through the gap.
+Fix (user, Q61): a coarser level keeps drawing a region until every finer Chunk
+covering it is sent. Holding Chunks back until their neighbours are sent was
+rejected: it left larger empty ground mid-load.
 
 ## Acceptance
 
