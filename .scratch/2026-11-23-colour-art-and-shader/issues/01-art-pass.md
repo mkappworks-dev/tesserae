@@ -13,10 +13,10 @@ before the next:
    `building.rs`: periods that divide 16 (leaves first), clumped speckles, two
    noise octaves, a scaling `tint`, the 50 to 243 texel range, thicker sprites.
 2. The same rules, by hand, in the PNGs of `flora` (leaves, logs, ground
-   cover), `strata` (rock), `timber` (planks, thatch) and `brickwork` (brick,
-   cobble, roof tile).
+   cover), `strata` (rock), `timber` (planks, thatch), `brickwork` (brick,
+   cobble, roof tile) and `crops` (wheat: thicker stalks).
 3. Colour targets: grass and leaves, dirt, sand and snow, `flora:cane`, and
-   every Biome's sky and fog colour.
+   every Biome's sky (blue overhead) and fog colour (its character).
 4. Appearance colours set to each tile's linear mean.
 
 ## Acceptance

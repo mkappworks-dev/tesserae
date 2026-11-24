@@ -58,26 +58,29 @@ shoulder, so the tonemapper is not the cause. Block light is emissive with
 `emissive_exposure_weight` 0, so it skips `Exposure`.
 
 Most of the screen is Mod art, not Terra's own: `flora` draws every tree, grass
-tuft and flower (its leaves are cutout), `strata` the rock, `timber` and
-`brickwork` the houses.
+tuft and flower (its leaves are cutout), `strata` the rock. Terra's houses come
+from its own `building.rs`; `timber` and `brickwork` are not yet Terra's Mods.
+Mod art has one source, `scripts/generate-mod-art`, never the PNGs.
 
 ## Solution
 
-Five tickets, judged on the baseline captures, before and after:
+Six tickets, judged on the baseline captures, before and after:
 
 1. **Art pass** over Terra's `textures.rs` and `building.rs`, its appearance
    colours and Biome sky and fog colours, and the PNGs of the Mods Terra ships
    (`flora`, `strata`, `timber`, `brickwork`): pattern fixes first, then colour
    targets.
-2. **Light balance and aerial perspective:** a near haze in metres in Distance
-   fog, ambient and Sky light balance, block light and `Exposure`, and the
-   tonemapper.
+2. **Light balance, aerial perspective and the sky:** a near haze in metres in
+   Distance fog, a sky gradient with a sun disc, ambient and Sky light balance,
+   block light and `Exposure`, and the tonemapper.
 3. **Per-block and per-area variation:** a rotated or mirrored tile per Voxel
    for Materials that read the same in any direction, and a crown-sized colour
    variation in metres on leaves and grass.
-4. **Screen-space ambient occlusion**, landed only if it fits the frame budget.
+4. **Screen-space ambient occlusion**, as a player setting, off by default.
 5. **Tree variety:** storeys, canopy variants and wider jungle and swamp
    spacing, so a forest reads as separate trees.
+6. **Loading terrain draws black:** a bug on `main` found in the captures; far
+   terrain that is still loading draws black with orange dots.
 
 Every value is a look decision: the user approves it on a capture before it
 lands.
@@ -114,10 +117,14 @@ lands.
     or snow top above about 85% value on screen.
   - `flora:cane` (`[140, 190, 90]`, the swamp's pale cross plants) darker,
     with a two-tone stem and leaf.
-  - Temperate's sky toward a clear blue at about S 0.4; Dry's toward a pale warm
-    blue, its warmth kept in the fog. Every Biome's fog stays lighter than its
-    sky, and the clear colour moves with it.
+  - Every Biome's sky is blue overhead (Temperate at about S 0.4). A Biome's
+    character moves into its fog and horizon: warm haze for Dry and Savanna,
+    green-grey for Swamp, pale for Cold. Every fog stays lighter than its sky.
   - No saturation change underground; the cave reads muted already.
+- The Mods' PNGs are the plant art. Terra's `sprite()` drawings and its stale
+  tree aliases are deleted: a Game's appearance row only reaches its own
+  Materials, so nothing Terra declares used them. Thicker wheat is drawn in
+  `crops`' PNGs.
 - A Material's appearance colour is its tile's linear mean (grass: its top),
   set after the pattern changes. Terra's are tested; the Mods' `content.toml`
   colours are set by hand from the same measure.
@@ -161,9 +168,23 @@ lands.
 - These change what Generator version 3 makes. Nothing is released, so v3
   changes in place and its digests are recorded again
   ([ADR-0033](../../docs/adr/0033-generator-version-3-is-the-only-version.md)).
-- Ambient occlusion is screen-space. Per-corner AO in the mesher would split
-  greedy-merged quads and give back part of the packed-quad mesh-memory saving;
-  it is considered only if screen-space AO misses the frame budget.
+- The sky is a gradient, not one clear colour: a Biome's sky colour at the
+  zenith, its fog colour at the horizon, so the existing pair drives it with no
+  new Declaration field. A sun disc and glow sit at the fixed light's direction.
+  Clouds belong to the day and night cycle spec, which builds on this sky; a
+  physically based atmosphere needs HDR and waits for captures to ask for it.
+- Ambient occlusion is screen-space, and a player setting off by default: on
+  `flight` it added about 1 ms at 1080p against some 0.45 ms of headroom at the
+  1440p target, so it never counts against the budget. Its prepass covers only
+  the levels AO can reach. Per-corner AO in the mesher would split
+  greedy-merged quads and give back part of the packed-quad mesh-memory saving.
+- `timber` and `brickwork` get this spec's art, ready for Terra; making the
+  shared building Mods Terra's source of building Materials is the shared
+  building materials spec (`feat/shared-building-materials`).
+- Loading terrain: a coarser level keeps drawing a region until every finer
+  Chunk covering it is sent, so no gap shows what lies beneath. Holding coarse
+  Chunks back until their neighbours are sent was tried and rejected: it trades
+  the black for larger empty ground.
 - The tonemapper is compared (AgX beside TonyMcMapface) but is not expected to
   be the fix. A change re-measures the fog's tonemap darkening constant.
 - No HDR cameras unless captures show the sectional grade is needed: that is an
@@ -194,5 +215,8 @@ lands.
   follow-up.
 - Trunks wider than one Voxel for the tallest storey: new trunk, limb and
   felling rules, a follow-up.
-- A day cycle or moving sun.
+- A day and night cycle, a moving sun, the moon and clouds: the day and night
+  cycle spec (`feat/day-night-cycle`), which builds on this sky.
+- Bloom, HDR grading, volumetric light, waving foliage and water reflections:
+  the Look overhaul spec (`feat/look-overhaul`).
 - The other demo Games' own art.
