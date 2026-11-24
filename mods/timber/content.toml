@@ -18,12 +18,12 @@ remove-time-s = 0.2
 
 [[appearance]]
 material = "planks"
-color = [176, 132, 78, 255]
+color = [168, 124, 70, 255]
 texture = "art/planks.png"
 
 [[appearance]]
 material = "thatch"
-color = [196, 170, 92, 255]
+color = [194, 168, 91, 255]
 texture = "art/thatch.png"
 
 [[shapes]]

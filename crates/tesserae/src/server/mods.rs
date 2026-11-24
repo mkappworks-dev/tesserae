@@ -3242,6 +3242,65 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         }
     }
 
+    /// The map and untextured draws show the appearance colour, so it must be what the textured
+    /// surface averages to from afar: the linear mean of its drawn texels.
+    #[test]
+    fn terra_appearance_colours_are_their_tiles_linear_mean() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let linear = |c: u8| {
+            let c = c as f64 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let srgb = |l: f64| {
+            255.0
+                * if l <= 0.003_130_8 {
+                    l * 12.92
+                } else {
+                    1.055 * l.powf(1.0 / 2.4) - 0.055
+                }
+        };
+        let mut checked = 0;
+        for (id, name) in loaded.registry.names(Kind::Material) {
+            if !name.starts_with("terra:") {
+                continue;
+            }
+            let Some((_, pixels, _)) = loaded.textures.iter().find(|(m, ..)| *m as usize == id)
+            else {
+                continue;
+            };
+            let (_, colour) = loaded
+                .appearance
+                .iter()
+                .find(|(m, _)| *m as usize == id)
+                .unwrap();
+            // A grass block is seen from above.
+            let faces = if name == "terra:grass" { 0..1 } else { 0..3 };
+            let drawn: Vec<&[u8; 4]> = pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .enumerate()
+                .filter(|(i, p)| faces.contains(&(i / 16 % 3)) && p[3] > 0)
+                .map(|(_, p)| p)
+                .collect();
+            for c in 0..3 {
+                let mean = drawn.iter().map(|p| linear(p[c])).sum::<f64>() / drawn.len() as f64;
+                assert!(
+                    (srgb(mean) - colour[c] as f64).abs() <= 1.0,
+                    "{name} channel {c}: appearance {} against a mean of {:.1}",
+                    colour[c],
+                    srgb(mean)
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked >= 40, "only {checked} Terra Materials checked");
+    }
+
     #[test]
     fn terra_and_the_mods_it_ships_vary_natural_tiles_and_keep_built_ones() {
         use tesserae_mods::TileVariation::{Fixed, Turned, TurnedAndPatched};

@@ -154,11 +154,22 @@ fn marker(name: &str, icon: MarkerIcon, [r, g, b]: [u8; 3]) -> MarkerKindDef {
     }
 }
 
-pub(crate) fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
+/// `base` is the colour its pattern is painted from; the map and untextured draws show the tile's
+/// mean, so they agree with the textured surface.
+pub(crate) fn appearance(material: &str, base: [u8; 4]) -> Appearance {
+    let texture = textures::texture(material, base);
+    // A grass block is seen from above.
+    let faces = if material == "grass" { 0..1 } else { 0..3 };
+    let [r, g, b] = textures::mean(&texture, faces);
     Appearance {
         material: material.into(),
-        color: Srgba { r, g, b, a },
-        texture: Some(textures::texture(material, [r, g, b, a])),
+        color: Srgba {
+            r,
+            g,
+            b,
+            a: base[3],
+        },
+        texture: Some(texture),
         variation: variation(material),
     }
 }
@@ -297,12 +308,12 @@ impl Guest for Terra {
                 appearance("brick", [168, 74, 52, 255]),
                 appearance("water", [26, 82, 158, 166]),
                 appearance("stone", [133, 133, 140, 255]),
-                appearance("dirt", [107, 74, 46, 255]),
-                appearance("grass", [84, 143, 61, 255]),
+                appearance("dirt", [104, 86, 62, 255]),
+                appearance("grass", [101, 131, 67, 255]),
                 appearance("glass", [164, 210, 250, 89]),
-                appearance("leaves", [41, 107, 36, 255]),
-                appearance("sand", [214, 196, 140, 255]),
-                appearance("snow", [236, 240, 246, 255]),
+                appearance("leaves", [87, 124, 61, 255]),
+                appearance("sand", [192, 175, 136, 255]),
+                appearance("snow", [220, 224, 230, 255]),
                 appearance("iron", [150, 120, 104, 255]),
                 appearance("crystal", [150, 110, 230, 255]),
                 appearance("melon", [84, 150, 56, 255]),
@@ -544,8 +555,8 @@ impl Guest for Terra {
                     humidity: 0.59,
                     ground: None,
                     sky_fog: Some(SkyFog {
-                        sky: (126, 146, 168),
-                        fog: (136, 160, 190),
+                        sky: (112, 150, 190),
+                        fog: (176, 190, 206),
                     }),
                     cave_scale: None,
                     // A melon in every 16 by 16 m of grass is found while exploring, not a
@@ -584,8 +595,8 @@ impl Guest for Terra {
                         surface: "terra:sand".into(),
                     }),
                     sky_fog: Some(SkyFog {
-                        sky: (176, 160, 128),
-                        fog: (196, 178, 142),
+                        sky: (118, 156, 196),
+                        fog: (212, 196, 166),
                     }),
                     cave_scale: Some(1.5),
                     crop_fields: Vec::new(),
@@ -607,8 +618,8 @@ impl Guest for Terra {
                         surface: "terra:snow".into(),
                     }),
                     sky_fog: Some(SkyFog {
-                        sky: (150, 164, 184),
-                        fog: (176, 190, 208),
+                        sky: (124, 158, 198),
+                        fog: (214, 222, 232),
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
@@ -626,8 +637,8 @@ impl Guest for Terra {
                     humidity: 0.71,
                     ground: None,
                     sky_fog: Some(SkyFog {
-                        sky: (112, 148, 128),
-                        fog: (126, 166, 140),
+                        sky: (106, 148, 188),
+                        fog: (178, 194, 184),
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
@@ -649,8 +660,8 @@ impl Guest for Terra {
                         surface: "terra:dirt".into(),
                     }),
                     sky_fog: Some(SkyFog {
-                        sky: (108, 126, 114),
-                        fog: (124, 142, 126),
+                        sky: (110, 140, 172),
+                        fog: (166, 174, 156),
                     }),
                     cave_scale: Some(0.5),
                     crop_fields: Vec::new(),
@@ -672,8 +683,8 @@ impl Guest for Terra {
                         surface: "terra:dirt".into(),
                     }),
                     sky_fog: Some(SkyFog {
-                        sky: (170, 160, 124),
-                        fog: (192, 178, 136),
+                        sky: (120, 158, 200),
+                        fog: (214, 196, 158),
                     }),
                     cave_scale: None,
                     crop_fields: plants::savanna_fields(),
@@ -706,8 +717,8 @@ impl Guest for Terra {
                         surface: "terra:sand".into(),
                     }),
                     sky_fog: Some(SkyFog {
-                        sky: (118, 150, 178),
-                        fog: (130, 164, 190),
+                        sky: (104, 146, 194),
+                        fog: (176, 196, 214),
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),
@@ -736,8 +747,8 @@ impl Guest for Terra {
                         surface: "terra:sand".into(),
                     }),
                     sky_fog: Some(SkyFog {
-                        sky: (140, 156, 176),
-                        fog: (160, 176, 196),
+                        sky: (112, 156, 204),
+                        fog: (196, 208, 216),
                     }),
                     cave_scale: None,
                     crop_fields: Vec::new(),
@@ -768,8 +779,8 @@ impl Guest for Terra {
                         surface: "terra:snow".into(),
                     }),
                     sky_fog: Some(SkyFog {
-                        sky: (150, 168, 192),
-                        fog: (180, 194, 214),
+                        sky: (100, 140, 196),
+                        fog: (206, 214, 226),
                     }),
                     cave_scale: Some(0.0),
                     crop_fields: Vec::new(),

@@ -60,35 +60,35 @@ tags = ["soil"]
 
 [[appearance]]
 material = "stone"
-color = [140, 141, 148, 255]
+color = [139, 140, 147, 255]
 texture = "art/stone.png"
 variation = "turned"
 
 [[appearance]]
 material = "basalt"
-color = [58, 60, 68, 255]
+color = [55, 57, 65, 255]
 texture = "art/basalt.png"
 variation = "turned"
 
 [[appearance]]
 material = "clay"
-color = [166, 112, 92, 255]
+color = [165, 111, 91, 255]
 texture = "art/clay.png"
 
 [[appearance]]
 material = "sand"
-color = [222, 205, 150, 255]
+color = [223, 207, 152, 255]
 texture = "art/sand.png"
 variation = "turned"
 
 [[appearance]]
 material = "soil"
-color = [107, 74, 46, 255]
+color = [110, 77, 48, 255]
 texture = "art/soil.png"
 
 [[appearance]]
 material = "turf"
-color = [80, 144, 49, 255]
+color = [80, 143, 50, 255]
 texture = "art/turf.png"
 
 [[items]]
