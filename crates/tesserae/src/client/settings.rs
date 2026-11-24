@@ -153,6 +153,7 @@ pub(super) enum Operation {
     Cap(Option<u32>),
     AntiAliasing(super::anti_alias::AntiAliasing),
     Scale(u32),
+    AmbientOcclusion(bool),
     TextScale(u32),
     ReducedMotion(bool),
     SolidBackground(bool),

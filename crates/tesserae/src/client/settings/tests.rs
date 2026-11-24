@@ -91,6 +91,9 @@ fn a_change_applies_at_once_and_survives_leaving_settings() {
         (Tab::Behavior, Operation::Repeat(true), |p| p.repeat_held),
         (Tab::Behavior, Operation::Ghost(true), |p| p.placement_ghost),
         (Tab::Display, Operation::Compass(true), |p| p.compass),
+        (Tab::Display, Operation::AmbientOcclusion(true), |p| {
+            p.ambient_occlusion
+        }),
         (Tab::Display, Operation::Minimap(true), |p| p.minimap),
         (
             Tab::Display,

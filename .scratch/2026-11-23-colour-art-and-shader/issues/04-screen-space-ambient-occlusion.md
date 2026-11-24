@@ -47,3 +47,25 @@ p95 at most 6.9 ms, last verified at 6.454 ms: 0.45 ms of headroom. SSAO adds
 about 1 ms of p95 at 1080p, about 1.8 ms at 1440p's pixel count. The prepass
 (depth and normals over every level) is about half of it. Captures, sheets and
 runs: `/tmp/colour-04/`. The user decides on per-corner AO.
+
+2026-11-25: landed as the Q60 setting. "Ambient occlusion" under Display, Image
+quality, off by default; when on, SSAO Low on Low, Medium and Custom and SSAO
+Medium on High; never under MSAA. The camera's depth and normal prepass now
+draws level 0 only (coarse quads get no area in its vertex stage), so the
+coverage cut it needed for coarse faces is gone; shadow passes still draw every
+level.
+
+Same method against 79ec13cf, the setting on in both runs' profile (High,
+SMAA). Runs were bimodal: whole series in which the second camera, which AO
+does not touch, slowed 2.5x (the GPU clock state; base hit it once, the branch
+in 6 of 9 Medium runs). Medians of the fast-state runs, ms:
+
+| Tier   | Frame p50   | Frame p95   | Main camera | Prepass     |
+| ------ | ----------- | ----------- | ----------- | ----------- |
+| Medium | 4.02 → 4.56 | 4.74 → 7.08 | 0.78 → 1.76 | 0.20 → 0.68 |
+| High   | 4.11 → 4.63 | 5.19 → 5.71 | 0.81 → 2.05 | 0.18 → 0.66 |
+
+The cut saves little: the main camera's added cost went from 1.10 to 0.98 ms on
+Medium and from 1.43 to 1.24 ms on High, since level 0 is almost all of the
+prepass (its share is about 0.5 ms either way). The SSAO passes are the rest.
+Captures: `/tmp/colour-04/v2/`.

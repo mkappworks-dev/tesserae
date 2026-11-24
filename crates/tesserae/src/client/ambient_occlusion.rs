@@ -1,5 +1,6 @@
-//! Screen-space ambient occlusion on the Player camera, set per Quality tier. It reads the
-//! depth and normal prepasses, which it adds to the camera and which go with it.
+//! Screen-space ambient occlusion on the Player camera: a player setting, its quality set by the
+//! Quality tier. It reads the depth and normal prepasses, which it adds to the camera and which go
+//! with it.
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
 use bevy::prelude::*;
@@ -17,22 +18,22 @@ pub(super) fn plugin(app: &mut App) {
     app.add_session_systems(PostUpdate, follow);
 }
 
-/// The SSAO quality a tier draws, or none where it misses the frame budget. Bevy's SSAO reads
-/// single-sampled prepass textures and skips a multisampled camera, so MSAA turns it off.
+/// The SSAO quality drawn, or none. Bevy's SSAO reads single-sampled prepass textures and skips a
+/// multisampled camera, so MSAA turns it off.
 pub(crate) fn occlusion(
+    on: bool,
     tier: DistancePreset,
     aa: AntiAliasing,
 ) -> Option<ScreenSpaceAmbientOcclusionQualityLevel> {
-    if aa.msaa() != Msaa::Off {
+    if !on || aa.msaa() != Msaa::Off {
         return None;
     }
-    match tier {
-        DistancePreset::Low => None,
-        DistancePreset::Medium | DistancePreset::Custom => {
-            Some(ScreenSpaceAmbientOcclusionQualityLevel::Low)
+    Some(match tier {
+        DistancePreset::High => ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+        DistancePreset::Low | DistancePreset::Medium | DistancePreset::Custom => {
+            ScreenSpaceAmbientOcclusionQualityLevel::Low
         }
-        DistancePreset::High => Some(ScreenSpaceAmbientOcclusionQualityLevel::Medium),
-    }
+    })
 }
 
 fn follow(
@@ -46,6 +47,7 @@ fn follow(
     };
     let (camera, current) = *main;
     let wanted = occlusion(
+        preferences.ambient_occlusion,
         quality::tier(&preferences, switch.as_deref()),
         anti_alias::chosen(&preferences),
     );
@@ -73,22 +75,15 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
 
     #[test]
-    fn low_and_msaa_draw_none_and_the_other_tiers_draw_their_own() {
+    fn the_setting_draws_by_tier_and_never_under_msaa() {
+        use DistancePreset::*;
         use ScreenSpaceAmbientOcclusionQualityLevel as Q;
-        assert_eq!(occlusion(DistancePreset::Low, AntiAliasing::Smaa), None);
-        assert_eq!(
-            occlusion(DistancePreset::Medium, AntiAliasing::Smaa),
-            Some(Q::Low)
-        );
-        assert_eq!(
-            occlusion(DistancePreset::Custom, AntiAliasing::Off),
-            Some(Q::Low)
-        );
-        assert_eq!(
-            occlusion(DistancePreset::High, AntiAliasing::Smaa),
-            Some(Q::Medium)
-        );
-        assert_eq!(occlusion(DistancePreset::High, AntiAliasing::Msaa4), None);
+        assert_eq!(occlusion(false, High, AntiAliasing::Smaa), None, "off");
+        assert_eq!(occlusion(true, Low, AntiAliasing::Smaa), Some(Q::Low));
+        assert_eq!(occlusion(true, Medium, AntiAliasing::Off), Some(Q::Low));
+        assert_eq!(occlusion(true, Custom, AntiAliasing::Smaa), Some(Q::Low));
+        assert_eq!(occlusion(true, High, AntiAliasing::Smaa), Some(Q::Medium));
+        assert_eq!(occlusion(true, High, AntiAliasing::Msaa4), None, "MSAA");
     }
 
     fn state(app: &mut App) -> (Option<ScreenSpaceAmbientOcclusionQualityLevel>, bool, bool) {
@@ -107,24 +102,21 @@ mod tests {
     }
 
     #[test]
-    fn the_player_camera_gains_and_loses_occlusion_and_its_prepasses_with_the_tier() {
+    fn the_player_camera_gains_and_loses_occlusion_and_its_prepasses_with_the_setting() {
+        use ScreenSpaceAmbientOcclusionQualityLevel as Q;
         let mut app = App::new();
         app.insert_resource(Preferences::default());
         app.world_mut().spawn((Camera3d::default(), MainCamera));
-        assert_eq!(
-            state(&mut app),
-            (
-                Some(ScreenSpaceAmbientOcclusionQualityLevel::Low),
-                true,
-                true
-            ),
-            "Medium, the default"
-        );
+        assert_eq!(state(&mut app), (None, false, false), "off by default");
 
-        app.insert_resource(Switch::Preset(DistancePreset::Low));
-        assert_eq!(state(&mut app), (None, false, false));
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .ambient_occlusion = true;
+        assert_eq!(state(&mut app), (Some(Q::Low), true, true), "Medium");
 
-        app.world_mut().remove_resource::<Switch>();
+        app.insert_resource(Switch::Preset(DistancePreset::High));
+        assert_eq!(state(&mut app), (Some(Q::Medium), true, true));
+
         app.world_mut().resource_mut::<Preferences>().anti_aliasing = AntiAliasing::Msaa4;
         assert_eq!(state(&mut app), (None, false, false), "MSAA");
     }
