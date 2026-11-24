@@ -170,7 +170,7 @@ lands.
 - The sky is a gradient, not one clear colour: a Biome's sky colour at the
   zenith, its fog colour at the horizon, so the existing pair drives it with no
   new Declaration field. A sun disc and glow sit at the fixed light's direction.
-  Clouds belong to the Look overhaul spec, which builds on this sky; a
+  Clouds belong to the day and night cycle spec, which builds on this sky; a
   physically based atmosphere needs HDR and waits for captures to ask for it.
 - Ambient occlusion is screen-space. Per-corner AO in the mesher would split
   greedy-merged quads and give back part of the packed-quad mesh-memory saving;
@@ -205,7 +205,8 @@ lands.
   follow-up.
 - Trunks wider than one Voxel for the tallest storey: new trunk, limb and
   felling rules, a follow-up.
-- A day cycle or moving sun.
-- Clouds, bloom, HDR grading, volumetric light, waving foliage and water
-  reflections: the Look overhaul spec (`feat/look-overhaul`).
+- A day and night cycle, a moving sun, the moon and clouds: the day and night
+  cycle spec (`feat/day-night-cycle`), which builds on this sky.
+- Bloom, HDR grading, volumetric light, waving foliage and water reflections:
+  the Look overhaul spec (`feat/look-overhaul`).
 - The other demo Games' own art.
