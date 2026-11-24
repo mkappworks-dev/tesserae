@@ -14,7 +14,12 @@ import bevy_pbr::render::{
         STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
     },
 };
+@if(SCREEN_SPACE_AMBIENT_OCCLUSION)
+import bevy_pbr::render::mesh_view_bindings::{screen_space_ambient_occlusion_texture, view};
+@if(SCREEN_SPACE_AMBIENT_OCCLUSION)
+import bevy_pbr::ssao::utils::ssao_multibounce;
 import super::{
+    coverage::finer_drawn,
     leaf_hole::leaf_hole,
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, sample_texture, uv_gradient},
@@ -34,66 +39,6 @@ struct LodParams {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(101)
 var<uniform> lod: LodParams;
-
-// Mirrors client::drawn_mask, which documents the layout.
-@group(constants::MATERIAL_BIND_GROUP) @binding(102)
-var<storage, read> drawn: array<u32>;
-
-// How far behind a face its own Voxel is sampled, as a fraction of the finer
-// Cell: a thirty-second of one of its Voxels, far enough to clear the float
-// error in a world-space coordinate and far short of leaving the Voxel.
-const BEHIND_A_FACE: f32 = 1.0 / 1024.0;
-
-// `drawn_mask::SOME` and `drawn_mask::ALL`, which a test holds equal.
-const SOME: u32 = 1u;
-const ALL: u32 = 2u;
-
-// The cover bits of the level-`level` Chunk holding the face at `point` facing
-// `normal`: `SOME`, its own level or a finer one draws part of it; `ALL`, all
-// of it.
-// The Chunk asked about is the one behind the face, because a face lies on the
-// boundary of the Voxel it is the surface of: water levelled onto a Chunk
-// boundary by `level_the_water` would otherwise ask the Chunk above it, which
-// holds no water at all.
-fn cover_at(level: u32, point: vec3<f32>, normal: vec3<f32>) -> u32 {
-    let slot = 1u + 8u * level;
-    let size = vec3<u32>(drawn[slot + 4u], drawn[slot + 5u], drawn[slot + 6u]);
-    if min(size.x, min(size.y, size.z)) == 0u {
-        return 0u;
-    }
-    let origin = vec3<i32>(
-        bitcast<i32>(drawn[slot + 1u]),
-        bitcast<i32>(drawn[slot + 2u]),
-        bitcast<i32>(drawn[slot + 3u]),
-    );
-    let cell_m = bitcast<f32>(drawn[slot + 7u]);
-    let behind = point - normalize(normal) * cell_m * BEHIND_A_FACE;
-    let local = vec3<i32>(floor(behind / cell_m)) - origin;
-    if any(local < vec3<i32>(0)) || any(vec3<u32>(local) >= size) {
-        return 0u;
-    }
-    let l = vec3<u32>(local);
-    let i = (l.z * size.y + l.y) * size.x + l.x;
-    return (drawn[drawn[slot] + i / 16u] >> ((i % 16u) * 2u)) & (SOME | ALL);
-}
-
-// Whether a level finer than `level` draws the Chunk at `point`, which then
-// draws it instead. Usually one lookup: only a partly covered Cell sends the
-// walk a level further down.
-fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
-    var finer = min(level, drawn[0]);
-    while finer > 0u {
-        finer -= 1u;
-        let cover = cover_at(finer, point, normal);
-        if cover == 0u {
-            return false;
-        }
-        if (cover & ALL) != 0u {
-            return true;
-        }
-    }
-    return false;
-}
 
 const TINT_STRENGTH: f32 = 0.55;
 
@@ -117,6 +62,9 @@ const BLOCK_LIGHT_STRENGTH: f32 = 4.0;
 // walls read as shapes and not a void, while a torch is still what lights it. Level 1's was too
 // faint to show rock at all. The sun gets none.
 const UNLIT_AMBIENT: f32 = 0.107;
+
+// The share of screen-space occlusion the sun's light takes as well as the sky's.
+const SUN_OCCLUSION: f32 = 0.5;
 
 // Flat, like the Material index: every vertex of a greedy quad carries the same
 // level because light is part of the merge key, so interpolating would only
@@ -185,6 +133,22 @@ fn fragment(
         );
     }
 
+    let sky = light_level(in.light, 4u);
+
+    // bevy_pbr bounces the occlusion off StandardMaterial's white base_color, before the Material's
+    // colour is multiplied in, which lifts it to almost nothing; bounce it off the real albedo.
+    @if(SCREEN_SPACE_AMBIENT_OCCLUSION) {
+        let ssao_at = vec2<i32>(in.clip_position.xy - view.viewport.xy);
+        let ssao = textureLoad(screen_space_ambient_occlusion_texture, ssao_at, 0i).r;
+        // Faded by sky light, which already darkens what cannot see the sky: a shaded floor is
+        // not occluded twice.
+        let bounced = ssao_multibounce(ssao, pbr_input.material.base_color.rgb);
+        pbr_input.diffuse_occlusion = mix(vec3<f32>(1.0), bounced, sky);
+        // A look choice, not physics: sunlit faces are lit almost wholly by the sun, so occlusion
+        // on the ambient term alone would leave a canopy's creases as flat as before.
+        pbr_input.directional_shadow_factor *= mix(1.0, ssao, SUN_OCCLUSION);
+    }
+
     // Sky light is how much of the sky dome and the sun this face can see, so it
     // drives bevy_pbr's own two occlusion inputs rather than being multiplied
     // into base_color the way Minecraft does it. That keeps albedo as albedo and
@@ -196,7 +160,6 @@ fn fragment(
     // directional_shadow_factor alone would leave the ambient dome lighting a
     // cave past its faint floor. pbr_types.wesl's own doc on that field says "use this for custom
     // shadow maps", which is exactly what a sky-light flood-fill is.
-    let sky = light_level(in.light, 4u);
     pbr_input.diffuse_occlusion *= vec3<f32>(max(sky, UNLIT_AMBIENT));
     pbr_input.directional_shadow_factor *= sky;
 

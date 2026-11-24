@@ -850,8 +850,9 @@ const VIEW_PITCH: f32 = -0.3;
 /// edge between two plugins' systems, which would have to be kept in step.
 ///
 /// One camera draws every level into one depth buffer: the coverage rule in
-/// `chunk_material.wesl` already discards a coarse fragment wherever a finer
-/// level draws, so depth alone decides the rest. See
+/// `coverage.wesl` already discards a coarse fragment wherever a finer level
+/// draws, in the colour pass and the camera's prepass, so depth alone decides
+/// the rest. See
 /// `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
 ///
 /// [`SpawnPoint`]: crate::server::world_state::SpawnPoint
