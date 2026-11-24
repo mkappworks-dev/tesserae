@@ -265,9 +265,10 @@ fn sixteen(cross: u8, branched: bool) -> Vec<SurfaceFeature> {
         },
     ];
     let tree = |trunk_m: (f32, f32), radius, shape: usize| SurfaceTree {
+        storeys: tesserae_core::plant::Storeys::NONE,
         trunk: TRUNK,
         crowding_m: None,
-        canopy: CANOPY,
+        canopy: tesserae_core::plant::Canopies::one(CANOPY),
         trunk_height_m: trunk_m,
         canopy_radius_m: radius,
         fruit: None,
@@ -433,9 +434,10 @@ fn rebearing() {
     use tesserae_core::plant::tree::expected_canopy_cells;
     use tesserae_core::plant::{Fruit, Stage, Tree};
     let oak = |branching| Tree {
+        storeys: tesserae_core::plant::Storeys::NONE,
         trunk: 1,
         crowding_m: None,
-        canopy: 2,
+        canopy: tesserae_core::plant::Canopies::one(2),
         trunk_height_m: (4.0, 6.0),
         canopy_radius_m: 2.5,
         mean_seconds: 60.0,

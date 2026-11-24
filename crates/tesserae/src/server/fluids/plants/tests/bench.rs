@@ -160,7 +160,7 @@ fn sample_tick_cost_per_logical_step() {
                     for v in tree_voxels(&o.tree, SEED, base, 1.0) {
                         let material = if bare && v.part == tesserae_core::plant::tree::Part::Fruit
                         {
-                            o.tree.canopy
+                            o.tree.canopy.first()
                         } else {
                             v.material
                         };

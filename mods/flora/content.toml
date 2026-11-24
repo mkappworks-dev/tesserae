@@ -971,7 +971,7 @@ shape = "flora:cross"
 sapling = "flora:oak_sapling"
 trunk = "flora:oak_log"
 canopy = "flora:oak_leaves"
-trunk-height-m = [10.0, 13.0]
+trunk-height-m = [9.0, 14.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
@@ -1150,6 +1150,11 @@ trunk = "flora:jungle_log"
 canopy = "flora:jungle_leaves"
 trunk-height-m = [18.0, 24.0]
 canopy-radius-m = 5.0
+storeys = [
+  { weight = 0.15, trunk-height-m = [25.0, 27.0], canopy-radius-m = 6.0 },
+  { weight = 0.6, trunk-height-m = [18.0, 24.0], canopy-radius-m = 4.5 },
+  { weight = 0.25, trunk-height-m = [8.0, 12.0], canopy-radius-m = 3.0 },
+]
 mean-seconds = 140.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.12, length-m = 4.0 }
@@ -1188,6 +1193,10 @@ trunk = "flora:swamp_log"
 canopy = "flora:swamp_leaves"
 trunk-height-m = [12.0, 15.0]
 canopy-radius-m = 3.5
+storeys = [
+  { weight = 0.7, trunk-height-m = [12.0, 15.0] },
+  { weight = 0.3, trunk-height-m = [6.0, 9.0], canopy-radius-m = 2.5 },
+]
 mean-seconds = 110.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.2, length-m = 2.0 }

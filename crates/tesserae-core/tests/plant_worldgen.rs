@@ -61,10 +61,11 @@ const BRANCHING: Branching = Branching {
 
 fn oak_with(fruit: bool, branching: Option<Branching>) -> SurfaceTree {
     SurfaceTree {
+        storeys: tesserae_core::plant::Storeys::NONE,
         branching,
         crowding_m: None,
         trunk: TRUNK,
-        canopy: CANOPY,
+        canopy: tesserae_core::plant::Canopies::one(CANOPY),
         trunk_height_m: (3.0, 5.0),
         canopy_radius_m: 2.5,
         vines: None,
@@ -222,6 +223,7 @@ impl Probe {
 fn row_of(fruit: bool, branching: Option<Branching>) -> Tree {
     let o = oak_with(fruit, branching);
     Tree {
+        storeys: tesserae_core::plant::Storeys::NONE,
         vines: None,
         branching,
         crowding_m: None,
@@ -1715,6 +1717,51 @@ fn canopy_cover_takes_a_dense_forests_leaves_and_leaves_sparse_trees_out() {
     );
 }
 
+/// A forest of canopy variants shows one per crown-sized patch, not one per column, drawn from
+/// the column in metres, so the same at another Voxel size.
+#[test]
+fn canopy_cover_shows_one_variant_a_crown_alike_at_every_voxel_size() {
+    let variants = [CANOPY, 216, 217];
+    let cover = |size: f32| {
+        let mut f = tree_feature(3.0, false);
+        if let Some(SurfacePlant {
+            kind: SurfacePlantKind::Tree(tree),
+            ..
+        }) = &mut f.plant
+        {
+            tree.crowding_m = Some(1.0);
+            tree.canopy = tesserae_core::plant::Canopies::new(&variants).unwrap();
+        }
+        let g = Worldgen::new(SEED, size, flat(&[f]));
+        let per_m = (1.0 / size) as i32;
+        let columns: Vec<[i32; 2]> = (0..64)
+            .flat_map(|x| (0..16).map(move |z| [(x - 32) * per_m, (z * 4 - 32) * per_m]))
+            .collect();
+        g.canopy_cover(&g.canopy_shapes(), &columns)
+            .into_iter()
+            .map(|c| c.map(|c| c.material))
+            .collect::<Vec<_>>()
+    };
+    let covered = cover(1.0);
+    assert_eq!(cover(0.5), covered);
+    let drawn: Vec<MaterialId> = covered.into_iter().map(|m| m.expect("covered")).collect();
+    assert!(drawn.iter().all(|m| variants.contains(m)), "{drawn:?}");
+    let shown: std::collections::HashSet<_> = drawn.iter().collect();
+    assert!(shown.len() > 1, "every crown alike");
+    // Columns a metre apart along x: a patch about a crown wide changes at few of them.
+    let changes = drawn
+        .chunks(16)
+        .zip(drawn.chunks(16).skip(1))
+        .flat_map(|(a, b)| a.iter().zip(b))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(
+        changes * 3 < drawn.len(),
+        "{changes} of {} change",
+        drawn.len()
+    );
+}
+
 /// A mixed forest's sparser columns show the next species' leaves where its trees cover at least
 /// half what the dominant species' do, and each column's answer is its own, whatever is asked
 /// beside it.
@@ -1732,7 +1779,7 @@ fn canopy_cover_shades_a_mixed_forests_sparser_columns_by_the_next_species_share
         }) = &mut f.plant
         {
             tree.crowding_m = Some(1.0);
-            tree.canopy = canopy;
+            tree.canopy = tesserae_core::plant::Canopies::one(canopy);
         }
         f
     };

@@ -832,6 +832,28 @@ is wide. From `flora`'s jungle tree:
 crowding-m = 2.0
 ```
 
+`canopy` takes one Material or a list of up to four, alike but for colour: each
+tree grows one, drawn by the World seed and where it stands, so neighbouring
+crowns of one species read as separate trees. Each is a grown Material. A fruit
+picked from a tree leaves the first.
+
+`storeys` splits a row into up to four height bands. Each has a `weight`, its
+share of the row's trees, a `trunk-height-m` and an optional `canopy-radius-m`
+(the row's when absent); each tree belongs to one, drawn like its canopy, so a
+forest has trees above and below its canopy. A storey's `branching` is the
+row's, its reach, lean and lobes scaled by its crown over the row's
+`canopy-radius-m`. Where two trees' crowns meet the taller storey's Voxel
+stands. A row without `storeys` is one band, `trunk-height-m` under
+`canopy-radius-m`. From `flora`'s swamp tree:
+
+```toml
+canopy = ["flora:swamp_leaves", "flora:swamp_leaves_dark", "flora:swamp_leaves_light"]
+storeys = [
+  { weight = 0.7, trunk-height-m = [12.0, 15.0] },
+  { weight = 0.3, trunk-height-m = [6.0, 9.0], canopy-radius-m = 2.5 },
+]
+```
+
 A `column` adds one Voxel at the end of its run, `direction` up or down, to
 `max-height-m` (up to 32), one every `mean-seconds`. `stands-in` names the fluid
 it grows through and stands waterlogged in (kelp); omitted, it grows in Air.

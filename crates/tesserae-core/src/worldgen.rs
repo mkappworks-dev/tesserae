@@ -38,8 +38,10 @@ use crate::loot::LootTable;
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm3_cached, fbm3_range};
 use crate::ore::{OreCells, OreField, OreMask, OreTable};
-use crate::plant::tree::{Part, fruit_stage, tree_voxels, vine_voxels};
-use crate::plant::{CountRange, Fruit, Stage, Tree, first_fruit_offsets};
+use crate::plant::tree::{
+    Part, canopy_at, canopy_of, fruit_stage, storey_band, tree_voxels, vine_voxels,
+};
+use crate::plant::{Band, CountRange, Fruit, Stage, Tree, first_fruit_offsets};
 use crate::settlement::Settlement;
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
@@ -737,6 +739,8 @@ struct CanopyShape {
     area_m2: f32,
     top_m: f32,
     crowding_m: f32,
+    /// A crown's mean width, in metres alone so a variant's patch is the same at every size.
+    crown_m: f32,
 }
 
 /// Each tree feature's crown, by Biome and feature: see [`Worldgen::canopy_shapes`].
@@ -3081,8 +3085,9 @@ impl Worldgen {
             && self.crowded(
                 scatter,
                 [gx, gz],
-                tree.crowding_m
-                    .unwrap_or(CROWN_SPACING * tree.canopy_radius_m),
+                tree.crowding_m.unwrap_or(
+                    CROWN_SPACING * self.tree_band(&tree, standing.base).canopy_radius_m,
+                ),
             )
         {
             return None;
@@ -3321,6 +3326,7 @@ impl Worldgen {
         Tree {
             trunk: tree.trunk,
             canopy: tree.canopy,
+            storeys: tree.storeys,
             trunk_height_m: tree.trunk_height_m,
             canopy_radius_m: tree.canopy_radius_m,
             branching: tree.branching,
@@ -3346,6 +3352,20 @@ impl Worldgen {
                 shape: (f.shape != SHAPE_FULL_CUBE).then_some(f.shape),
             }),
         }
+    }
+
+    /// The storey the tree standing at `base` grows, drawn from its column at the ground's height 0
+    /// as [`Self::tree_cells`] grows it.
+    fn tree_band(&self, tree: &SurfaceTree, base: [i32; 3]) -> Band {
+        let seed = u64::from(self.seed);
+        let column = [base[0], 0, base[2]];
+        storey_band(
+            &tree.storeys,
+            tree.own_band(),
+            seed,
+            column,
+            self.voxel_size,
+        )
     }
 
     /// Every Voxel of the tree standing at `base`, fully grown, with the fruit at hash-drawn
@@ -3490,7 +3510,8 @@ impl Worldgen {
                     if base[1] + rise < origin[1] {
                         continue;
                     }
-                    trees.push((tree.trunk, self.tree_cells(&tree, base)));
+                    let tall_m = self.tree_band(&tree, base).trunk_height_m.1;
+                    trees.push((tall_m, tree.trunk, self.tree_cells(&tree, base)));
                     hung.extend(self.vine_cells(&tree, base));
                 }
                 SurfacePlantKind::Vine(vine) => {
@@ -3508,9 +3529,12 @@ impl Worldgen {
                 _ => {}
             }
         }
+        // Where crowns meet, the taller storey's Voxel wins; stable, so of two alike the first in
+        // the fixed order wins, as from every Chunk.
+        trees.sort_by(|a, b| b.0.total_cmp(&a.0));
         // A trunk is never left with a hole where a neighbour's canopy got there first.
         for trunks in [true, false] {
-            for (trunk, cells) in &trees {
+            for (_, trunk, cells) in &trees {
                 for &(at, voxel) in cells {
                     if (voxel.material() == *trunk) == trunks {
                         put(chunk, at, voxel, None);
@@ -3561,20 +3585,27 @@ impl Worldgen {
         };
         let mut parts: HashMap<[i32; 3], TreePart> = HashMap::new();
         let seed = u64::from(self.seed);
-        for standing in self.plants_on(
-            &scatter,
-            [min[0] - margin, min[2] - margin],
-            [max[0] + margin - 1, max[2] + margin - 1],
-        ) {
-            let SurfacePlantKind::Tree(tree) = standing.plant.kind else {
-                continue;
-            };
-            let base = standing.base;
-            if base[1] >= max[1] || base[1] + rise < min[1] {
-                continue;
-            }
+        let mut trees: Vec<(f32, SurfaceTree, [i32; 3])> = self
+            .plants_on(
+                &scatter,
+                [min[0] - margin, min[2] - margin],
+                [max[0] + margin - 1, max[2] + margin - 1],
+            )
+            .into_iter()
+            .filter_map(|standing| match standing.plant.kind {
+                SurfacePlantKind::Tree(tree) => Some((tree, standing.base)),
+                _ => None,
+            })
+            .filter(|(_, base)| base[1] < max[1] && base[1] + rise >= min[1])
+            .map(|(tree, base)| (self.tree_band(&tree, base).trunk_height_m.1, tree, base))
+            .collect();
+        // Level 0's order: the taller storey first.
+        trees.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for (_, tree, base) in trees {
             let row = Self::tree_of(&tree);
-            for v in tree_voxels(&row, seed, [base[0], 0, base[2]], self.voxel_size) {
+            let column = [base[0], 0, base[2]];
+            let canopy = canopy_of(&row, seed, column, self.voxel_size);
+            for v in tree_voxels(&row, seed, column, self.voxel_size) {
                 let at = [v.at[0], v.at[1] + base[1], v.at[2]];
                 if !inside(at) || !open(at) {
                     continue;
@@ -3587,7 +3618,7 @@ impl Worldgen {
                     },
                     Part::Canopy | Part::Fruit => TreePart {
                         at,
-                        material: tree.canopy,
+                        material: canopy,
                         canopy: true,
                     },
                 };
@@ -3626,12 +3657,12 @@ impl Worldgen {
                 top += (highest - base[1] + 1) as f32 * size;
             }
             let n = CANOPY_SAMPLES as f32;
+            let radius_m = tree.storeys.mean_canopy_radius_m(tree.own_band());
             CanopyShape {
                 area_m2: area / n,
                 top_m: top / n,
-                crowding_m: tree
-                    .crowding_m
-                    .unwrap_or(CROWN_SPACING * tree.canopy_radius_m),
+                crowding_m: tree.crowding_m.unwrap_or(CROWN_SPACING * radius_m),
+                crown_m: 2.0 * radius_m,
             }
         };
         CanopyShapes(
@@ -3756,10 +3787,15 @@ impl Worldgen {
             .iter()
             .find(|t| t.1.canopy != tree.canopy)
             .filter(|t| 2.0 * t.0 >= lead)
-            .map_or(tree.canopy, |t| t.1.canopy);
+            .map_or((tree, shape), |t| (t.1, t.2));
+        // One variant per crown-sized cell, so a coarse level's crowns are not a speckle.
+        let variant = |tree: &SurfaceTree, shape: CanopyShape| {
+            let cell = [x_m, z_m].map(|m| (m / shape.crown_m).floor() as i32);
+            canopy_at(&tree.canopy, u64::from(self.seed), cell, shape.crown_m)
+        };
         let canopy = Canopy {
-            material: tree.canopy,
-            sparse,
+            material: variant(tree, shape),
+            sparse: variant(sparse.0, sparse.1),
             top_m: shape.top_m,
             // Crowns still overlap where crowding lets them, as scattered discs do.
             cover: (1.0 - libm::exp(-cover)) as f32,

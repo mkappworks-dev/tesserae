@@ -75,7 +75,10 @@ fn laid(loaded: &LoadedMods) -> HashSet<MaterialId> {
                 SurfacePlantKind::Column { material, .. } => {
                     laid.insert(material);
                 }
-                SurfacePlantKind::Tree(tree) => laid.extend([tree.trunk, tree.canopy]),
+                SurfacePlantKind::Tree(tree) => {
+                    laid.insert(tree.trunk);
+                    laid.extend(tree.canopy.as_slice());
+                }
                 SurfacePlantKind::Vine(vine) => {
                     laid.insert(vine.material);
                     laid.extend(&vine.fruit[..usize::from(vine.len)]);
