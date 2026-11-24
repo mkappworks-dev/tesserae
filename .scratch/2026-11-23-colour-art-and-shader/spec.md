@@ -63,7 +63,7 @@ tuft and flower (its leaves are cutout), `strata` the rock, `timber` and
 
 ## Solution
 
-Five tickets, judged on the baseline captures, before and after:
+Six tickets, judged on the baseline captures, before and after:
 
 1. **Art pass** over Terra's `textures.rs` and `building.rs`, its appearance
    colours and Biome sky and fog colours, and the PNGs of the Mods Terra ships
@@ -78,6 +78,8 @@ Five tickets, judged on the baseline captures, before and after:
 4. **Screen-space ambient occlusion**, landed only if it fits the frame budget.
 5. **Tree variety:** storeys, canopy variants and wider jungle and swamp
    spacing, so a forest reads as separate trees.
+6. **Loading terrain draws black:** a bug on `main` found in the captures; far
+   terrain that is still loading draws black with orange dots.
 
 Every value is a look decision: the user approves it on a capture before it
 lands.
@@ -118,6 +120,10 @@ lands.
     blue, its warmth kept in the fog. Every Biome's fog stays lighter than its
     sky, and the clear colour moves with it.
   - No saturation change underground; the cave reads muted already.
+- The Mods' PNGs are the plant art. Terra's `sprite()` drawings and its stale
+  tree aliases are deleted: a Game's appearance row only reaches its own
+  Materials, so nothing Terra declares used them. Thicker wheat is drawn in
+  `crops`' PNGs.
 - A Material's appearance colour is its tile's linear mean (grass: its top),
   set after the pattern changes. Terra's are tested; the Mods' `content.toml`
   colours are set by hand from the same measure.
