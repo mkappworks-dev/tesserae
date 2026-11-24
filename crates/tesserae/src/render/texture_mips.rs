@@ -236,7 +236,7 @@ mod tests {
     fn a_checkerboard_averages_to_its_linear_mean() {
         let tile: Vec<u8> = (0..EDGE * EDGE)
             .flat_map(|i| {
-                let v = if (i % EDGE + i / EDGE) % 2 == 0 {
+                let v = if (i % EDGE + i / EDGE).is_multiple_of(2) {
                     0
                 } else {
                     255
