@@ -481,6 +481,8 @@ struct Level {
     /// Level 1 only: changed under while level 0 draws all eight children. See [`catch_up`].
     deferred: Marks<LodCause>,
     delivered: HashSet<ChunkCoord>,
+    /// Meshed and not yet sent: see [`send_withheld`].
+    withheld: HashMap<ChunkCoord, ChunkMesh>,
     generated: Counts<LodCause>,
     meshed: Counts<LodCause>,
     #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -578,7 +580,9 @@ impl LodState {
 
     #[cfg(test)]
     pub(in crate::server) fn any_pending(&self) -> bool {
-        self.levels.iter().any(|l| l.pending || l.mesh_pending)
+        self.levels
+            .iter()
+            .any(|l| l.pending || l.mesh_pending || !l.withheld.is_empty())
     }
 
     #[cfg(test)]
@@ -1674,7 +1678,7 @@ pub(in crate::server) fn stream_lod(
         &plans, &mut store, &mut state, &mut jobs, &budget, &priority, reach,
     );
     land_meshes(
-        &plans, &mut state, &mut jobs, &mut ready, &budget, &priority,
+        &plans, &store, &mut state, &mut jobs, &mut ready, &budget, &priority,
     );
     let in_level_zero = |c: ChunkCoord| {
         let load = Rings::new(*settings, world.cell_size()).load;
@@ -1759,6 +1763,17 @@ fn retire(
             });
             // Still held, and nothing else will mesh it again if the Eye comes
             // back.
+            level.dirty.insert(coord, LodCause::Moved);
+        }
+
+        let left: Vec<ChunkCoord> = level
+            .withheld
+            .keys()
+            .copied()
+            .filter(|&c| !plan.rings.keep.contains(delta(plan.anchor, c)))
+            .collect();
+        for coord in left {
+            level.withheld.remove(&coord);
             level.dirty.insert(coord, LodCause::Moved);
         }
 
@@ -1903,6 +1918,7 @@ fn catch_up(
         .iter()
         .partition(|&&c| drawn_by_level_zero(meshes, c));
     for coord in waiting {
+        level.withheld.remove(&coord);
         if level.delivered.remove(&coord) {
             #[cfg(any(feature = "dev", feature = "profiling"))]
             level.sizes.remove(&coord);
@@ -1916,6 +1932,7 @@ fn catch_up(
         // Its regeneration landing marks it again; meshed before that, or by a job dispatched
         // before the change, it would show the Chunk from before the change.
         level.dirty.remove(&coord);
+        level.withheld.remove(&coord);
         jobs.mesh.retain(|key| key != (1, coord));
         mark_cover(store, state, jobs, (1, coord), reach, cause);
     }
@@ -1927,6 +1944,7 @@ fn catch_up(
 /// than a mesh builds.
 fn land_meshes(
     plans: &[Plan],
+    store: &LodStore,
     state: &mut LodState,
     jobs: &mut LodJobs,
     ready: &mut MessageWriter<LodMeshReady>,
@@ -1955,13 +1973,89 @@ fn land_meshes(
         if lv.dirty.contains(&coord) {
             jobs.mesh.note_stale();
         }
-        #[cfg(any(feature = "dev", feature = "profiling"))]
-        if crate::cost::collecting() {
-            lv.sizes.insert(coord, measure::MeshSize::of(&mesh));
-        }
-        ready.write(LodMeshReady { level, coord, mesh });
-        lv.delivered.insert(coord);
+        lv.withheld.insert(coord, mesh);
     }
+    send_withheld(plans, store, state, ready);
+}
+
+/// Sends the withheld meshes no gap borders: a gap is a face neighbour in the mesh shell that is
+/// neither sent nor air, nor drawn by a coarser level. Sent beside one, a Chunk is seen through
+/// it, where the ground or water over a cave or a lake bed will be, and the bed, lit dark as it
+/// lies, drew as black terrain while the level loaded. So a level's ground arrives in whole
+/// groups, and its first only once every neighbour of the group is meshed.
+fn send_withheld(
+    plans: &[Plan],
+    store: &LodStore,
+    state: &mut LodState,
+    ready: &mut MessageWriter<LodMeshReady>,
+) {
+    for plan in plans {
+        let Some(level) = state.levels.get(Plan::index(plan.level)) else {
+            continue;
+        };
+        let drawn_coarser = |coord: ChunkCoord| {
+            let mut covering = coord;
+            (plan.level + 1..=plans.len() as u32).any(|coarser| {
+                covering = covering.parent();
+                state
+                    .levels
+                    .get(coarser as usize - 1)
+                    .is_some_and(|lv| lv.delivered.contains(&covering))
+            })
+        };
+        let filled = |n: ChunkCoord| {
+            !plan.rings.mesh.contains(delta(plan.anchor, n))
+                || level.delivered.contains(&n)
+                || level.deferred.contains(&n)
+                || store.shown(plan.level, n).is_some_and(|s| is_air(&s))
+                || drawn_coarser(n)
+        };
+        // Sent, a withheld neighbour of a blocked Chunk would border the gap that one leaves.
+        let mut blocked: Vec<ChunkCoord> = level
+            .withheld
+            .keys()
+            .copied()
+            .filter(|&c| {
+                face_neighbors(c)
+                    .into_iter()
+                    .any(|n| !level.withheld.contains_key(&n) && !filled(n))
+            })
+            .collect();
+        let mut held_back: HashSet<ChunkCoord> = blocked.iter().copied().collect();
+        while let Some(c) = blocked.pop() {
+            for n in face_neighbors(c) {
+                if level.withheld.contains_key(&n) && held_back.insert(n) {
+                    blocked.push(n);
+                }
+            }
+        }
+        let due: Vec<ChunkCoord> = level
+            .withheld
+            .keys()
+            .copied()
+            .filter(|c| !held_back.contains(c))
+            .collect();
+        let lv = state.level_mut(plan.level);
+        for coord in due {
+            let Some(mesh) = lv.withheld.remove(&coord) else {
+                continue;
+            };
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            if crate::cost::collecting() {
+                lv.sizes.insert(coord, measure::MeshSize::of(&mesh));
+            }
+            ready.write(LodMeshReady {
+                level: plan.level,
+                coord,
+                mesh,
+            });
+            lv.delivered.insert(coord);
+        }
+    }
+}
+
+fn is_air(shown: &Shown) -> bool {
+    shown.chunk.uniform().is_some_and(|v| v.is_air()) && !shown.overlay.may_contain_fluid()
 }
 
 #[expect(
@@ -3655,6 +3749,53 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_micros(100));
         }
         assert_eq!(delivered, all_shells(&h).len());
+    }
+
+    /// Mid-load, a lake bed sent before the Chunk beside it that holds the water showed black,
+    /// as level 0 lights a bed that deep, through the gap where the water would be. Sent beside
+    /// a Chunk meshed but not sent, it showed the same, a Chunk further on.
+    #[test]
+    fn no_chunk_is_sent_beside_ground_its_level_has_not_sent() {
+        let mut h = harness_with(lod_settings(), unlimited());
+        {
+            let mut jobs = h.app.world_mut().resource_mut::<LodJobs>();
+            jobs.generate.scramble = true;
+            jobs.mesh.scramble = true;
+        }
+        let shells = all_shells(&h);
+        let mut sent: HashSet<LodKey> = HashSet::default();
+        let started = std::time::Instant::now();
+        loop {
+            assert!(started.elapsed() < SETTLE_CEILING, "never went quiet");
+            let (ready, _) = h.lod_tick();
+            sent.extend(ready.iter().map(|m| (m.level, m.coord)));
+            for m in &ready {
+                let level = &h.lod_state().levels[m.level as usize - 1];
+                for n in face_neighbors(m.coord) {
+                    let mut covering = (m.level, n);
+                    let filled = !shells.contains(&covering)
+                        || sent.contains(&covering)
+                        || level.deferred.contains(&n)
+                        || h.lod_store()
+                            .shown(m.level, n)
+                            .is_some_and(|shown| is_air(&shown))
+                        || (m.level + 1..LEVELS).any(|coarser| {
+                            covering = (coarser, covering.1.parent());
+                            sent.contains(&covering)
+                        });
+                    assert!(
+                        filled,
+                        "level {} {} was sent beside {n}, not yet sent",
+                        m.level, m.coord
+                    );
+                }
+            }
+            if h.lod_quiet() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        assert!(shells.is_subset(&sent), "and everything is still sent");
     }
 
     #[test]
