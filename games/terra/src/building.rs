@@ -6,7 +6,7 @@ use crate::tesserae::mods::content::{
     Appearance, MaterialDef, Occlusion, RecipeDef, RecipeStack, RenderClass, VoxelUse, VoxelUseKind,
 };
 use crate::tesserae::mods::types::Srgba;
-use crate::textures::noise;
+use crate::textures::{albedo, cells, mean, noise};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Pattern {
@@ -221,7 +221,8 @@ pub(crate) fn appearance() -> Vec<Appearance> {
     BLOCKS
         .iter()
         .map(|b| {
-            let [r, g, bl] = rgb(b.main).map(|c| c as u8);
+            let texture = texture(b);
+            let [r, g, bl] = mean(&texture, 0..3);
             Appearance {
                 material: b.name.into(),
                 color: Srgba {
@@ -230,7 +231,7 @@ pub(crate) fn appearance() -> Vec<Appearance> {
                     b: bl,
                     a: 255,
                 },
-                texture: Some(texture(b)),
+                texture: Some(texture),
             }
         })
         .collect()
@@ -278,9 +279,12 @@ fn texture(b: &Block) -> Vec<u8> {
     for y in 0..EDGE {
         for face in 0..3 {
             for x in 0..EDGE {
-                let n = noise(x, y, salt.wrapping_add(face)) as f32 / 255.0 * 0.08 - 0.04;
+                let coarse = cells(x, y, 2, salt.wrapping_add(face + 3)) as f32 / 255.0 * 0.08;
+                let fine = noise(x, y, salt.wrapping_add(face)) as f32 / 255.0 * 0.04;
+                let n = coarse - 0.04 + fine - 0.02;
                 let (colour, k) = texel(b.pattern, b.main, b.second, x, y, face != 1, n);
-                let [r, g, bl] = rgb(colour).map(|c| (c * k).clamp(0.0, 255.0) as u8);
+                let lit = rgb(colour).map(|c| (c * k).clamp(0.0, 255.0) as u8);
+                let [r, g, bl] = if colour == GLOW { lit } else { albedo(lit) };
                 pixels.extend_from_slice(&[r, g, bl, 255]);
             }
         }
@@ -304,6 +308,13 @@ fn hash(values: &[i32]) -> f32 {
     (h % 1000) as f32 / 1000.0
 }
 
+/// How far texel `v` is from `p` across a tile that repeats, so a stone at one edge continues at
+/// the other.
+fn around(v: usize, p: f32) -> f32 {
+    let d = (v % 16) as f32 - p;
+    d - 16.0 * (d / 16.0).round()
+}
+
 const COBBLES: [(f32, f32); 9] = [
     (2.0, 3.0),
     (9.0, 1.0),
@@ -321,10 +332,10 @@ fn texel(pattern: Pattern, c1: u32, c2: u32, x: usize, y: usize, top: bool, n: f
     let (xi, yi) = (x as i32, y as i32);
     match pattern {
         Planks => {
-            let row = yi >> 2;
+            let row = (yi >> 2) & 3;
             if y % 4 == 3 {
                 (c1, 0.62)
-            } else if xi == (row * 5 + 3) % 16 {
+            } else if xi & 15 == (row * 5 + 3) % 16 {
                 (c1, 0.7)
             } else {
                 (c1, 0.9 + hash(&[row, 7]) * 0.16 + n)
@@ -341,7 +352,7 @@ fn texel(pattern: Pattern, c1: u32, c2: u32, x: usize, y: usize, top: bool, n: f
             } else if (x + (y >> 2)) % 4 == 0 {
                 (c1, 0.68 + n)
             } else {
-                (c1, 0.92 + hash(&[xi, 3]) * 0.14 + n)
+                (c1, 0.92 + hash(&[xi & 15, 3]) * 0.14 + n)
             }
         }
         Bricks => {
@@ -350,7 +361,7 @@ fn texel(pattern: Pattern, c1: u32, c2: u32, x: usize, y: usize, top: bool, n: f
             if y % 4 == 3 || shifted % 8 == 7 {
                 (c2, 0.95 + n)
             } else {
-                (c1, 0.84 + hash(&[shifted >> 3, row]) * 0.22 + n)
+                (c1, 0.84 + hash(&[(shifted >> 3) & 1, row & 3]) * 0.22 + n)
             }
         }
         Ashlar => {
@@ -359,14 +370,15 @@ fn texel(pattern: Pattern, c1: u32, c2: u32, x: usize, y: usize, top: bool, n: f
             if y % 8 == 7 || shifted % 16 == 15 {
                 (c2, 0.9 + n)
             } else {
-                (c1, 0.9 + hash(&[shifted >> 4, row]) * 0.12 + n)
+                // One stone per course per tile: the halves either side of the edge are one stone.
+                (c1, 0.9 + hash(&[0, row & 1]) * 0.12 + n)
             }
         }
         Cobble => {
             let mut ds: Vec<(f32, i32)> = COBBLES
                 .iter()
                 .enumerate()
-                .map(|(i, &(px, py))| ((x as f32 - px).hypot(y as f32 - py), i as i32))
+                .map(|(i, &(px, py))| (around(x, px).hypot(around(y, py)), i as i32))
                 .collect();
             ds.sort_by(|a, b| a.0.total_cmp(&b.0));
             if ds[1].0 - ds[0].0 < 1.1 {
@@ -394,30 +406,31 @@ fn texel(pattern: Pattern, c1: u32, c2: u32, x: usize, y: usize, top: bool, n: f
             } else if shifted % 4 == 0 {
                 (c1, 0.72)
             } else {
-                (c1, 0.85 + hash(&[shifted >> 2, row]) * 0.25 + n)
+                (c1, 0.85 + hash(&[(shifted >> 2) & 3, row & 3]) * 0.25 + n)
             }
         }
         Thatch => {
-            if !top && y % 6 == 5 {
+            if !top && y % 8 == 7 {
                 (c1, 0.68)
             } else {
-                (
-                    c1,
-                    0.78 + hash(&[xi, if top { yi >> 1 } else { 1 }]) * 0.3 + n * 2.0,
-                )
+                let course = if top { (yi >> 1) & 7 } else { 1 };
+                (c1, 0.78 + hash(&[xi & 15, course]) * 0.3 + n * 2.0)
             }
         }
         Plaster => (c1, 0.94 + n),
         Slate => {
-            let row = yi / 3;
-            let shifted = xi + (row % 2) * 3;
-            if y % 3 == 2 {
+            let row = yi >> 2;
+            let shifted = xi + (row % 2) * 4;
+            if y % 4 == 3 {
                 (c1, 0.6)
-            } else if shifted % 6 == 0 {
+            } else if shifted % 8 == 0 {
                 (c1, 0.75)
             } else {
-                let lip = if y % 3 == 0 { 0.08 } else { 0.0 };
-                (c1, 0.88 + hash(&[shifted / 6, row]) * 0.2 + lip + n)
+                let lip = if y % 4 == 0 { 0.08 } else { 0.0 };
+                (
+                    c1,
+                    0.88 + hash(&[(shifted >> 3) & 1, row & 3]) * 0.2 + lip + n,
+                )
             }
         }
         Cloth => (
@@ -481,6 +494,43 @@ fn texel(pattern: Pattern, c1: u32, c2: u32, x: usize, y: usize, top: bool, n: f
                 }
             } else {
                 texel(Bricks, c1, c2, x, y, top, n)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Drawing past the tile's edge continues the pattern into the next Voxel's tile, which must
+    /// match that tile's own start. Stations and a log's end grain are drawn once per tile.
+    #[test]
+    fn every_period_bound_pattern_tiles_across_a_voxel_edge() {
+        let repeating = [
+            Planks, Log, Bricks, Ashlar, Cobble, Tiles, Shingles, Thatch, Plaster, Slate, Cloth,
+        ];
+        for pattern in repeating {
+            for top in [false, true] {
+                if pattern == Log && top {
+                    continue;
+                }
+                let at = |x, y| texel(pattern, 0xb88a54, 0x5e5e5a, x, y, top, 0.0);
+                for y in 0..16 {
+                    for x in 0..16 {
+                        let face = if top { "top" } else { "side" };
+                        assert_eq!(
+                            at(x + 16, y),
+                            at(x, y),
+                            "{pattern:?} {face} at x {x}, y {y}"
+                        );
+                        assert_eq!(
+                            at(x, y + 16),
+                            at(x, y),
+                            "{pattern:?} {face} at x {x}, y {y}"
+                        );
+                    }
+                }
             }
         }
     }

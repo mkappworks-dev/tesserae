@@ -154,11 +154,22 @@ fn marker(name: &str, icon: MarkerIcon, [r, g, b]: [u8; 3]) -> MarkerKindDef {
     }
 }
 
-pub(crate) fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
+/// `base` is the colour its pattern is painted from; the map and untextured draws show the tile's
+/// mean, so they agree with the textured surface.
+pub(crate) fn appearance(material: &str, base: [u8; 4]) -> Appearance {
+    let texture = textures::texture(material, base);
+    // A grass block is seen from above.
+    let faces = if material == "grass" { 0..1 } else { 0..3 };
+    let [r, g, b] = textures::mean(&texture, faces);
     Appearance {
         material: material.into(),
-        color: Srgba { r, g, b, a },
-        texture: Some(textures::texture(material, [r, g, b, a])),
+        color: Srgba {
+            r,
+            g,
+            b,
+            a: base[3],
+        },
+        texture: Some(texture),
     }
 }
 
