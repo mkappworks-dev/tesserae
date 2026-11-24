@@ -4,7 +4,8 @@ Status: ready-for-agent
 
 Source: branch `fix/texture-shimmer-and-saturation`, cut from `main` at
 `2f45144f`. Tickets: [issues/](issues/). The saturation half of the same report
-is its own spec, [Colour, art and shader](../2026-11-23-colour-art-and-shader/spec.md).
+is its own spec,
+[Colour, art and shader](../2026-11-23-colour-art-and-shader/spec.md).
 
 ## Problem Statement
 
@@ -34,24 +35,28 @@ What the code does today, read from source:
 
 ## Solution
 
-1. **Baseline captures** on `main`, offscreen, at fixed Eyes: a near view, a
-   far view across level 0 into coarse levels, a moving pair for shimmer, and
-   a cave lit by block light. Every later ticket, in this spec and the colour
-   one, is judged against them.
+1. **Baseline captures** on `main`, offscreen, at fixed Eyes: a near view, a far
+   view across level 0 into coarse levels, a moving pair for shimmer, and a cave
+   lit by block light. Every later ticket, in this spec and the colour one, is
+   judged against them.
 2. **Mipmapped Material textures.** Move the atlas to a 2D texture array, one
    layer per Material face, so each layer is a 16x16 tile with its own full mip
    chain (16, 8, 4, 2, 1) and no neighbour to bleed into. Mips are built on the
    CPU when the textures arrive, averaged in linear space with alpha-weighted
-   colour so cutout leaves do not darken at distance, then alpha scaled per mip
-   to keep mip 0's coverage at the cutoff. wgpu refuses anisotropy unless every
-   filter is linear, so the sampler is all-linear with repeat addressing and 16x
-   anisotropy, and the pixel-art look up close comes from the shader: where the
-   mip level is at or below 0 it snaps the UV to the texel centre, which linear
-   filtering returns unblended. The shader takes `dpdx`/`dpdy` of the
-   continuous UV at the top of the fragment, before any branch or discard, and
-   samples with `textureSampleGrad`; repeat addressing per layer replaces
-   `fract`, so merged quads get the right mip with no seam. The inset goes
-   away. Item models and tile icons, which share the atlas, move with it.
+   colour so cutout leaves do not darken at distance, then alpha scaled up per
+   mip so coverage at the cutoff never falls below mip 0's. wgpu refuses
+   anisotropy unless every filter is linear, so the sampler is all-linear with
+   repeat addressing and 16x anisotropy, and the pixel-art look up close comes
+   from the shader: along each texture axis where a pixel covers less than a
+   texel, it holds the UV at the texel centre, which linear filtering returns
+   unblended, and crosses each texel edge within one pixel. A grazing view,
+   minified along one axis and magnified along the other, stays crisp along the
+   magnified one. The shader takes `dpdx`/`dpdy` of the continuous UV at the top
+   of the fragment, before any branch or discard, and samples with
+   `textureSampleGrad`; repeat addressing per layer replaces `fract`, so merged
+   quads get the right mip with no seam. The inset goes away. Item models and
+   tile icons keep the 2D atlas: held models use `StandardMaterial`, which
+   cannot sample an array, and both are seen up close.
 
 ## Decisions
 
@@ -59,24 +64,27 @@ What the code does today, read from source:
   read as nearest. Only distance filters.
 - One all-linear sampler with 16x anisotropy and the texel snap, kept only if
   the `flight` fixture's GPU frame time does not regress beyond noise.
-- Texture arrays over a padded atlas: padding still bleeds at the small mips
-  and wastes memory; an array layer cannot bleed.
+- Texture arrays over a padded atlas: padding still bleeds at the small mips and
+  wastes memory; an array layer cannot bleed.
 - Mips are built on the Client, not shipped by Mods: a Mod sends 16x16 tiles as
   today and the WIT contract does not change. Bevy's GPU mip generator takes no
   sRGB format and cannot preserve coverage, so it is not an option.
-- Leaves keep mip 0's coverage at every mip.
+- Leaves never drop below mip 0's coverage, but may rise above it: sparse
+  foliage does not thin out, and dense leaves (Flora's are about a quarter
+  holes) fill in at a distance instead of speckling. Chosen by the user on
+  2026-11-24 over holding coverage exactly, from ticket 02's captures.
 - Fixed engine behaviour, not a Settings entry.
-- No TAA. It would also help shimmer, but it ghosts on fast flight and costs
-  GPU the frame does not have; mips fix the cause.
+- No TAA. It would also help shimmer, but it ghosts on fast flight and costs GPU
+  the frame does not have; mips fix the cause.
 - Terra's art is not changed here; the colour spec owns it, so this PR's before
   and after differ only in sampling.
 
 ## Testing
 
-- Unit tests for the mip builder: a uniform tile stays uniform at every level;
-  a checkerboard averages to its mean; a half-transparent cutout tile keeps its
+- Unit tests for the mip builder: a uniform tile stays uniform at every level; a
+  checkerboard averages to its mean; a half-transparent cutout tile keeps its
   colour; sparse foliage keeps mip 0's coverage at 4x4 and 2x2 within a
-  tolerance.
+  tolerance; dense foliage fills in.
 - The textured-slot bitmask and alpha mode per slot keep their current tests.
 - Capture comparisons from ticket 01's Eyes, before and after, reviewed by eye.
 - GPU frame time on the `flight` fixture must not regress beyond noise

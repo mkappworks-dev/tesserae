@@ -24,12 +24,16 @@ const ALPHA_FLOOR: f32 = 1.0 / 256.0;
 /// The most a level's alpha is scaled by to keep its coverage.
 const MAX_ALPHA_SCALE: f32 = 4.0;
 
+/// Never below one: a dense cutout's holes close up at a distance instead of
+/// being held open, which is what makes them speckle as the camera moves.
+const MIN_ALPHA_SCALE: f32 = 1.0;
+
 type Texel = [f32; 4];
 
 /// `tile`, `EDGE` square sRGB RGBA, and its mips, largest first. Colour is
 /// averaged in linear space, weighted by alpha so a cutout's transparent texels
-/// do not darken its edge. With a `cutoff`, each level's alpha is scaled so the
-/// share of the face that passes the cutoff stays mip 0's.
+/// do not darken its edge. With a `cutoff`, each level's alpha is scaled up so
+/// the share of the face that passes the cutoff does not fall below mip 0's.
 pub fn mip_chain(tile: &[u8], cutoff: Option<f32>) -> Vec<u8> {
     assert_eq!(tile.len(), EDGE * EDGE * 4, "one face");
     let mut level: Vec<Texel> = tile
@@ -102,7 +106,7 @@ fn encode(t: Texel, alpha_scale: f32) -> [u8; 4] {
 /// The scale whose coverage is nearest `target`, by bisection: coverage only
 /// grows with the scale.
 fn alpha_scale(level: &[Texel], edge: usize, cutoff: f32, target: f32) -> f32 {
-    let (mut lo, mut hi) = (0.0, MAX_ALPHA_SCALE);
+    let (mut lo, mut hi) = (MIN_ALPHA_SCALE, MAX_ALPHA_SCALE);
     for _ in 0..20 {
         let mid = (lo + hi) / 2.0;
         if coverage(level, edge, cutoff, mid) < target {
@@ -233,6 +237,20 @@ mod tests {
         let one = texels(levels(&chain)[LEVELS as usize - 1])[0];
         for c in 0..3 {
             assert!(one[c].abs_diff(green[c]) <= 2, "{one:?} against {green:?}");
+        }
+    }
+
+    #[test]
+    fn dense_foliage_closes_its_holes_at_a_distance() {
+        // Leaves with a hole in four texels: averaging already passes the cutoff.
+        let tile: Vec<u8> = (0..(EDGE * EDGE) as u32)
+            .flat_map(|i| [40, 110, 30, if i % 4 == 1 { 0 } else { 255 }])
+            .collect();
+        let chain = mip_chain(&tile, Some(0.5));
+        let levels = levels(&chain);
+        assert_eq!(counted(levels[0], 0.5), 0.75);
+        for level in &levels[2..] {
+            assert_eq!(counted(level, 0.5), 1.0);
         }
     }
 

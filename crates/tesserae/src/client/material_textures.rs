@@ -194,8 +194,8 @@ pub(super) fn receive(
 fn face_array(atlas: &[u8], alpha: &[AlphaMode; ROWS]) -> Image {
     let mut data = Vec::with_capacity(LAYERS * CHAIN_BYTES);
     let mut tile = Vec::with_capacity(EDGE * EDGE * 4);
-    for slot in 0..ROWS {
-        let cutoff = match alpha[slot] {
+    for (slot, mode) in alpha.iter().enumerate() {
+        let cutoff = match *mode {
             AlphaMode::Mask(cutoff) => Some(cutoff),
             _ => None,
         };
@@ -404,7 +404,7 @@ mod tests {
         app.init_resource::<Assets<Image>>().add_plugins(plugin);
         let mut leaves = vec![255; MATERIAL_TEXTURE_BYTES];
         for (i, texel) in leaves.chunks_mut(4).enumerate() {
-            texel[3] = if i % 3 == 0 { 255 } else { 0 };
+            texel[3] = if i.is_multiple_of(3) { 255 } else { 0 };
         }
         app.world_mut()
             .write_message(MaterialTextures(vec![(23, leaves)]));
