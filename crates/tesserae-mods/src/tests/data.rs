@@ -151,6 +151,7 @@ fn component() -> Declaration {
                     a: 255,
                 },
                 texture: None,
+                variation: content::TileVariation::TurnedAndPatched,
             },
             content::Appearance {
                 material: "water".into(),
@@ -161,6 +162,7 @@ fn component() -> Declaration {
                     a: 128,
                 },
                 texture: None,
+                variation: content::TileVariation::Fixed,
             },
         ],
         world: Some(content::WorldParams {

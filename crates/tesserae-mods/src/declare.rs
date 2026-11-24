@@ -837,6 +837,7 @@ fn surface_feature(
                 vines,
                 trunk: tree.trunk,
                 canopy: tree.canopy,
+                storeys: tree.storeys,
                 trunk_height_m: tree.trunk_height_m,
                 canopy_radius_m: tree.canopy_radius_m,
                 branching: tree.branching,

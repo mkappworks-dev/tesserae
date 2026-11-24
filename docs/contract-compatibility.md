@@ -301,12 +301,29 @@ without it crowds as before; a dense stand of one species declares less. The
 Biome snapshot freezes it as an optional member, so no `FORMAT_VERSION` changes.
 A Declaration built against the earlier 0.3 text needs a rebuild.
 
+A `tree-def` of line 0.3 then took `canopy` as a list and gained `storeys`, a
+list of `storey-def` after it: one canopy or up to four alike but for colour,
+and up to four weighted height bands, each with a trunk height and an optional
+crown. Each tree draws one of each by the World seed and its root position in
+metres, and a storey's `branching` is the row's scaled by its crown over the
+row's. One canopy and no storeys generate as before. The Biome snapshot freezes
+both as optional members, so no `FORMAT_VERSION` changes. A data-only row's
+`canopy` still takes one name; a Declaration built against the earlier 0.3 text
+needs a rebuild.
+
 A `view-params` of line 0.3 then gained `low-lod-distance-m`, an optional `f32`
 last: the reach of the Low Quality curve, the Game's own rings, from
 `view-distance-m` to `lod-distance-m`. `lod-distance-m` is now the ceiling every
 Player's curve is clamped to, at most 8192 m. Absent, Low reaches the ceiling,
 so a Game that declared its view before streams the same rings under Low. A
 Declaration built against the earlier 0.3 text needs a rebuild.
+
+An `appearance` of line 0.3 then gained `variation`, a closed `tile-variation`
+last: `fixed`, `turned` (each Voxel turns or mirrors the texture, keyed on its
+position in the World) or `turned-and-patched` (also shifting value and hue in
+patches about 5 m across). The 0.1 and 0.2 adapters and an omitted data-only
+`variation` give `fixed`, which draws exactly as before. A Declaration built
+against the earlier 0.3 text needs a rebuild.
 
 ## What is not frozen
 

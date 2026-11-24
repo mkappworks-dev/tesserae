@@ -54,6 +54,24 @@ solid = true
 remove-time-s = 0.1
 
 [[materials]]
+name = "oak_leaves_dark"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "oak_leaves_light"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
 name = "oak_sapling"
 emission = 0
 dimming = 0
@@ -225,6 +243,24 @@ solid = true
 remove-time-s = 0.1
 
 [[materials]]
+name = "jungle_leaves_dark"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "jungle_leaves_light"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
 name = "jungle_sapling"
 emission = 0
 dimming = 0
@@ -244,6 +280,24 @@ remove-time-s = 0.35
 
 [[materials]]
 name = "swamp_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "swamp_leaves_dark"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "swamp_leaves_light"
 emission = 0
 dimming = 1
 occlusion = "never"
@@ -279,6 +333,24 @@ solid = true
 remove-time-s = 0.1
 
 [[materials]]
+name = "apple_leaves_dark"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "apple_leaves_light"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
 name = "apple_sapling"
 emission = 0
 dimming = 0
@@ -306,6 +378,24 @@ solid = true
 remove-time-s = 0.1
 
 [[materials]]
+name = "orange_leaves_dark"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "orange_leaves_light"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
 name = "orange_sapling"
 emission = 0
 dimming = 0
@@ -325,6 +415,24 @@ remove-time-s = 0.35
 
 [[materials]]
 name = "cherry_leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "cherry_leaves_dark"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "cherry_leaves_light"
 emission = 0
 dimming = 1
 occlusion = "never"
@@ -558,6 +666,7 @@ texture = "art/wood.png"
 material = "leaves"
 color = [74, 108, 51, 255]
 texture = "art/leaves.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "grass"
@@ -578,6 +687,19 @@ texture = "art/wood.png"
 material = "oak_leaves"
 color = [74, 108, 51, 255]
 texture = "art/leaves.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "oak_leaves_dark"
+color = [72, 99, 47, 255]
+texture = "art/oak_leaves_dark.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "oak_leaves_light"
+color = [76, 116, 55, 255]
+texture = "art/oak_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "oak_sapling"
@@ -613,6 +735,7 @@ texture = "art/birch_log.png"
 material = "birch_leaves"
 color = [107, 156, 49, 255]
 texture = "art/birch_leaves.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "birch_sapling"
@@ -628,6 +751,7 @@ texture = "art/pine_log.png"
 material = "pine_leaves"
 color = [31, 86, 52, 255]
 texture = "art/pine_leaves.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "pine_sapling"
@@ -643,6 +767,7 @@ texture = "art/palm_log.png"
 material = "palm_leaves"
 color = [61, 138, 47, 255]
 texture = "art/palm_leaves.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "palm_sapling"
@@ -658,6 +783,7 @@ texture = "art/acacia_log.png"
 material = "acacia_leaves"
 color = [124, 143, 46, 255]
 texture = "art/acacia_leaves.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "acacia_sapling"
@@ -673,6 +799,19 @@ texture = "art/jungle_log.png"
 material = "jungle_leaves"
 color = [71, 117, 58, 255]
 texture = "art/jungle_leaves.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "jungle_leaves_dark"
+color = [69, 107, 53, 255]
+texture = "art/jungle_leaves_dark.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "jungle_leaves_light"
+color = [72, 126, 63, 255]
+texture = "art/jungle_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "jungle_sapling"
@@ -688,6 +827,19 @@ texture = "art/swamp_log.png"
 material = "swamp_leaves"
 color = [78, 93, 52, 255]
 texture = "art/swamp_leaves.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "swamp_leaves_dark"
+color = [75, 86, 48, 255]
+texture = "art/swamp_leaves_dark.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "swamp_leaves_light"
+color = [82, 101, 57, 255]
+texture = "art/swamp_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "swamp_sapling"
@@ -703,6 +855,19 @@ texture = "art/apple_log.png"
 material = "apple_leaves"
 color = [74, 107, 51, 255]
 texture = "art/apple_leaves.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "apple_leaves_dark"
+color = [71, 98, 46, 255]
+texture = "art/apple_leaves_dark.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "apple_leaves_light"
+color = [76, 116, 55, 255]
+texture = "art/apple_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_sapling"
@@ -718,6 +883,19 @@ texture = "art/orange_log.png"
 material = "orange_leaves"
 color = [67, 101, 51, 255]
 texture = "art/orange_leaves.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "orange_leaves_dark"
+color = [65, 93, 47, 255]
+texture = "art/orange_leaves_dark.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "orange_leaves_light"
+color = [69, 109, 55, 255]
+texture = "art/orange_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "orange_sapling"
@@ -733,6 +911,19 @@ texture = "art/cherry_log.png"
 material = "cherry_leaves"
 color = [93, 121, 62, 255]
 texture = "art/cherry_leaves.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "cherry_leaves_dark"
+color = [89, 111, 57, 255]
+texture = "art/cherry_leaves_dark.png"
+variation = "turned-and-patched"
+
+[[appearance]]
+material = "cherry_leaves_light"
+color = [96, 131, 67, 255]
+texture = "art/cherry_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "cherry_sapling"
@@ -970,8 +1161,8 @@ seed = "flora:oak_sapling"
 shape = "flora:cross"
 sapling = "flora:oak_sapling"
 trunk = "flora:oak_log"
-canopy = "flora:oak_leaves"
-trunk-height-m = [10.0, 13.0]
+canopy = ["flora:oak_leaves", "flora:oak_leaves_dark", "flora:oak_leaves_light"]
+trunk-height-m = [9.0, 14.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
@@ -1147,9 +1338,14 @@ seed = "flora:jungle_sapling"
 shape = "flora:cross"
 sapling = "flora:jungle_sapling"
 trunk = "flora:jungle_log"
-canopy = "flora:jungle_leaves"
+canopy = ["flora:jungle_leaves", "flora:jungle_leaves_dark", "flora:jungle_leaves_light"]
 trunk-height-m = [18.0, 24.0]
 canopy-radius-m = 5.0
+storeys = [
+  { weight = 0.15, trunk-height-m = [25.0, 27.0], canopy-radius-m = 6.0 },
+  { weight = 0.6, trunk-height-m = [18.0, 24.0], canopy-radius-m = 4.5 },
+  { weight = 0.25, trunk-height-m = [8.0, 12.0], canopy-radius-m = 3.0 },
+]
 mean-seconds = 140.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.12, length-m = 4.0 }
@@ -1185,9 +1381,13 @@ seed = "flora:swamp_sapling"
 shape = "flora:cross"
 sapling = "flora:swamp_sapling"
 trunk = "flora:swamp_log"
-canopy = "flora:swamp_leaves"
+canopy = ["flora:swamp_leaves", "flora:swamp_leaves_dark", "flora:swamp_leaves_light"]
 trunk-height-m = [12.0, 15.0]
 canopy-radius-m = 3.5
+storeys = [
+  { weight = 0.7, trunk-height-m = [12.0, 15.0] },
+  { weight = 0.3, trunk-height-m = [6.0, 9.0], canopy-radius-m = 2.5 },
+]
 mean-seconds = 110.0
 sapling-yield = [1, 2]
 vines = { plant = "flora:vine", density = 0.2, length-m = 2.0 }
@@ -1223,7 +1423,7 @@ seed = "flora:apple_sapling"
 shape = "flora:cross"
 sapling = "flora:apple_sapling"
 trunk = "flora:apple_log"
-canopy = "flora:apple_leaves"
+canopy = ["flora:apple_leaves", "flora:apple_leaves_dark", "flora:apple_leaves_light"]
 trunk-height-m = [8.0, 10.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
@@ -1258,7 +1458,7 @@ seed = "flora:orange_sapling"
 shape = "flora:cross"
 sapling = "flora:orange_sapling"
 trunk = "flora:orange_log"
-canopy = "flora:orange_leaves"
+canopy = ["flora:orange_leaves", "flora:orange_leaves_dark", "flora:orange_leaves_light"]
 trunk-height-m = [8.0, 10.0]
 canopy-radius-m = 2.2
 mean-seconds = 90.0
@@ -1294,7 +1494,7 @@ seed = "flora:cherry_sapling"
 shape = "flora:cross"
 sapling = "flora:cherry_sapling"
 trunk = "flora:cherry_log"
-canopy = "flora:cherry_leaves"
+canopy = ["flora:cherry_leaves", "flora:cherry_leaves_dark", "flora:cherry_leaves_light"]
 trunk-height-m = [8.0, 10.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
@@ -1519,7 +1719,7 @@ mean-seconds = 90.0
 length-m = 6.0
 
 [plants.needs]
-soil = ["#rock", "#soil", "flora:wood", "flora:leaves", "flora:jungle_log", "flora:jungle_leaves", "flora:swamp_log", "flora:swamp_leaves"]
+soil = ["#rock", "#soil", "flora:wood", "flora:leaves", "flora:jungle_log", "flora:jungle_leaves", "flora:jungle_leaves_dark", "flora:jungle_leaves_light", "flora:swamp_log", "flora:swamp_leaves", "flora:swamp_leaves_dark", "flora:swamp_leaves_light"]
 
 [[items]]
 name = "log"

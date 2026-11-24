@@ -6,8 +6,8 @@ use std::collections::HashSet;
 
 use super::reach::voxels_in;
 use super::{
-    Branching, Change, FORK_SPREAD, GrowEnv, Growth, Kind, MAX_CANOPY_RADIUS_M, Plant, PlantRef,
-    PlantTable, Role, Surroundings, Tree, conditions_met, mix,
+    Band, Branching, Canopies, Change, FORK_SPREAD, GrowEnv, Growth, Kind, MAX_CANOPY_RADIUS_M,
+    Plant, PlantRef, PlantTable, Role, Storeys, Surroundings, Tree, conditions_met, mix,
 };
 use crate::climate::{SurfaceVines, VINE_FACES};
 use crate::light::Light;
@@ -63,10 +63,59 @@ fn hash(seed: u64, at: [i32; 3], voxel_size: f32, salt: u64) -> u64 {
         })
 }
 
-/// Voxels in the trunk of the tree whose sapling stands at `base`: a hash
-/// picks a whole number of Voxels inside `trunk-height-m`.
+/// The band the tree whose sapling stands at `base` grows: one of the row's storeys by weight, by
+/// hash of seed and position, or the row's own when it declares none.
+pub fn band_of(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> Band {
+    storey_band(&tree.storeys, tree.own_band(), seed, base, voxel_size)
+}
+
+/// [`band_of`] for a row given by its storeys and own band, as a Biome freezes them.
+pub fn storey_band(storeys: &Storeys, own: Band, seed: u64, base: [i32; 3], size: f32) -> Band {
+    if storeys.as_slice().is_empty() {
+        return own;
+    }
+    storeys.pick(own, hash(seed, base, size, STOREY_SALT))
+}
+
+/// The canopy variant the tree whose sapling stands at `base` grows, by hash of seed and position.
+pub fn canopy_of(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> MaterialId {
+    if tree.canopy.as_slice().len() == 1 {
+        return tree.canopy.first();
+    }
+    tree.canopy.pick(hash(seed, base, voxel_size, VARIANT_SALT))
+}
+
+/// The variant a column of Canopy cover shows: drawn like a tree's, from the column at the
+/// ground's height 0, so all of one column agrees.
+pub fn canopy_at(canopy: &Canopies, seed: u64, column: [i32; 2], voxel_size: f32) -> MaterialId {
+    if canopy.as_slice().len() == 1 {
+        return canopy.first();
+    }
+    canopy.pick(hash(
+        seed,
+        [column[0], 0, column[1]],
+        voxel_size,
+        VARIANT_SALT,
+    ))
+}
+
+// Past the salts a tree's own draws use, 1 to 11 and 16 up for its limbs.
+const STOREY_SALT: u64 = 1 << 32;
+const VARIANT_SALT: u64 = (1 << 32) + 1;
+
+/// Voxels in the trunk of the tree whose sapling stands at `base`: a hash picks a whole number of
+/// Voxels inside its band's `trunk-height-m`.
 pub fn trunk_height(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> i32 {
-    let (low, high) = tree.trunk_height_m;
+    trunk_voxels(
+        band_of(tree, seed, base, voxel_size),
+        seed,
+        base,
+        voxel_size,
+    )
+}
+
+fn trunk_voxels(band: Band, seed: u64, base: [i32; 3], voxel_size: f32) -> i32 {
+    let (low, high) = band.trunk_height_m;
     let fewest = ((low / voxel_size) - 1e-3).ceil().max(1.0) as i32;
     let most = (((high / voxel_size) + 1e-3).floor() as i32).max(fewest);
     fewest + (hash(seed, base, voxel_size, 1) % (most - fewest + 1) as u64) as i32
@@ -85,14 +134,21 @@ pub fn fruit_stage(seed: u64, at: [i32; 3], voxel_size: f32, stages: usize) -> u
     (hash(seed, at, voxel_size, 3) % stages.max(1) as u64) as usize
 }
 
-/// Every Voxel of the tree whose sapling stands at `base`: the trunk from the
-/// sapling's own cell upward, then the canopy, some of it fruit. A tree with no `branching` is a
-/// straight trunk under one ellipsoid centred on its top; one with it grows limbs, leaders and
-/// lobes too. A pure function of the row, the position and the Voxel size.
+/// Every Voxel of the tree whose sapling stands at `base`: the trunk from the sapling's own cell
+/// upward, then the canopy, some of it fruit. Its storey and canopy variant are drawn first. A
+/// tree with no `branching` is a straight trunk under one ellipsoid centred on its top; one with
+/// it grows limbs, leaders and lobes too. A pure function of the row, the position and the Voxel
+/// size.
 pub fn tree_voxels(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> Vec<TreeVoxel> {
-    let height = trunk_height(tree, seed, base, voxel_size);
-    if let Some(b) = &tree.branching {
-        return branched(tree, b, seed, base, voxel_size, height);
+    let band = band_of(tree, seed, base, voxel_size);
+    let grown = Grown {
+        tree,
+        canopy: canopy_of(tree, seed, base, voxel_size),
+        band,
+    };
+    let height = trunk_voxels(band, seed, base, voxel_size);
+    if let Some(b) = &band.branching {
+        return branched(&grown, b, seed, base, voxel_size, height);
     }
     let mut voxels: Vec<TreeVoxel> = (0..height)
         .map(|dy| wood([base[0], base[1] + dy, base[2]], tree.trunk))
@@ -100,12 +156,19 @@ pub fn tree_voxels(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> V
     let top = [base[0], base[1] + height - 1, base[2]];
     // The canopy leaves the lower trunk bare, and never reaches the ground.
     let lowest = base[1] + (height / 2).max(1);
-    ellipsoid(top, tree.canopy_radius_m, voxel_size, |at, [dx, dy, dz]| {
+    ellipsoid(top, band.canopy_radius_m, voxel_size, |at, [dx, dy, dz]| {
         if at[1] >= lowest && !(dx == 0 && dz == 0 && dy <= 0) {
-            voxels.push(leaf(tree, seed, at, voxel_size));
+            voxels.push(grown.leaf(seed, at, voxel_size));
         }
     });
     voxels
+}
+
+/// One tree of a row, its storey and canopy variant drawn.
+struct Grown<'a> {
+    tree: &'a Tree,
+    canopy: MaterialId,
+    band: Band,
 }
 
 fn wood(at: [i32; 3], material: MaterialId) -> TreeVoxel {
@@ -118,27 +181,30 @@ fn wood(at: [i32; 3], material: MaterialId) -> TreeVoxel {
     }
 }
 
-/// The canopy Voxel at `at`, or the fruit that replaces it.
-fn leaf(tree: &Tree, seed: u64, at: [i32; 3], voxel_size: f32) -> TreeVoxel {
-    let fruit = tree
-        .fruit
-        .as_ref()
-        .filter(|f| bears_fruit(seed, f.density, at, voxel_size));
-    match fruit {
-        Some(f) => TreeVoxel {
-            at,
-            material: f.stages[0].material,
-            part: Part::Fruit,
-            shape: f.stages[0].shape.or(f.shape).unwrap_or(SHAPE_FULL_CUBE),
-            orientation: 0,
-        },
-        None => TreeVoxel {
-            at,
-            material: tree.canopy,
-            part: Part::Canopy,
-            shape: SHAPE_FULL_CUBE,
-            orientation: 0,
-        },
+impl Grown<'_> {
+    /// The canopy Voxel at `at`, or the fruit that replaces it.
+    fn leaf(&self, seed: u64, at: [i32; 3], voxel_size: f32) -> TreeVoxel {
+        let fruit = self
+            .tree
+            .fruit
+            .as_ref()
+            .filter(|f| bears_fruit(seed, f.density, at, voxel_size));
+        match fruit {
+            Some(f) => TreeVoxel {
+                at,
+                material: f.stages[0].material,
+                part: Part::Fruit,
+                shape: f.stages[0].shape.or(f.shape).unwrap_or(SHAPE_FULL_CUBE),
+                orientation: 0,
+            },
+            None => TreeVoxel {
+                at,
+                material: self.canopy,
+                part: Part::Canopy,
+                shape: SHAPE_FULL_CUBE,
+                orientation: 0,
+            },
+        }
     }
 }
 
@@ -266,7 +332,7 @@ impl Taken {
 /// on top. Each draw is a hash of the seed and the base in millimetres, each length is metres
 /// over the Voxel size, so the tree is the same shape at every size.
 fn branched(
-    tree: &Tree,
+    grown: &Grown,
     b: &Branching,
     seed: u64,
     base: [i32; 3],
@@ -361,9 +427,10 @@ fn branched(
         }
     }
 
+    let tree = grown.tree;
     let mut voxels: Vec<TreeVoxel> = Vec::new();
-    let around = (tree.reach_m() / size).ceil() as i32 + 5;
-    let rise = top_y + (tree.crown_rise_m() / size).ceil() as i32 + 3;
+    let around = (grown.band.reach_m() / size).ceil() as i32 + 5;
+    let rise = top_y + (grown.band.crown_rise_m() / size).ceil() as i32 + 3;
     let mut taken = Taken::new(
         [base[0] - around, base[1], base[2] - around],
         [2 * around + 1, rise + 1, 2 * around + 1],
@@ -380,7 +447,7 @@ fn branched(
     let mut foliage = |centre: [i32; 3], radius_m: f32, lowest: i32| {
         ellipsoid(centre, radius_m, size, |at, _| {
             if at[1] >= lowest && taken.insert(at) {
-                voxels.push(leaf(tree, seed, at, size));
+                voxels.push(grown.leaf(seed, at, size));
             }
         });
     };
@@ -395,7 +462,7 @@ fn branched(
     }
     foliage(
         axis(top_y),
-        tree.canopy_radius_m,
+        grown.band.canopy_radius_m,
         base[1] + (height / 2).max(1),
     );
     voxels
@@ -714,7 +781,7 @@ pub fn felling_region(
     }
     let slack = if tree.branching.is_some() { 4 } else { 0 };
     let wide = 2 * (voxels_in(tree.reach_m().min(MAX_CANOPY_RADIUS_M), voxel_size) + slack) + 3;
-    let tall = voxels_in(tree.trunk_height_m.1 + tree.crown_rise_m(), voxel_size) + 3;
+    let tall = voxels_in(tree.tallest_trunk_m() + tree.crown_rise_m(), voxel_size) + 3;
     let mut seen: HashSet<[i32; 3]> = HashSet::from([from]);
     let mut stack = vec![from];
     let (mut low, mut high) = (from, from);
@@ -773,7 +840,9 @@ mod tests {
     use crate::climate::Climate;
     use crate::occupants::Occupants;
     use crate::plant::TreeVines;
-    use crate::plant::{CountRange, Fruit, Needs, Stage, Yield};
+    use crate::plant::{
+        CountRange, Fruit, MAX_CANOPIES, MAX_PLANT_HEIGHT_M, Needs, Stage, Storey, Yield,
+    };
     use crate::shape::{Orientation, ShapeTable};
     use std::collections::HashMap;
 
@@ -790,11 +859,12 @@ mod tests {
 
     fn tree(fruit: Option<f32>) -> Tree {
         Tree {
+            storeys: crate::plant::Storeys::NONE,
             vines: None,
             branching: None,
             crowding_m: None,
             trunk: TRUNK,
-            canopy: CANOPY,
+            canopy: crate::plant::Canopies::one(CANOPY),
             trunk_height_m: (3.0, 5.0),
             canopy_radius_m: 2.0,
             mean_seconds: 60.0,
@@ -1053,7 +1123,7 @@ mod tests {
             ..Needs::default()
         };
         let mut other = tree(None);
-        (other.trunk, other.canopy) = (OTHER_TRUNK, OTHER_CANOPY);
+        (other.trunk, other.canopy) = (OTHER_TRUNK, Canopies::one(OTHER_CANOPY));
         let rows = [
             (
                 "fern",
@@ -1469,7 +1539,25 @@ mod tests {
             .is_err(),
             "five fruit Stages are past the limit of four"
         );
-        assert!(load(&|t| t.canopy = TRUNK).is_err(), "a Material twice");
+        assert!(
+            load(&|t| t.canopy = Canopies::one(TRUNK)).is_err(),
+            "a Material twice"
+        );
+        assert!(load(&|t| *t = storeyed(t.clone())).is_ok());
+        let storey = |edit: fn(&mut Storey)| {
+            load(&|t| {
+                *t = storeyed(t.clone());
+                let mut list = t.storeys.as_slice().to_vec();
+                edit(&mut list[0]);
+                t.storeys = Storeys::new(&list).unwrap();
+            })
+        };
+        assert!(storey(|s| s.weight = 0.0).is_err());
+        assert!(storey(|s| s.trunk_height_m = (3.0, 2.0)).is_err());
+        assert!(storey(|s| s.trunk_height_m.1 = MAX_PLANT_HEIGHT_M + 1.0).is_err());
+        assert!(storey(|s| s.canopy_radius_m = MAX_CANOPY_RADIUS_M + 1.0).is_err());
+        assert!(Canopies::new(&[CANOPY; MAX_CANOPIES + 1]).is_none());
+        assert!(Canopies::new(&[]).is_none());
     }
 
     #[test]
@@ -1617,7 +1705,12 @@ mod tests {
                     if inside > 1.0 + 1e-4 || at[1] < lowest || (dx == 0 && dz == 0 && dy <= 0) {
                         continue;
                     }
-                    voxels.push(leaf(tree, seed, at, size));
+                    let grown = Grown {
+                        tree,
+                        canopy: tree.canopy.first(),
+                        band: tree.own_band(),
+                    };
+                    voxels.push(grown.leaf(seed, at, size));
                 }
             }
         }
@@ -2392,4 +2485,184 @@ mod tests {
                 .contains("not a climber")
         );
     }
+
+    const VARIANTS: [MaterialId; 2] = [26, 27];
+
+    /// `row` with three storeys, tallest first, and three canopy variants.
+    fn storeyed(mut row: Tree) -> Tree {
+        row.canopy = Canopies::new(&[CANOPY, VARIANTS[0], VARIANTS[1]]).unwrap();
+        row.storeys = Storeys::new(&[
+            Storey {
+                weight: 0.15,
+                trunk_height_m: (9.0, 10.0),
+                canopy_radius_m: 3.0,
+            },
+            Storey {
+                weight: 0.6,
+                trunk_height_m: (6.0, 7.0),
+                canopy_radius_m: 2.0,
+            },
+            Storey {
+                weight: 0.25,
+                trunk_height_m: (3.0, 4.0),
+                canopy_radius_m: 1.5,
+            },
+        ])
+        .unwrap();
+        row
+    }
+
+    fn storey_index(row: &Tree, band: Band) -> usize {
+        row.storeys
+            .as_slice()
+            .iter()
+            .position(|s| s.trunk_height_m == band.trunk_height_m)
+            .expect("a storey's band")
+    }
+
+    /// Wood cells in the tree's column, the trunk, in metres.
+    fn trunk_m(voxels: &[TreeVoxel], base: [i32; 3], size: f32) -> f32 {
+        let trunk = voxels
+            .iter()
+            .filter(|v| v.part == Part::Trunk && v.at[0] == base[0] && v.at[2] == base[2]);
+        trunk.count() as f32 * size
+    }
+
+    fn canopies(voxels: &[TreeVoxel]) -> HashSet<MaterialId> {
+        voxels
+            .iter()
+            .filter(|v| v.part == Part::Canopy)
+            .map(|v| v.material)
+            .collect()
+    }
+
+    #[test]
+    fn each_tree_grows_one_storey_and_one_canopy_variant_fixed_by_seed_and_position() {
+        let row = storeyed(tree(None));
+        let (mut storeys, mut variants) = (HashSet::new(), HashSet::new());
+        let mut moved = false;
+        for n in 0..300 {
+            let base = [n * 7 - 900, 3, n * 13 - 1700];
+            let grown = tree_voxels(&row, SEED, base, 1.0);
+            assert_eq!(grown, tree_voxels(&row, SEED, base, 1.0), "{base:?}");
+            let band = band_of(&row, SEED, base, 1.0);
+            let (low, high) = band.trunk_height_m;
+            let trunk = trunk_m(&grown, base, 1.0);
+            assert!((low..=high).contains(&trunk), "{base:?}: {trunk} m");
+            let leaves = canopies(&grown);
+            assert_eq!(leaves.len(), 1, "{base:?}: one variant a crown");
+            assert!(leaves.contains(&canopy_of(&row, SEED, base, 1.0)));
+            storeys.insert(storey_index(&row, band));
+            variants.extend(leaves);
+            moved |= band_of(&row, SEED + 1, base, 1.0) != band
+                || canopy_of(&row, SEED + 1, base, 1.0) != canopy_of(&row, SEED, base, 1.0);
+        }
+        assert_eq!(storeys.len(), 3, "every storey stands");
+        assert_eq!(variants.len(), 3, "every variant grows");
+        assert!(moved, "another World seed draws other trees");
+    }
+
+    #[test]
+    fn a_tree_draws_its_storey_and_variant_alike_at_every_voxel_size() {
+        let row = storeyed(tree(None));
+        for n in 0..200 {
+            let at_m = [n * 3 - 300, n * 5 - 500];
+            let base = |size: f32| {
+                let per_m = (1.0 / size) as i32;
+                [at_m[0] * per_m, 0, at_m[1] * per_m]
+            };
+            let band = band_of(&row, SEED, base(1.0), 1.0);
+            let canopy = canopy_of(&row, SEED, base(1.0), 1.0);
+            for size in SIZES {
+                assert_eq!(
+                    band_of(&row, SEED, base(size), size),
+                    band,
+                    "{at_m:?} at {size}"
+                );
+                assert_eq!(
+                    canopy_of(&row, SEED, base(size), size),
+                    canopy,
+                    "{at_m:?} at {size}"
+                );
+                let grown = tree_voxels(&row, SEED, base(size), size);
+                assert_eq!(
+                    canopies(&grown),
+                    HashSet::from([canopy]),
+                    "{at_m:?} at {size}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn storeys_share_the_trees_by_weight() {
+        let row = storeyed(tree(None));
+        let mut count = [0usize; 3];
+        let n = 4000;
+        for i in 0..n {
+            let base = [i % 80 * 5, 0, i / 80 * 7];
+            count[storey_index(&row, band_of(&row, SEED, base, 1.0))] += 1;
+        }
+        for (got, want) in count.iter().zip([0.15, 0.6, 0.25]) {
+            let share = *got as f64 / f64::from(n);
+            assert!((share - want).abs() < 0.03, "{count:?}");
+        }
+    }
+
+    #[test]
+    fn a_lower_storey_is_the_row_in_small_and_the_row_reaches_as_far_as_its_widest() {
+        let (_, mut row) = species().into_iter().find(|(n, _)| *n == "jungle").unwrap();
+        row.storeys = Storeys::new(&[Storey {
+            weight: 1.0,
+            trunk_height_m: (8.0, 9.0),
+            canopy_radius_m: row.canopy_radius_m / 2.0,
+        }])
+        .unwrap();
+        let own = row.branching.unwrap();
+        let band = band_of(&row, SEED, [0, 0, 0], 1.0);
+        let small = band.branching.unwrap();
+        assert_eq!(small.reach_m, own.reach_m / 2.0);
+        assert_eq!(small.lobe_radius_m, own.lobe_radius_m / 2.0);
+        assert_eq!(small.limbs, own.limbs);
+        assert_eq!(row.reach_m(), band.reach_m());
+        assert_eq!(row.tallest_trunk_m(), 9.0);
+        for size in SIZES {
+            for n in 0..20 {
+                let base = [n * 17, 0, -n * 11];
+                let wide = tree_voxels(&row, SEED, base, size).iter().all(|v| {
+                    let off = ((v.at[0] - base[0]) as f32).hypot((v.at[2] - base[2]) as f32);
+                    off * size <= row.reach_m() + 4.0 * size
+                });
+                assert!(wide, "{size} at {base:?}");
+            }
+        }
+    }
+
+    /// A digest of each flora species' trees, recorded before storeys and canopy variants, which
+    /// a row that declares neither must still grow.
+    #[test]
+    fn a_tree_row_with_one_canopy_and_no_storeys_grows_the_recorded_trees() {
+        let mut digest = 0xcbf2_9ce4_8422_2325u64;
+        let mut eat = |v: i64| {
+            for b in v.to_le_bytes() {
+                digest = (digest ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        for (_, row) in species() {
+            for size in SIZES {
+                for n in 0..12 {
+                    let base = [n * 37 - 200, n % 3, n * 23 - 140];
+                    for v in tree_voxels(&row, SEED, base, size) {
+                        v.at.iter().for_each(|&c| eat(i64::from(c)));
+                        eat(i64::from(v.material));
+                        eat(v.part as i64);
+                    }
+                }
+            }
+        }
+        assert_eq!(digest, RECORDED_SPECIES);
+    }
+
+    /// Recorded on macOS arm64 at 79ec13cf, before storeys.
+    const RECORDED_SPECIES: u64 = 0xebe0_072f_d798_cad7;
 }

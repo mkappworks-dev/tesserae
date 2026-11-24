@@ -28,7 +28,7 @@ fn cut(in: ChunkVertexOutput) {
     let uv_grad = uv_gradient(in.uv);
     let slot = material_slot(in.material);
     if has_texture(slot) {
-        if sample_texture(slot, in.uv, uv_grad, in.world_normal).a < 0.5 {
+        if sample_texture(slot, in.uv, uv_grad, in.world_normal, in.world_position.xyz, in.instance_index).a < 0.5 {
             discard;
         }
     } else if leaf_hole(in.uv) {

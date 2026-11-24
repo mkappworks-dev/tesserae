@@ -14,6 +14,7 @@ mod digest;
 use common::{CASES, chunk_span, water_near};
 use sha2::{Digest, Sha256};
 use tesserae_core::material::MaterialDef;
+use tesserae_core::plant::{Canopies, Storey, Storeys};
 use tesserae_core::save::Mapping;
 use tesserae_core::testgen::{
     Fixtures, content, fixtures, register_content, register_glass, register_ground,
@@ -50,6 +51,9 @@ fn params_of(f: &Fixtures) -> WorldgenParams {
 fn names() -> Mapping {
     let mut names = fixtures().mapping();
     names.materials.insert(WOOD, "t:wood".to_owned());
+    names
+        .materials
+        .insert(DARK_LEAVES, "t:dark_leaves".to_owned());
     names
 }
 
@@ -218,24 +222,53 @@ const RECORDED_HIGH_GROUND: [&str; 6] = [
 /// The forest's trunks. Unregistered, since generation never asks the tables; [`names`] names it.
 const WOOD: MaterialId = 200;
 
+/// A second canopy variant, unregistered like [`WOOD`].
+const DARK_LEAVES: MaterialId = 201;
+
+fn forest_tree() -> SurfaceTree {
+    SurfaceTree {
+        trunk: WOOD,
+        storeys: Storeys::NONE,
+        canopy: Canopies::one(fixtures().leaves),
+        trunk_height_m: (3.0, 5.0),
+        canopy_radius_m: 2.5,
+        fruit: None,
+        vines: None,
+        branching: None,
+        crowding_m: None,
+    }
+}
+
 /// The fixture ground and sea under one Biome of trees close enough to crowd, and no Settlement,
 /// so a Player spawns on the dry land nearest the origin.
 fn forest() -> WorldgenParams {
+    forest_of(forest_tree())
+}
+
+/// The forest's trees in two storeys, crowding less than their crowns so the storeys contest
+/// Voxels, under two canopy variants.
+fn storeyed_forest() -> WorldgenParams {
+    let storey = |weight, trunk_height_m, canopy_radius_m| Storey {
+        weight,
+        trunk_height_m,
+        canopy_radius_m,
+    };
+    forest_of(SurfaceTree {
+        canopy: Canopies::new(&[fixtures().leaves, DARK_LEAVES]).unwrap(),
+        storeys: Storeys::new(&[storey(0.3, (6.0, 8.0), 3.0), storey(0.7, (3.0, 5.0), 2.0)])
+            .unwrap(),
+        crowding_m: Some(2.0),
+        ..forest_tree()
+    })
+}
+
+fn forest_of(tree: SurfaceTree) -> WorldgenParams {
     let tree = SurfaceFeature {
         material: WOOD,
         spacing_m: 6.0,
         plant: Some(SurfacePlant {
             shape: SHAPE_FULL_CUBE,
-            kind: SurfacePlantKind::Tree(SurfaceTree {
-                trunk: WOOD,
-                canopy: fixtures().leaves,
-                trunk_height_m: (3.0, 5.0),
-                canopy_radius_m: 2.5,
-                fruit: None,
-                vines: None,
-                branching: None,
-                crowding_m: None,
-            }),
+            kind: SurfacePlantKind::Tree(tree),
         }),
         clump: None,
         field: None,
@@ -444,6 +477,21 @@ fn the_forest_a_player_spawns_in_makes_the_recorded_chunks() {
     assert_eq!(made, RECORDED_FOREST);
 }
 
+#[test]
+fn the_storeyed_forest_makes_the_recorded_chunks() {
+    let made = case_digests(|seed, size| {
+        let g = Worldgen::new(seed, size, storeyed_forest());
+        let b = boxed(&g, &PlantTable::default(), g.spawn_m(), 16.0);
+        let checks = [
+            (holds(&b, WOOD), "trunk"),
+            (holds(&b, fixtures().leaves), "canopy"),
+            (holds(&b, DARK_LEAVES), "canopy variant"),
+        ];
+        (b, missing(&checks))
+    });
+    assert_eq!(made, RECORDED_STOREYED_FOREST);
+}
+
 /// In the content's hamlet, then on the forest's dry land, which a Player looks for only because
 /// the origin is sea.
 #[test]
@@ -491,6 +539,14 @@ const RECORDED_FOREST: [&str; 4] = [
     "2cfb0213c80b50a85fe81127378521c803038e63dee8600e378ae2aca62ee34b",
     "5ced9a6a5d38f78a54d558498ff69c728c24b879450ffedae7ceaf47118649c0",
     "dbae335dfab55261370553635cfe9f03e6ec78aad8cfb980b612c480a0a10daa",
+];
+
+/// Recorded with storeys and canopy variants, on macOS arm64.
+const RECORDED_STOREYED_FOREST: [&str; 4] = [
+    "dc60515327b244703bf9b85064e50f1211a19114b4573a27181774c23cada099",
+    "bce614fe180c9cfbd29d3e0f1d7d781f09ea8697a9952a82458972d1d771b4af",
+    "d8e048ea8aee25d59e9f5b91f1a2fd98388db23413ad031aea2c3d37bbbd843b",
+    "e5d39098a34865ce7aa27c25ba4a555d98ac6db1222a7497436a69c47ae18e5c",
 ];
 
 /// The content's then the forest's, compared bit for bit.

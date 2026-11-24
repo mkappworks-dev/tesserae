@@ -9,10 +9,7 @@ Spec: [Colour, art and light](../spec.md).
 A bug on `main`, found in this spec's captures: while far LOD levels are still
 loading, their terrain draws black with orange dots before it fills in. Seen
 at `jungle-top-medium` and `far` with a 30 s settle under host load; level 1
-held 0 to 54 Chunks where a settled view holds about 5340. The orange dots
-suggest emissive Materials (lava) lit while the rest has no light yet, so a
-Chunk may be drawn before its Sky light arrives. Diagnose first; that guess is
-not confirmed.
+held 0 to 54 Chunks where a settled view holds about 5340.
 
 Cause (diagnosed): a coarse Chunk was sent before a ground or water neighbour
 at its level, and the dark beds and cave floors beneath showed through the gap.
