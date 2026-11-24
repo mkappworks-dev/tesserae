@@ -47,7 +47,7 @@ pub(super) struct StructureList {
 
 impl StructureList {
     /// Open, for a capture of the panel.
-    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub(super) fn show(&mut self) {
         self.open = true;
         self.dirty = true;
