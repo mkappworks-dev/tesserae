@@ -69,9 +69,9 @@ Six tickets, judged on the baseline captures, before and after:
    colours and Biome sky and fog colours, and the PNGs of the Mods Terra ships
    (`flora`, `strata`, `timber`, `brickwork`): pattern fixes first, then colour
    targets.
-2. **Light balance and aerial perspective:** a near haze in metres in Distance
-   fog, ambient and Sky light balance, block light and `Exposure`, and the
-   tonemapper.
+2. **Light balance, aerial perspective and the sky:** a near haze in metres in
+   Distance fog, a sky gradient with a sun disc, ambient and Sky light balance,
+   block light and `Exposure`, and the tonemapper.
 3. **Per-block and per-area variation:** a rotated or mirrored tile per Voxel
    for Materials that read the same in any direction, and a crown-sized colour
    variation in metres on leaves and grass.
@@ -116,9 +116,9 @@ lands.
     or snow top above about 85% value on screen.
   - `flora:cane` (`[140, 190, 90]`, the swamp's pale cross plants) darker,
     with a two-tone stem and leaf.
-  - Temperate's sky toward a clear blue at about S 0.4; Dry's toward a pale warm
-    blue, its warmth kept in the fog. Every Biome's fog stays lighter than its
-    sky, and the clear colour moves with it.
+  - Every Biome's sky is blue overhead (Temperate at about S 0.4). A Biome's
+    character moves into its fog and horizon: warm haze for Dry and Savanna,
+    green-grey for Swamp, pale for Cold. Every fog stays lighter than its sky.
   - No saturation change underground; the cave reads muted already.
 - The Mods' PNGs are the plant art. Terra's `sprite()` drawings and its stale
   tree aliases are deleted: a Game's appearance row only reaches its own
@@ -167,6 +167,11 @@ lands.
 - These change what Generator version 3 makes. Nothing is released, so v3
   changes in place and its digests are recorded again
   ([ADR-0033](../../docs/adr/0033-generator-version-3-is-the-only-version.md)).
+- The sky is a gradient, not one clear colour: a Biome's sky colour at the
+  zenith, its fog colour at the horizon, so the existing pair drives it with no
+  new Declaration field. A sun disc and glow sit at the fixed light's direction.
+  Clouds belong to the Look overhaul spec, which builds on this sky; a
+  physically based atmosphere needs HDR and waits for captures to ask for it.
 - Ambient occlusion is screen-space. Per-corner AO in the mesher would split
   greedy-merged quads and give back part of the packed-quad mesh-memory saving;
   it is considered only if screen-space AO misses the frame budget.
@@ -201,4 +206,6 @@ lands.
 - Trunks wider than one Voxel for the tallest storey: new trunk, limb and
   felling rules, a follow-up.
 - A day cycle or moving sun.
+- Clouds, bloom, HDR grading, volumetric light, waving foliage and water
+  reflections: the Look overhaul spec (`feat/look-overhaul`).
 - The other demo Games' own art.

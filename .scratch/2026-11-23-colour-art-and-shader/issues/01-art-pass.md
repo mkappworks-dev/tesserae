@@ -16,7 +16,7 @@ before the next:
    cover), `strata` (rock), `timber` (planks, thatch), `brickwork` (brick,
    cobble, roof tile) and `crops` (wheat: thicker stalks).
 3. Colour targets: grass and leaves, dirt, sand and snow, `flora:cane`, and
-   every Biome's sky and fog colour.
+   every Biome's sky (blue overhead) and fog colour (its character).
 4. Appearance colours set to each tile's linear mean.
 
 ## Acceptance
