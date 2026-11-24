@@ -178,7 +178,7 @@ pub(super) fn receive(
             textures.alpha[slot] = alpha_of(row);
         }
     }
-    let faces = face_array(&pixels, &textures.alpha);
+    let faces = face_array(&pixels, &textures.present, &textures.alpha);
     if let Some(old) = textures.faces.replace(images.add(faces)) {
         images.remove(old.id());
     }
@@ -191,9 +191,10 @@ pub(super) fn receive(
 /// repeats across a merged quad and filters down with no neighbour to bleed
 /// into. Anisotropy needs every filter linear; the shader snaps magnified
 /// texels back to crisp ones.
-fn face_array(atlas: &[u8], alpha: &[AlphaMode; ROWS]) -> Image {
+fn face_array(atlas: &[u8], present: &[bool; ROWS], alpha: &[AlphaMode; ROWS]) -> Image {
     let mut data = Vec::with_capacity(LAYERS * CHAIN_BYTES);
     let mut tile = Vec::with_capacity(EDGE * EDGE * 4);
+    let blank = mip_chain(&[255; EDGE * EDGE * 4], None);
     for (slot, mode) in alpha.iter().enumerate() {
         let cutoff = match *mode {
             AlphaMode::Mask(cutoff) => Some(cutoff),
@@ -201,6 +202,10 @@ fn face_array(atlas: &[u8], alpha: &[AlphaMode; ROWS]) -> Image {
         };
         for face in 0..FACES {
             debug_assert_eq!(data.len(), layer(slot, face) * CHAIN_BYTES);
+            if !present[slot] {
+                data.extend_from_slice(&blank);
+                continue;
+            }
             tile.clear();
             for y in 0..EDGE {
                 let start = ((slot * EDGE + y) * WIDTH + face * EDGE) * 4;
@@ -209,6 +214,8 @@ fn face_array(atlas: &[u8], alpha: &[AlphaMode; ROWS]) -> Image {
             data.extend(mip_chain(&tile, cutoff));
         }
     }
+    // LAYERS is past WebGPU's default limit of 256; Bevy requests the
+    // adapter's own limits, and Metal allows 2048.
     let mut image = Image::new_uninit(
         Extent3d {
             width: EDGE as u32,
@@ -217,7 +224,7 @@ fn face_array(atlas: &[u8], alpha: &[AlphaMode; ROWS]) -> Image {
         },
         TextureDimension::D2,
         TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::default(),
+        RenderAssetUsages::RENDER_WORLD,
     );
     // Image::new would assert the data holds mip 0 alone; this is the default
     // layer-major order, every layer's whole chain in turn.

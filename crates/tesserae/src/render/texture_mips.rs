@@ -3,7 +3,6 @@
 use super::texture_atlas::EDGE;
 use bevy::color::Srgba;
 
-/// 16, 8, 4, 2 and 1 texels across.
 pub const LEVELS: u32 = EDGE.ilog2() + 1;
 
 /// Bytes of one face's whole chain, as [`mip_chain`] returns it.
@@ -32,8 +31,10 @@ type Texel = [f32; 4];
 
 /// `tile`, `EDGE` square sRGB RGBA, and its mips, largest first. Colour is
 /// averaged in linear space, weighted by alpha so a cutout's transparent texels
-/// do not darken its edge. With a `cutoff`, each level's alpha is scaled up so
-/// the share of the face that passes the cutoff does not fall below mip 0's.
+/// do not darken its edge. Mip 0's transparent texels take their neighbours'
+/// colour for the same reason: the linear sampler blends into them. With a
+/// `cutoff`, each level's alpha is scaled up so the share of the face that
+/// passes the cutoff does not fall below mip 0's.
 pub fn mip_chain(tile: &[u8], cutoff: Option<f32>) -> Vec<u8> {
     assert_eq!(tile.len(), EDGE * EDGE * 4, "one face");
     let mut level: Vec<Texel> = tile
@@ -52,6 +53,10 @@ pub fn mip_chain(tile: &[u8], cutoff: Option<f32>) -> Vec<u8> {
     let target = cutoff.map(|c| coverage(&level, EDGE, c, 1.0));
     let mut out = tile.to_vec();
     out.reserve(CHAIN_BYTES - tile.len());
+    for (i, rgb) in fill_transparent(&level) {
+        let [r, g, b, _] = encode([rgb[0], rgb[1], rgb[2], 0.0], 1.0);
+        out[i * 4..i * 4 + 3].copy_from_slice(&[r, g, b]);
+    }
     let mut edge = EDGE;
     while edge > 1 {
         // Each level halves the unscaled one above it, so a scale never compounds.
@@ -64,6 +69,34 @@ pub fn mip_chain(tile: &[u8], cutoff: Option<f32>) -> Vec<u8> {
         out.extend(level.iter().flat_map(|t| encode(*t, scale)));
     }
     out
+}
+
+/// A colour for each transparent texel of mip 0 next to a visible one: the
+/// alpha-weighted mean of its visible neighbours, wrapping as the sampler does.
+fn fill_transparent(level: &[Texel]) -> Vec<(usize, [f32; 3])> {
+    let n = EDGE as isize;
+    let mut filled = Vec::new();
+    for (i, texel) in level.iter().enumerate() {
+        if texel[3] > 0.0 {
+            continue;
+        }
+        let (x, y) = ((i % EDGE) as isize, (i / EDGE) as isize);
+        let mut sum = [0.0; 3];
+        let mut weight = 0.0;
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let t = level[((y + dy).rem_euclid(n) * n + (x + dx).rem_euclid(n)) as usize];
+                for c in 0..3 {
+                    sum[c] += t[c] * t[3];
+                }
+                weight += t[3];
+            }
+        }
+        if weight > 0.0 {
+            filled.push((i, sum.map(|v| v / weight)));
+        }
+    }
+    filled
 }
 
 fn halve(level: &[Texel], edge: usize) -> Vec<Texel> {
@@ -121,20 +154,21 @@ fn alpha_scale(level: &[Texel], edge: usize, cutoff: f32, target: f32) -> f32 {
 
 /// The share of the face whose filtered alpha passes `cutoff`: `level` sampled
 /// bilinearly, wrapping as the repeat sampler does, at mip 0's texel centres.
-/// Counting a 2x2 level's own texels would only ever give quarters.
-pub(crate) fn coverage(level: &[Texel], edge: usize, cutoff: f32, scale: f32) -> f32 {
+/// Counting a 2x2 level's own texels would only ever give quarters. Passing is
+/// at or over the cutoff, as the shader keeps it.
+fn coverage(level: &[Texel], edge: usize, cutoff: f32, scale: f32) -> f32 {
     let n = edge as isize;
     let at = |x: isize, y: isize| level[(y.rem_euclid(n) * n + x.rem_euclid(n)) as usize][3];
+    let to_level = |k: usize| (k as f32 + 0.5) * edge as f32 / EDGE as f32 - 0.5;
     let mut passed = 0;
     for j in 0..EDGE {
         for i in 0..EDGE {
-            let to_level = |k: usize| (k as f32 + 0.5) * edge as f32 / EDGE as f32 - 0.5;
             let (fx, fy) = (to_level(i), to_level(j));
             let (x0, y0) = (fx.floor() as isize, fy.floor() as isize);
             let (tx, ty) = (fx - fx.floor(), fy - fy.floor());
             let top = at(x0, y0) * (1.0 - tx) + at(x0 + 1, y0) * tx;
             let bottom = at(x0, y0 + 1) * (1.0 - tx) + at(x0 + 1, y0 + 1) * tx;
-            if (top * (1.0 - ty) + bottom * ty) * scale > cutoff {
+            if (top * (1.0 - ty) + bottom * ty) * scale >= cutoff {
                 passed += 1;
             }
         }
@@ -167,7 +201,7 @@ mod tests {
     fn counted(level: &[u8], cutoff: f32) -> f32 {
         let t = texels(level);
         t.iter()
-            .filter(|p| f32::from(p[3]) / 255.0 > cutoff)
+            .filter(|p| f32::from(p[3]) / 255.0 >= cutoff)
             .count() as f32
             / t.len() as f32
     }
@@ -238,6 +272,29 @@ mod tests {
         for c in 0..3 {
             assert!(one[c].abs_diff(green[c]) <= 2, "{one:?} against {green:?}");
         }
+    }
+
+    #[test]
+    fn transparent_texels_take_their_visible_neighbours_colour() {
+        let green = [80, 144, 49, 255];
+        let tile: Vec<u8> = (0..EDGE * EDGE)
+            .flat_map(|i| {
+                if i % EDGE < EDGE / 2 {
+                    green
+                } else {
+                    [0, 0, 0, 0]
+                }
+            })
+            .collect();
+        let chain = mip_chain(&tile, Some(0.5));
+        let zero = texels(levels(&chain)[0]);
+        let beside = zero[EDGE / 2];
+        assert_eq!(beside[3], 0, "alpha untouched");
+        for c in 0..3 {
+            assert!(beside[c].abs_diff(green[c]) <= 1, "{beside:?}");
+        }
+        assert_eq!(zero[EDGE / 2 + 2], [0, 0, 0, 0], "no visible neighbour");
+        assert_eq!(zero[0], green);
     }
 
     #[test]
