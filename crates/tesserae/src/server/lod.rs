@@ -41,7 +41,8 @@ use super::player::Player;
 use super::priority::{Aim, Order, Ring};
 use super::streaming::causes::{Counts, LodCause, Marks};
 use super::streaming::{
-    LodMeshReady, LodUnloaded, MeshState, Rings, StreamingSettings, delta, face_neighbors, offset,
+    Extent, LodMeshReady, LodUnloaded, MeshState, Rings, StreamingSettings, delta, face_neighbors,
+    offset,
 };
 use super::world_state::ChunkStore;
 use super::{ContentTables, WorldGenerator};
@@ -1678,8 +1679,9 @@ pub(in crate::server) fn stream_lod(
         &plans, &mut store, &mut state, &mut jobs, &budget, &priority, reach,
     );
     land_meshes(
-        &plans, &store, &mut state, &mut jobs, &mut ready, &budget, &priority,
+        &plans, &store, &meshes, &mut state, &mut jobs, &mut ready, &budget, &priority,
     );
+    hand_over(&plans, &meshes, &mut state, &mut unloaded);
     let in_level_zero = |c: ChunkCoord| {
         let load = Rings::new(*settings, world.cell_size()).load;
         load.contains(delta(world.chunk_at(player.eye()), c))
@@ -1942,9 +1944,14 @@ fn catch_up(
 /// `load`, so every neighbour the job read is still held. As at level 0 it is delivered even if
 /// the Chunk was dirtied again in flight; dropping it would starve a Chunk that changes faster
 /// than a mesh builds.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one stage of the tick; bundling them would invent a type used once"
+)]
 fn land_meshes(
     plans: &[Plan],
     store: &LodStore,
+    level_zero: &MeshState,
     state: &mut LodState,
     jobs: &mut LodJobs,
     ready: &mut MessageWriter<LodMeshReady>,
@@ -1961,7 +1968,13 @@ fn land_meshes(
         let plan = &plans[Plan::index(level)];
         let lv = state.level_mut(level);
         lv.mesh_pending = true;
-        if !plan.rings.keep.contains(delta(plan.anchor, coord)) {
+        let d = delta(plan.anchor, coord);
+        // A Chunk of the hole a level covers is meshed until handed over.
+        let kept = match covered_hole(plan) {
+            Some(_) => plan.rings.keep.outer.contains(d),
+            None => plan.rings.keep.contains(d),
+        };
+        if !kept {
             jobs.mesh.note_stale();
             lv.dirty.insert(coord, LodCause::Moved);
             continue;
@@ -1975,17 +1988,19 @@ fn land_meshes(
         }
         lv.withheld.insert(coord, mesh);
     }
-    send_withheld(plans, store, state, ready);
+    send_withheld(plans, store, level_zero, state, ready);
 }
 
-/// Sends the withheld meshes no gap borders: a gap is a face neighbour in the mesh shell that is
-/// neither sent nor air, nor drawn by a coarser level. Sent beside one, a Chunk is seen through
-/// it, where the ground or water over a cave or a lake bed will be, and the bed, lit dark as it
-/// lies, drew as black terrain while the level loaded. So a level's ground arrives in whole
-/// groups, and its first only once every neighbour of the group is meshed.
+/// Sends the withheld meshes no gap borders: a gap is a face neighbour the level meshes
+/// ([`meshed_extent`]) that is neither sent nor air and that neither a coarser level nor the
+/// finer ones draw. Sent beside one, a Chunk is seen through it, where the ground or water over
+/// a cave or a lake bed will be, and the bed, lit dark as it lies, drew as black terrain while
+/// the level loaded. Below the top level a coarser Chunk stands in the gap (see [`hand_over`]),
+/// so a Chunk waits only where the coarser level has not arrived either.
 fn send_withheld(
     plans: &[Plan],
     store: &LodStore,
+    level_zero: &MeshState,
     state: &mut LodState,
     ready: &mut MessageWriter<LodMeshReady>,
 ) {
@@ -2004,11 +2019,12 @@ fn send_withheld(
             })
         };
         let filled = |n: ChunkCoord| {
-            !plan.rings.mesh.contains(delta(plan.anchor, n))
+            !meshed_extent(plan).contains(delta(plan.anchor, n))
                 || level.delivered.contains(&n)
                 || level.deferred.contains(&n)
                 || store.shown(plan.level, n).is_some_and(|s| is_air(&s))
                 || drawn_coarser(n)
+                || covered_by_finer(state, level_zero, (plan.level, n))
         };
         // Sent, a withheld neighbour of a blocked Chunk would border the gap that one leaves.
         let mut blocked: Vec<ChunkCoord> = level
@@ -2054,8 +2070,81 @@ fn send_withheld(
     }
 }
 
+/// The hole a level meshes until finer levels cover it. Level 1's is level 0's region, which
+/// level 0 fills first and on its own terms.
+fn covered_hole(plan: &Plan) -> Option<Extent> {
+    plan.rings.mesh.hole.filter(|_| plan.level >= 2)
+}
+
+/// Every Chunk a level meshes, the hole it covers included.
+fn meshed_extent(plan: &Plan) -> Shell {
+    Shell {
+        outer: plan.rings.mesh.outer,
+        hole: plan
+            .rings
+            .mesh
+            .hole
+            .filter(|_| covered_hole(plan).is_none()),
+    }
+}
+
 fn is_air(shown: &Shown) -> bool {
     shown.chunk.uniform().is_some_and(|v| v.is_air()) && !shown.overlay.may_contain_fluid()
+}
+
+/// Whether finer levels have sent all of a Chunk's region, an empty mesh included.
+fn covered_by_finer(state: &LodState, level_zero: &MeshState, (level, coord): LodKey) -> bool {
+    coord.children().all(|child| {
+        if level == 1 {
+            return level_zero.is_delivered(child);
+        }
+        state
+            .levels
+            .get(level as usize - 2)
+            .is_some_and(|finer| finer.delivered.contains(&child))
+            || covered_by_finer(state, level_zero, (level - 1, child))
+    })
+}
+
+/// Unloads each Chunk of a level's hole once finer levels have sent all of its region. Until
+/// then it is meshed and drawn like the rest of the level, so a finer Chunk not yet sent leaves
+/// the coarser ground in its place rather than a gap to see through, and the Client draws the
+/// finer Chunks over it as they land (ADR-0019).
+fn hand_over(
+    plans: &[Plan],
+    level_zero: &MeshState,
+    state: &mut LodState,
+    unloaded: &mut MessageWriter<LodUnloaded>,
+) {
+    for plan in plans {
+        let Some(hole) = covered_hole(plan) else {
+            continue;
+        };
+        let Some(level) = state.levels.get(Plan::index(plan.level)) else {
+            continue;
+        };
+        let covered: Vec<ChunkCoord> = hole
+            .offsets()
+            .into_iter()
+            .map(|d| offset(plan.anchor, d))
+            .filter(|c| level.delivered.contains(c) || level.withheld.contains_key(c))
+            .filter(|&c| covered_by_finer(state, level_zero, (plan.level, c)))
+            .collect();
+        let level = state.level_mut(plan.level);
+        for coord in covered {
+            level.withheld.remove(&coord);
+            // Meshed again should the finer levels stop drawing it.
+            level.dirty.insert(coord, LodCause::Moved);
+            if level.delivered.remove(&coord) {
+                #[cfg(any(feature = "dev", feature = "profiling"))]
+                level.sizes.remove(&coord);
+                unloaded.write(LodUnloaded {
+                    level: plan.level,
+                    coord,
+                });
+            }
+        }
+    }
 }
 
 #[expect(
@@ -2283,7 +2372,17 @@ fn dispatch_meshes(
         .filter(|&i| std::mem::take(&mut state.level_mut(plans[i].level).mesh_pending))
         .collect();
     let mut below = None;
-    for (holes, i, d) in walk(orders, &due) {
+    // Each level's hole first: few Chunks, and what stands in for the finer levels meanwhile.
+    let covers: Vec<(bool, usize, IVec3)> = due
+        .iter()
+        .flat_map(|&i| {
+            let hole = covered_hole(&plans[i]).map(|h| h.offsets());
+            hole.unwrap_or_default()
+                .into_iter()
+                .map(move |d| (false, i, d))
+        })
+        .collect();
+    for (holes, i, d) in covers.into_iter().chain(walk(orders, &due)) {
         let plan = &plans[i];
         let coord = offset(plan.anchor, d);
         let level = state.level_mut(plan.level);
@@ -2291,6 +2390,10 @@ fn dispatch_meshes(
             || level.deferred.contains(&coord)
             || jobs.mesh.contains((plan.level, coord))
         {
+            continue;
+        }
+        let in_hole = covered_hole(plan).is_some_and(|h| h.contains(d));
+        if in_hole && covered_by_finer(state, level_zero, (plan.level, coord)) {
             continue;
         }
         if holes {
@@ -3751,41 +3854,71 @@ mod tests {
         assert_eq!(delivered, all_shells(&h).len());
     }
 
+    /// Level 0 five Cells out, so level 1 five out with a hole of one Chunk, and level 2 five
+    /// out with a hole of one Chunk over level 1's.
+    fn covered_hole_settings() -> StreamingSettings {
+        StreamingSettings {
+            view_distance_m: 160.0,
+            vertical_distance_m: 64.0,
+            hysteresis_m: 32.0,
+            lod_distance_m: 640.0,
+            lod_unit_m: 0.0,
+        }
+    }
+
     /// Mid-load, a lake bed sent before the Chunk beside it that holds the water showed black,
-    /// as level 0 lights a bed that deep, through the gap where the water would be. Sent beside
-    /// a Chunk meshed but not sent, it showed the same, a Chunk further on.
+    /// as level 0 lights a bed that deep, through the gap where the water would be.
     #[test]
-    fn no_chunk_is_sent_beside_ground_its_level_has_not_sent() {
-        let mut h = harness_with(lod_settings(), unlimited());
+    fn every_sent_chunk_borders_ground_that_some_level_draws() {
+        let mut h = harness_with(covered_hole_settings(), unlimited());
+        let levels = level_count(&covered_hole_settings());
+        assert_eq!(levels, 3);
+        assert!(h.rings_of(2).mesh.hole.is_some(), "level 2 covers a hole");
+        h.settle();
         {
             let mut jobs = h.app.world_mut().resource_mut::<LodJobs>();
             jobs.generate.scramble = true;
             jobs.mesh.scramble = true;
         }
-        let shells = all_shells(&h);
-        let mut sent: HashSet<LodKey> = HashSet::default();
+        let mut drawn: HashSet<LodKey> = HashSet::default();
         let started = std::time::Instant::now();
         loop {
             assert!(started.elapsed() < SETTLE_CEILING, "never went quiet");
-            let (ready, _) = h.lod_tick();
-            sent.extend(ready.iter().map(|m| (m.level, m.coord)));
+            let (ready, unloaded) = h.lod_tick();
+            drawn.extend(ready.iter().map(|m| (m.level, m.coord)));
+            for m in &unloaded {
+                drawn.remove(&(m.level, m.coord));
+            }
+            let level_zero = h.app.world().resource::<MeshState>();
+            let finer_draws = |key: LodKey| finer_draws(&drawn, level_zero, key);
             for m in &ready {
-                let level = &h.lod_state().levels[m.level as usize - 1];
+                let anchor = h.anchor_of(m.level);
+                let mesh = h.rings_of(m.level).mesh;
+                // Level 1's hole is level 0's to fill.
+                let meshes = |d| match m.level {
+                    1 => mesh.contains(d),
+                    _ => mesh.outer.contains(d),
+                };
                 for n in face_neighbors(m.coord) {
                     let mut covering = (m.level, n);
-                    let filled = !shells.contains(&covering)
-                        || sent.contains(&covering)
-                        || level.deferred.contains(&n)
-                        || h.lod_store()
-                            .shown(m.level, n)
-                            .is_some_and(|shown| is_air(&shown))
-                        || (m.level + 1..LEVELS).any(|coarser| {
+                    let air = h
+                        .lod_store()
+                        .shown(m.level, n)
+                        .is_some_and(|shown| is_air(&shown));
+                    let filled = !meshes(delta(anchor, n))
+                        || drawn.contains(&covering)
+                        || air
+                        || h.lod_state().levels[m.level as usize - 1]
+                            .deferred
+                            .contains(&n)
+                        || finer_draws(covering)
+                        || (m.level + 1..levels).any(|coarser| {
                             covering = (coarser, covering.1.parent());
-                            sent.contains(&covering)
+                            drawn.contains(&covering)
                         });
                     assert!(
                         filled,
-                        "level {} {} was sent beside {n}, not yet sent",
+                        "level {} {} was sent beside a gap at {n}",
                         m.level, m.coord
                     );
                 }
@@ -3795,7 +3928,30 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_micros(100));
         }
-        assert!(shells.is_subset(&sent), "and everything is still sent");
+        for level in 1..levels {
+            let shell = h.mesh_shell(level);
+            let level_drawn: HashSet<ChunkCoord> =
+                drawn.iter().filter(|k| k.0 == level).map(|k| k.1).collect();
+            assert_eq!(
+                level_drawn, shell,
+                "level {level} sent its shell and handed its hole over"
+            );
+        }
+    }
+
+    fn finer_draws(
+        drawn: &HashSet<LodKey>,
+        level_zero: &MeshState,
+        (level, coord): LodKey,
+    ) -> bool {
+        coord.children().all(|child| {
+            if level == 1 {
+                level_zero.is_delivered(child)
+            } else {
+                drawn.contains(&(level - 1, child))
+                    || finer_draws(drawn, level_zero, (level - 1, child))
+            }
+        })
     }
 
     #[test]

@@ -34,10 +34,12 @@ the black arc in `far` met level-1 `24,0,-15`, which holds the sea surface,
 undelivered, then the delivered bed of `24,0,-16`. The orange dots are ore in
 the stone beside the bed.
 
-Fix: the Server withholds coarse meshes and sends a group once no Chunk in it
-borders a non-air neighbour in its mesh shell that is not yet sent, unless a
-coarser level draws that neighbour. Holding back for unmeshed neighbours only
-left the same black one Chunk further on. Test:
-`no_chunk_is_sent_beside_ground_its_level_has_not_sent`. Cost: a level's
-ground arrives in larger groups, so mid-load views show more of the clear
-colour where black was. Captures in `/tmp/colour-06`.
+Fix, as the user chose (Q61): from level 2 up a level also meshes its hole,
+the region the next finer level draws, and keeps each of those Chunks until
+the finer levels have sent all of its region, then unloads it; the Client
+draws the finer Chunks over it as they land (ADR-0019). A gap at a finer level
+shows the coarser ground, not what lies under it. Level 1's hole is level 0's.
+The top level, with nothing coarser, still sends its ground in groups that no
+unsent ground borders, as does any level where the coarser one has not arrived.
+Test: `every_sent_chunk_borders_ground_that_some_level_draws`. Captures in
+`/tmp/colour-06`.
