@@ -13,7 +13,7 @@ mod templates;
 mod textures;
 
 use tesserae::mods::content::{
-    Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams,
+    TileVariation, Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams,
     CombustionDef, FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef,
     MaterialDef, Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack,
     RenderClass, SelectorRange, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
@@ -170,6 +170,16 @@ pub(crate) fn appearance(material: &str, base: [u8; 4]) -> Appearance {
             a: base[3],
         },
         texture: Some(texture),
+        variation: variation(material),
+    }
+}
+
+/// Planks, brick and logs keep their orientation; natural ground turns.
+fn variation(material: &str) -> TileVariation {
+    match material {
+        "leaves" | "grass" => TileVariation::TurnedAndPatched,
+        "stone" | "dirt" | "sand" => TileVariation::Turned,
+        _ => TileVariation::Fixed,
     }
 }
 

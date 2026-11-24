@@ -531,6 +531,7 @@ macro_rules! building {
                         material: name,
                         color: crate::tesserae::mods::types::Srgba { r, g, b: b_, a },
                         texture: Some(b.texture()),
+                        variation: crate::tesserae::mods::content::TileVariation::Fixed,
                     }
                 })
                 .collect()

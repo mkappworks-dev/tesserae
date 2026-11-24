@@ -17,7 +17,7 @@ import bevy_pbr::render::{
 import super::{
     leaf_hole::leaf_hole,
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
-    material_texture::{material_slot, has_texture, sample_texture, uv_gradient},
+    material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
 };
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
@@ -173,7 +173,13 @@ fn fragment(
     // works as a whole-chunk tint.
     let slot = material_slot(in.material);
     if has_texture(slot) {
-        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal);
+        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal, in.world_position.xyz, in.instance_index);
+        if patched(slot, in.world_normal) {
+            pbr_input.material.base_color = vec4<f32>(
+                patch_colour(pbr_input.material.base_color.rgb, in.world_position.xyz),
+                pbr_input.material.base_color.a,
+            );
+        }
     } else {
         pbr_input.material.base_color *= palette[slot];
     }
