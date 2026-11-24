@@ -2,8 +2,8 @@
 //!
 //! Extending `StandardMaterial` rather than writing a bare `Material` is what
 //! buys shadows, clustered lighting, fog and tonemapping from `bevy_pbr` — the
-//! decision in DESIGN.md's "Bevy depth" row. The texture is shared with item
-//! rendering; a later Look pack can replace appearance through this boundary.
+//! decision in DESIGN.md's "Bevy depth" row. A later Look pack can replace
+//! appearance through this boundary.
 
 use bevy::asset::AssetPath;
 use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
@@ -54,7 +54,8 @@ pub struct ChunkMaterialExtension {
     /// of one zero word discards nothing.
     #[storage(102, read_only)]
     pub drawn: Handle<ShaderBuffer>,
-    #[texture(103)]
+    /// One layer per Material face, `texture_atlas::layer`'s order.
+    #[texture(103, dimension = "2d_array")]
     #[sampler(104)]
     pub texture: Option<Handle<Image>>,
     #[uniform(105)]
@@ -156,12 +157,8 @@ impl MaterialExtension for ChunkMaterialExtension {
                 super::texture_atlas::EDGE as u32,
             ),
             ShaderDefVal::UInt(
-                "CHUNK_TEXTURE_WIDTH".into(),
-                super::texture_atlas::WIDTH as u32,
-            ),
-            ShaderDefVal::UInt(
-                "CHUNK_TEXTURE_HEIGHT".into(),
-                super::texture_atlas::HEIGHT as u32,
+                "CHUNK_TEXTURE_FACES".into(),
+                super::texture_atlas::FACES as u32,
             ),
         ];
         defs.extend(quad_layout_defs());

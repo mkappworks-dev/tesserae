@@ -17,7 +17,7 @@ import bevy_pbr::render::{
 import super::{
     leaf_hole::leaf_hole,
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
-    material_texture::{material_slot, has_texture, sample_texture},
+    material_texture::{material_slot, has_texture, sample_texture, uv_gradient},
 };
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
@@ -158,6 +158,7 @@ fn fragment(
     vertex_output.world_position = in.world_position;
     vertex_output.world_normal = in.world_normal;
     vertex_output.instance_index = in.instance_index;
+    let uv_grad = uv_gradient(in.uv);
 
     // Coarse geometry up to a Voxel above the real surface would stand over the
     // finer silhouette, and coarse water under finer water would be drawn twice.
@@ -172,7 +173,7 @@ fn fragment(
     // works as a whole-chunk tint.
     let slot = material_slot(in.material);
     if has_texture(slot) {
-        pbr_input.material.base_color *= sample_texture(slot, in.uv, in.world_normal);
+        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal);
     } else {
         pbr_input.material.base_color *= palette[slot];
     }

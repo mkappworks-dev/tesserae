@@ -1132,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn terrain_and_item_models_share_one_texture_atlas_and_clear_removed_rows() {
+    fn terrain_takes_the_face_array_item_models_the_atlas_and_both_clear_removed_rows() {
         use crate::client::{
             edit::Holding,
             material_textures::{self, Textures},
@@ -1148,11 +1148,13 @@ mod tests {
         app.update();
         let held = Holding::solid(23, 0);
         let first = app.world().resource::<Textures>().texture(held).unwrap();
+        let faces = app.world().resource::<Textures>().faces().unwrap().clone();
+        assert_ne!(faces, first);
         let terrain = app.world().resource::<TerrainMaterial>();
         let materials = app.world().resource::<Assets<ChunkMaterial>>();
         for handle in terrain.all() {
             let extension = &materials.get(handle).unwrap().extension;
-            assert_eq!(extension.texture.as_ref(), Some(&first));
+            assert_eq!(extension.texture.as_ref(), Some(&faces));
             assert_eq!(
                 extension.textured,
                 [
@@ -1167,16 +1169,13 @@ mod tests {
             .resource::<Textures>()
             .material(held, Vec4::ONE, false);
         assert_eq!(item.base_color_texture, Some(first.clone()));
-        assert_eq!(app.world().resource::<Assets<Image>>().len(), 1);
+        assert_eq!(app.world().resource::<Assets<Image>>().len(), 2);
         app.world_mut().write_message(MaterialTextures(Vec::new()));
         app.update();
         assert!(app.world().resource::<Textures>().texture(held).is_none());
-        assert!(
-            app.world()
-                .resource::<Assets<Image>>()
-                .get(first.id())
-                .is_none()
-        );
+        for old in [first.id(), faces.id()] {
+            assert!(app.world().resource::<Assets<Image>>().get(old).is_none());
+        }
         let terrain = app.world().resource::<TerrainMaterial>();
         let materials = app.world().resource::<Assets<ChunkMaterial>>();
         for handle in terrain.all() {

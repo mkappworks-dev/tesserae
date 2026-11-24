@@ -7,15 +7,18 @@ use super::{
 use crate::content::{ItemLooks, MaterialTextures};
 use crate::render::{
     chunk_material::{ChunkMaterialExtension, FLAME_SLOT, TEXTURED_VECS},
-    texture_atlas::{EDGE, HEIGHT, ROWS, WIDTH},
+    texture_atlas::{EDGE, FACES, HEIGHT, LAYERS, ROWS, WIDTH, layer},
+    texture_mips::{CHAIN_BYTES, LEVELS, mip_chain},
 };
 use crate::session::SessionApp;
 use bevy::{
     asset::RenderAssetUsages,
     ecs::system::SystemParam,
-    image::ImageSampler,
+    image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    render::render_resource::{
+        Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+    },
 };
 use std::collections::HashMap;
 
@@ -23,7 +26,10 @@ const GHOST_OPACITY: f32 = 0.75;
 
 #[derive(Resource)]
 pub(super) struct Textures {
+    /// Item models and tile icons, which sample one face up close.
     atlas: Option<Handle<Image>>,
+    /// Terrain, which also sees faces far off and at grazing angles.
+    faces: Option<Handle<Image>>,
     present: [bool; ROWS],
     alpha: [AlphaMode; ROWS],
     /// Each Item's own sprite, by its place in the Server's item order.
@@ -34,6 +40,7 @@ impl Default for Textures {
     fn default() -> Self {
         Self {
             atlas: None,
+            faces: None,
             present: [false; ROWS],
             alpha: [AlphaMode::Opaque; ROWS],
             sprites: HashMap::new(),
@@ -73,8 +80,13 @@ impl Textures {
             .and(self.atlas.clone())
     }
 
+    #[cfg(test)]
+    pub(super) fn faces(&self) -> Option<&Handle<Image>> {
+        self.faces.as_ref()
+    }
+
     pub(super) fn apply(&self, extension: &mut ChunkMaterialExtension) {
-        extension.texture = self.atlas.clone();
+        extension.texture = self.faces.clone();
         extension.textured = [UVec4::ZERO; TEXTURED_VECS];
         for (slot, &present) in self.present.iter().enumerate() {
             if present {
@@ -166,9 +178,66 @@ pub(super) fn receive(
             textures.alpha[slot] = alpha_of(row);
         }
     }
+    let faces = face_array(&pixels, &textures.alpha);
+    if let Some(old) = textures.faces.replace(images.add(faces)) {
+        images.remove(old.id());
+    }
     if let Some(old) = textures.atlas.replace(images.add(image(pixels))) {
         images.remove(old.id());
     }
+}
+
+/// One layer per Material face, each with its own mip chain, so a face
+/// repeats across a merged quad and filters down with no neighbour to bleed
+/// into. Anisotropy needs every filter linear; the shader snaps magnified
+/// texels back to crisp ones.
+fn face_array(atlas: &[u8], alpha: &[AlphaMode; ROWS]) -> Image {
+    let mut data = Vec::with_capacity(LAYERS * CHAIN_BYTES);
+    let mut tile = Vec::with_capacity(EDGE * EDGE * 4);
+    for slot in 0..ROWS {
+        let cutoff = match alpha[slot] {
+            AlphaMode::Mask(cutoff) => Some(cutoff),
+            _ => None,
+        };
+        for face in 0..FACES {
+            debug_assert_eq!(data.len(), layer(slot, face) * CHAIN_BYTES);
+            tile.clear();
+            for y in 0..EDGE {
+                let start = ((slot * EDGE + y) * WIDTH + face * EDGE) * 4;
+                tile.extend_from_slice(&atlas[start..start + EDGE * 4]);
+            }
+            data.extend(mip_chain(&tile, cutoff));
+        }
+    }
+    let mut image = Image::new_uninit(
+        Extent3d {
+            width: EDGE as u32,
+            height: EDGE as u32,
+            depth_or_array_layers: LAYERS as u32,
+        },
+        TextureDimension::D2,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    // Image::new would assert the data holds mip 0 alone; this is the default
+    // layer-major order, every layer's whole chain in turn.
+    image.data = Some(data);
+    image.texture_descriptor.mip_level_count = LEVELS;
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D2Array),
+        ..default()
+    });
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        label: Some("material faces".into()),
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: 16,
+        ..default()
+    });
+    image
 }
 
 fn alpha_of(pixels: &[u8]) -> AlphaMode {
@@ -287,8 +356,8 @@ mod tests {
         );
         assert_eq!(
             app.world().resource::<Assets<Image>>().len(),
-            1,
-            "one atlas shared by Materials and the engine flame"
+            2,
+            "one atlas and one face array, each shared by Materials and the engine flame"
         );
         assert_ne!(
             app.world().resource::<Textures>().texture(held).unwrap(),
@@ -327,6 +396,59 @@ mod tests {
                 .alpha_mode,
             AlphaMode::Mask(0.5)
         );
+    }
+
+    #[test]
+    fn terrain_faces_are_one_mipmapped_layer_each_with_an_anisotropic_repeat_sampler() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>().add_plugins(plugin);
+        let mut leaves = vec![255; MATERIAL_TEXTURE_BYTES];
+        for (i, texel) in leaves.chunks_mut(4).enumerate() {
+            texel[3] = if i % 3 == 0 { 255 } else { 0 };
+        }
+        app.world_mut()
+            .write_message(MaterialTextures(vec![(23, leaves)]));
+        app.update();
+        let textures = app.world().resource::<Textures>();
+        let image = app
+            .world()
+            .resource::<Assets<Image>>()
+            .get(textures.faces().unwrap().id())
+            .unwrap();
+        let size = image.texture_descriptor.size;
+        assert_eq!(
+            [size.width, size.height, size.depth_or_array_layers],
+            [EDGE as u32, EDGE as u32, LAYERS as u32]
+        );
+        assert_eq!(image.texture_descriptor.mip_level_count, LEVELS);
+        assert_eq!(image.data.as_ref().unwrap().len(), LAYERS * CHAIN_BYTES);
+        assert_eq!(
+            image.texture_view_descriptor.as_ref().unwrap().dimension,
+            Some(TextureViewDimension::D2Array),
+            "wgpu would infer one layer as D2"
+        );
+        let ImageSampler::Descriptor(sampler) = &image.sampler else {
+            panic!("{:?}", image.sampler);
+        };
+        assert_eq!(sampler.anisotropy_clamp, 16);
+        assert_eq!(sampler.address_mode_u, ImageAddressMode::Repeat);
+        for filter in [
+            sampler.mag_filter,
+            sampler.min_filter,
+            sampler.mipmap_filter,
+        ] {
+            assert_eq!(
+                filter,
+                ImageFilterMode::Linear,
+                "wgpu refuses anisotropy otherwise"
+            );
+        }
+        // The cutout's side face, at 2x2: plain averaging would leave no texel
+        // over the cutoff.
+        let side = layer(23, 1) * CHAIN_BYTES;
+        let two = side + (256 + 64 + 16) * 4;
+        let chain = &image.data.as_ref().unwrap()[two..two + 16];
+        assert!(chain.chunks(4).any(|t| t[3] > 127), "{chain:?}");
     }
 
     #[test]
