@@ -27,17 +27,17 @@ remove-time-s = 0.5
 
 [[appearance]]
 material = "brick"
-color = [168, 74, 52, 255]
+color = [176, 137, 126, 255]
 texture = "art/brick.png"
 
 [[appearance]]
 material = "cobble"
-color = [120, 118, 112, 255]
+color = [109, 107, 101, 255]
 texture = "art/cobble.png"
 
 [[appearance]]
 material = "tile"
-color = [190, 120, 70, 255]
+color = [181, 112, 65, 255]
 texture = "art/tile.png"
 
 [[shapes]]
