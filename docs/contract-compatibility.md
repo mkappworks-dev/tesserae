@@ -318,6 +318,13 @@ Player's curve is clamped to, at most 8192 m. Absent, Low reaches the ceiling,
 so a Game that declared its view before streams the same rings under Low. A
 Declaration built against the earlier 0.3 text needs a rebuild.
 
+An `appearance` of line 0.3 then gained `variation`, a closed `tile-variation`
+last: `fixed`, `turned` (each Voxel turns or mirrors the texture, keyed on its
+position in the World) or `turned-and-patched` (also shifting value and hue in
+patches about 5 m across). The 0.1 and 0.2 adapters and an omitted data-only
+`variation` give `fixed`, which draws exactly as before. A Declaration built
+against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

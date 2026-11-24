@@ -57,7 +57,7 @@ fn terra_declares_a_food_of_its_own_that_grows_on_its_biomes() {
     );
     assert!(loaded.tables.materials.solid(Voxel::cube(id)));
     assert!(loaded.appearance.iter().any(|(m, _)| *m == id));
-    assert!(loaded.textures.iter().any(|(m, _)| *m == id));
+    assert!(loaded.textures.iter().any(|(m, ..)| *m == id));
 
     let world = loaded.world.unwrap();
     let growing: Vec<&str> = world
@@ -470,7 +470,7 @@ fn terras_textures_are_unchanged() {
     let mut textures: Vec<_> = loaded
         .textures
         .iter()
-        .map(|(id, pixels)| {
+        .map(|(id, pixels, _)| {
             let name = loaded
                 .registry
                 .names(Kind::Material)

@@ -689,6 +689,7 @@ fn preview_texture_payloads_are_bounded_and_name_the_invalid_appearance_row() {
             a: 255,
         },
         texture,
+        variation: content::TileVariation::Fixed,
     };
     for len in [
         0,

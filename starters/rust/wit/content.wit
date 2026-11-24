@@ -84,6 +84,22 @@ interface content {
         /// pixels, three 16 by 16 tiles across, in top / side / bottom order.
         /// Exactly 3072 bytes; sRGB colour with straight alpha.
         texture: option<list<u8>>,
+        /// How the texture varies from Voxel to Voxel. Untextured, it is ignored.
+        variation: tile-variation,
+    }
+
+    /// How a Material's tile varies across its Voxels, keyed on each one's
+    /// position in the World, so a wide surface does not repeat every Voxel.
+    /// Closed in 0.3.
+    enum tile-variation {
+        /// Every Voxel draws the tile as authored: planks, brick, logs.
+        fixed,
+        /// Each Voxel turns or mirrors the tile. A face whose tile differs from
+        /// the top's, as grass's flank does, keeps its up and only mirrors.
+        turned,
+        /// Turned, and patches about 5 m across shift the colour's value and hue
+        /// on every face that draws the top's tile: foliage and grass.
+        turned-and-patched,
     }
 
     /// Cave carving. The engine feeds it to native generation unchanged once
