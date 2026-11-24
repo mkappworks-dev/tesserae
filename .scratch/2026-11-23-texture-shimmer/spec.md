@@ -1,6 +1,6 @@
 # Texture shimmer
 
-Status: ready-for-agent
+Status: done
 
 Source: branch `fix/texture-shimmer-and-saturation`, cut from `main` at
 `2f45144f`. Tickets: [issues/](issues/). The saturation half of the same report
@@ -40,23 +40,24 @@ What the code does today, read from source:
    lit by block light. Every later ticket, in this spec and the colour one, is
    judged against them.
 2. **Mipmapped Material textures.** Move the atlas to a 2D texture array, one
-   layer per Material face, so each layer is a 16x16 tile with its own full mip
-   chain (16, 8, 4, 2, 1) and no neighbour to bleed into. Mips are built on the
-   CPU when the textures arrive, averaged in linear space with alpha-weighted
-   colour so cutout leaves do not darken at distance, then alpha scaled up per
-   mip so coverage at the cutoff never falls below mip 0's. wgpu refuses
-   anisotropy unless every filter is linear, so the sampler is all-linear with
-   repeat addressing and 16x anisotropy, and the pixel-art look up close comes
-   from the shader: along each texture axis where a pixel covers less than a
-   texel, it holds the UV at the texel centre, which linear filtering returns
-   unblended, and crosses each texel edge within one pixel. A grazing view,
-   minified along one axis and magnified along the other, stays crisp along the
-   magnified one. The shader takes `dpdx`/`dpdy` of the continuous UV at the top
-   of the fragment, before any branch or discard, and samples with
-   `textureSampleGrad`; repeat addressing per layer replaces `fract`, so merged
-   quads get the right mip with no seam. The inset goes away. Item models and
-   tile icons keep the 2D atlas: held models use `StandardMaterial`, which
-   cannot sample an array, and both are seen up close.
+   layer per distinct textured Material face (a slot's three layers packed in
+   one uniform word; identical faces share a layer), so each layer is a 16x16
+   tile with its own full mip chain (16, 8, 4, 2, 1) and no neighbour to bleed
+   into. Mips are built on the CPU when the textures arrive, averaged in linear
+   space with alpha-weighted colour so cutout leaves do not darken at distance,
+   then alpha scaled up per mip so coverage at the cutoff never falls below mip
+   0's. wgpu refuses anisotropy unless every filter is linear, so the sampler is
+   all-linear with repeat addressing and 16x anisotropy, and the pixel-art look
+   up close comes from the shader: along each texture axis where a pixel covers
+   less than a texel, it holds the UV at the texel centre, which linear
+   filtering returns unblended, and crosses each texel edge within one pixel. A
+   grazing view, minified along one axis and magnified along the other, stays
+   crisp along the magnified one. The shader takes `dpdx`/`dpdy` of the
+   continuous UV at the top of the fragment, before any branch or discard, and
+   samples with `textureSampleGrad`; repeat addressing per layer replaces
+   `fract`, so merged quads get the right mip with no seam. The inset goes away.
+   Item models and tile icons keep the 2D atlas: held models use
+   `StandardMaterial`, which cannot sample an array, and both are seen up close.
 
 ## Decisions
 
@@ -64,6 +65,12 @@ What the code does today, read from source:
   read as nearest. Only distance filters.
 - One all-linear sampler with 16x anisotropy and the texel snap, kept only if
   the `flight` fixture's GPU frame time does not regress beyond noise.
+- The array is uploaded by the render world as one write per mip level, not
+  Bevy's one write per layer per mip: after Bevy's ~1500 small writes, Apple's
+  GPU performance controller held the clock low for the rest of the process once
+  the GPU got busy, and the `flight` fixture's p95 GPU frame went from 4.7 ms to
+  11-17 ms. Found on ticket 02 by sampling the GPU power state; Instruments'
+  trace suppressed the effect.
 - Texture arrays over a padded atlas: padding still bleeds at the small mips and
   wastes memory; an array layer cannot bleed.
 - Mips are built on the Client, not shipped by Mods: a Mod sends 16x16 tiles as
