@@ -6,7 +6,7 @@ use exports::tesserae::mods::guest::{
 use tesserae::mods::content::{
     Appearance, DoorDef, GroundParams, MaterialDef, MovementPolicy, Occlusion, RecipeDef,
     RecipeStack, RenderClass, TemplateCell, TemplateDef, TemplatePaletteEntry, TemplateVoxel,
-    VoxelUse, VoxelUseKind,
+    TileVariation, VoxelUse, VoxelUseKind,
 };
 use tesserae::mods::types::Srgba;
 
@@ -31,6 +31,7 @@ fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
         material: material.into(),
         color: Srgba { r, g, b, a },
         texture: None,
+        variation: TileVariation::Fixed,
     }
 }
 

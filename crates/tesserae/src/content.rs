@@ -6,9 +6,9 @@ use tesserae_core::{MaterialId, ShapeId};
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 
-/// Shared RGBA texture atlases, keyed by registered Material id.
+/// Shared RGBA texture atlases and how each varies, keyed by registered Material id.
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
-pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
+pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>, tesserae_mods::TileVariation)>);
 
 /// How the Client draws each Item, declared or implicit, in the Server's item
 /// order.

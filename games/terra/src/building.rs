@@ -3,7 +3,8 @@
 //! keeps its own copy because it builds against the WIT contract alone.
 
 use crate::tesserae::mods::content::{
-    Appearance, MaterialDef, Occlusion, RecipeDef, RecipeStack, RenderClass, VoxelUse, VoxelUseKind,
+    Appearance, MaterialDef, Occlusion, RecipeDef, RecipeStack, RenderClass, TileVariation, VoxelUse,
+    VoxelUseKind,
 };
 use crate::tesserae::mods::types::Srgba;
 use crate::textures::noise;
@@ -231,6 +232,7 @@ pub(crate) fn appearance() -> Vec<Appearance> {
                     a: 255,
                 },
                 texture: Some(texture(b)),
+                variation: TileVariation::Fixed,
             }
         })
         .collect()

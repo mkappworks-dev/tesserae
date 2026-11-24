@@ -25,6 +25,8 @@ struct ChunkVertexOutput {
     @location(0) world_position: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
+    // The world position in the level's own cells, which a varied tile keys its Voxel on.
+    @location(3) cell: vec3<f32>,
     @location(6) @interpolate(flat) instance_index: u32,
     @location(10) @interpolate(flat) material: u32,
     @location(11) @interpolate(flat) light: u32,
@@ -155,6 +157,7 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
         vec4<f32>(quad.position, 1.0),
     );
     out.clip_position = position_world_to_clip(out.world_position.xyz);
+    out.cell = out.world_position.xyz / length(world_from_local[0].xyz);
     out.world_normal = mesh_functions::mesh_normal_local_to_world(
         quad.normal,
         in.instance_index,

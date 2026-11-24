@@ -62,11 +62,13 @@ tags = ["soil"]
 material = "stone"
 color = [140, 141, 148, 255]
 texture = "art/stone.png"
+variation = "turned"
 
 [[appearance]]
 material = "basalt"
 color = [58, 60, 68, 255]
 texture = "art/basalt.png"
+variation = "turned"
 
 [[appearance]]
 material = "clay"
@@ -77,6 +79,7 @@ texture = "art/clay.png"
 material = "sand"
 color = [222, 205, 150, 255]
 texture = "art/sand.png"
+variation = "turned"
 
 [[appearance]]
 material = "soil"
