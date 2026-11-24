@@ -1,3 +1,5 @@
+import bevy_pbr::render::mesh_functions::get_world_from_local;
+
 // One layer per distinct Material face, each with its own mips.
 @group(constants::MATERIAL_BIND_GROUP) @binding(103)
 var artwork: texture_2d_array<f32>;
@@ -83,8 +85,10 @@ struct Turn {
     sign: vec2<f32>,
 }
 
-fn turn_for(cell: vec3<f32>, normal: vec3<f32>, free: bool) -> Turn {
-    // The Voxel behind the face, whatever the quad it was merged into.
+fn turn_for(world: vec3<f32>, instance: u32, normal: vec3<f32>, free: bool) -> Turn {
+    // The Voxel behind the face, whatever the quad it was merged into, in the
+    // cells of its level: the mesh's scale is that level's Voxel in metres.
+    let cell = world / length(get_world_from_local(instance)[0].xyz);
     let bits = hash(vec3<i32>(floor(cell - normal * 0.5)));
     let flip = vec2<bool>((bits & 1u) != 0u, (bits & 2u) != 0u && free);
     return Turn((bits & 4u) != 0u && free, select(vec2<f32>(1.0), vec2<f32>(-1.0), flip));
@@ -100,21 +104,24 @@ fn patched(slot: u32, normal: vec3<f32>) -> bool {
     return (word >> LOOK_SHIFT) == TURNED_AND_PATCHED && draws_the_top(word, face_of(slot, normal));
 }
 
-// Value noise on a lattice in metres, two channels from one hash, in -1..1.
+fn lattice(p: vec2<i32>) -> vec2<f32> {
+    var h = bitcast<u32>(p.x) * 0x8da6b343u + bitcast<u32>(p.y) * 0xd8163841u;
+    h = (h ^ (h >> 15u)) * 0x2c1b3c6du;
+    h ^= h >> 12u;
+    return vec2<f32>(f32(h & 0xffffu), f32(h >> 16u)) / 65535.0;
+}
+
+// Value noise on a lattice in metres across the ground, two channels from one
+// hash, in -1..1. Not in height: a crown is about as tall as a patch, and 3D
+// noise doubled the hashes on the screen's commonest faces.
 fn patch_noise(world: vec3<f32>) -> vec2<f32> {
-    let at = world / PATCH_M;
-    let base = vec3<i32>(floor(at));
+    let at = world.xz / PATCH_M;
+    let base = vec2<i32>(floor(at));
     let f = fract(at);
     let w = f * f * (3.0 - 2.0 * f);
-    var sum = vec2<f32>(0.0);
-    for (var corner = 0u; corner < 8u; corner++) {
-        let o = vec3<u32>(corner & 1u, (corner >> 1u) & 1u, corner >> 2u);
-        let h = hash(base + vec3<i32>(o));
-        let value = vec2<f32>(f32(h & 0xffffu), f32(h >> 16u)) / 65535.0;
-        let weight = select(1.0 - w, w, vec3<bool>(o));
-        sum += value * weight.x * weight.y * weight.z;
-    }
-    return sum * 2.0 - 1.0;
+    let near = mix(lattice(base), lattice(base + vec2<i32>(1, 0)), w.x);
+    let far = mix(lattice(base + vec2<i32>(0, 1)), lattice(base + vec2<i32>(1, 1)), w.x);
+    return mix(near, far, w.y) * 2.0 - 1.0;
 }
 
 // Crown-sized shifts of value and hue, the same at any Voxel size. Hue turns
@@ -128,8 +135,7 @@ fn patch_colour(rgb: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
     return max(hued, vec3<f32>(0.0)) * (1.0 + n.x * PATCH_VALUE);
 }
 
-// `cell` is the fragment's world position in its level's cells.
-fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f32>, cell: vec3<f32>) -> vec4<f32> {
+fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f32>, world: vec3<f32>, instance: u32) -> vec4<f32> {
     let face = face_of(slot, normal);
     // Turns the face's UV upright on its texture: (u, -v).
     var axes = mat2x2<f32>(1.0, 0.0, 0.0, -1.0);
@@ -149,7 +155,7 @@ fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f
     // The derivatives turn with the UV, or a turned Voxel samples the wrong
     // mip and anisotropy axis.
     if (word & TURNED) != 0u {
-        let turn = turn_for(cell, normal, draws_the_top(word, face));
+        let turn = turn_for(world, instance, normal, draws_the_top(word, face));
         coord = turned(turn, coord);
         ddx = turned(turn, ddx);
         ddy = turned(turn, ddy);
