@@ -1,10 +1,13 @@
-// One layer per Material face, top / side / bottom, each with its own mips.
+// One layer per distinct Material face, each with its own mips.
 @group(constants::MATERIAL_BIND_GROUP) @binding(103)
 var artwork: texture_2d_array<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(104)
 var artwork_sampler: sampler;
+// Per slot, its top, side and bottom layers, as texture_atlas::face_word packs them.
 @group(constants::MATERIAL_BIND_GROUP) @binding(105)
-var<uniform> textured: array<vec4<u32>, (constants::CHUNK_PALETTE_SLOTS + 127u) / 128u>;
+var<uniform> face_words: array<vec4<u32>, (constants::CHUNK_PALETTE_SLOTS + 3u) / 4u>;
+
+const TEXTURED: u32 = 1u << 31u;
 
 // A face UV's screen-space derivatives. Taken at the top of a fragment stage,
 // before any discard or per-slot branch: derivatives need the whole 2x2 quad.
@@ -25,8 +28,12 @@ fn material_slot(material: u32) -> u32 {
     );
 }
 
+fn face_word(slot: u32) -> u32 {
+    return face_words[slot / 4u][slot % 4u];
+}
+
 fn has_texture(slot: u32) -> bool {
-    return (textured[slot / 128u][(slot / 32u) % 4u] & (1u << (slot % 32u))) != 0u;
+    return (face_word(slot) & TEXTURED) != 0u;
 }
 
 fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f32>) -> vec4<f32> {
@@ -60,6 +67,7 @@ fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f
     let seam = floor(texel + 0.5);
     let crisp = seam + clamp((texel - seam) / max(per_pixel, vec2<f32>(1e-6)), vec2<f32>(-0.5), vec2<f32>(0.5));
 
-    let layer = slot * constants::CHUNK_TEXTURE_FACES + face;
+    let bits: u32 = constants::CHUNK_FACE_LAYER_BITS;
+    let layer = (face_word(slot) >> (face * bits)) & ((1u << bits) - 1u);
     return textureSampleGrad(artwork, artwork_sampler, crisp / edge, layer, ddx, ddy);
 }

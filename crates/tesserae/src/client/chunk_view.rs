@@ -1150,19 +1150,19 @@ mod tests {
         let first = app.world().resource::<Textures>().texture(held).unwrap();
         let faces = app.world().resource::<Textures>().faces().unwrap().clone();
         assert_ne!(faces, first);
+        use crate::render::{chunk_material::FLAME_SLOT, texture_atlas::face_word};
+        let word = |extension: &crate::render::chunk_material::ChunkMaterialExtension,
+                    slot: usize| extension.face_words[slot / 4][slot % 4];
         let terrain = app.world().resource::<TerrainMaterial>();
         let materials = app.world().resource::<Assets<ChunkMaterial>>();
         for handle in terrain.all() {
             let extension = &materials.get(handle).unwrap().extension;
             assert_eq!(extension.texture.as_ref(), Some(&faces));
-            assert_eq!(
-                extension.textured,
-                [
-                    UVec4::new(1 << 23, 1 << 31, 0, 0),
-                    UVec4::ZERO,
-                    UVec4::new(1, 0, 0, 0)
-                ]
-            );
+            // Slot order: each slot's three identical faces share one layer.
+            assert_eq!(word(extension, 23), face_word([0; 3]));
+            assert_eq!(word(extension, 63), face_word([1; 3]));
+            assert_eq!(word(extension, FLAME_SLOT), face_word([2; 3]));
+            assert_eq!(word(extension, 24), 0);
         }
         let item = app
             .world()
@@ -1179,10 +1179,9 @@ mod tests {
         let terrain = app.world().resource::<TerrainMaterial>();
         let materials = app.world().resource::<Assets<ChunkMaterial>>();
         for handle in terrain.all() {
-            assert_eq!(
-                materials.get(handle).unwrap().extension.textured,
-                [UVec4::ZERO, UVec4::ZERO, UVec4::new(1, 0, 0, 0)]
-            );
+            let extension = &materials.get(handle).unwrap().extension;
+            assert_eq!(word(extension, 23), 0);
+            assert_eq!(word(extension, FLAME_SLOT), face_word([0; 3]));
         }
     }
 
