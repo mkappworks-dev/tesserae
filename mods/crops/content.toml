@@ -225,127 +225,127 @@ remove-time-s = 0.05
 
 [[appearance]]
 material = "wheat_sprout"
-color = [110, 170, 60, 255]
+color = [104, 162, 55, 255]
 texture = "art/wheat_sprout.png"
 
 [[appearance]]
 material = "wheat_young"
-color = [128, 170, 56, 255]
+color = [125, 165, 55, 255]
 texture = "art/wheat_young.png"
 
 [[appearance]]
 material = "wheat_green"
-color = [146, 170, 52, 255]
+color = [152, 175, 61, 255]
 texture = "art/wheat_green.png"
 
 [[appearance]]
 material = "wheat_ripe"
-color = [214, 178, 70, 255]
+color = [188, 181, 69, 255]
 texture = "art/wheat_ripe.png"
 
 [[appearance]]
 material = "carrot_sprout"
-color = [96, 168, 64, 255]
+color = [97, 169, 65, 255]
 texture = "art/carrot_sprout.png"
 
 [[appearance]]
 material = "carrot_young"
-color = [84, 164, 60, 255]
+color = [90, 169, 66, 255]
 texture = "art/carrot_young.png"
 
 [[appearance]]
 material = "carrot_green"
-color = [74, 156, 56, 255]
+color = [83, 165, 65, 255]
 texture = "art/carrot_green.png"
 
 [[appearance]]
 material = "carrot_ripe"
-color = [66, 148, 52, 255]
+color = [128, 157, 62, 255]
 texture = "art/carrot_ripe.png"
 
 [[appearance]]
 material = "potato_sprout"
-color = [92, 160, 62, 255]
+color = [93, 161, 63, 255]
 texture = "art/potato_sprout.png"
 
 [[appearance]]
 material = "potato_young"
-color = [82, 152, 58, 255]
+color = [88, 157, 64, 255]
 texture = "art/potato_young.png"
 
 [[appearance]]
 material = "potato_green"
-color = [70, 140, 54, 255]
+color = [79, 149, 63, 255]
 texture = "art/potato_green.png"
 
 [[appearance]]
 material = "potato_ripe"
-color = [88, 120, 48, 255]
+color = [121, 136, 68, 255]
 texture = "art/potato_ripe.png"
 
 [[appearance]]
 material = "berry_sprout"
-color = [52, 112, 44, 255]
+color = [59, 113, 49, 255]
 texture = "art/berry_sprout.png"
 
 [[appearance]]
 material = "berry_bush"
-color = [52, 112, 44, 255]
+color = [50, 107, 42, 255]
 texture = "art/berry_bush.png"
 
 [[appearance]]
 material = "berry_ripe"
-color = [186, 36, 62, 255]
+color = [96, 95, 45, 255]
 texture = "art/berry_ripe.png"
 
 [[appearance]]
 material = "watermelon_sprout"
-color = [60, 140, 70, 255]
+color = [61, 141, 71, 255]
 texture = "art/watermelon_sprout.png"
 
 [[appearance]]
 material = "watermelon_young"
-color = [56, 134, 66, 255]
+color = [62, 139, 72, 255]
 texture = "art/watermelon_young.png"
 
 [[appearance]]
 material = "watermelon_vine"
-color = [48, 126, 60, 255]
+color = [57, 135, 69, 255]
 texture = "art/watermelon_vine.png"
 
 [[appearance]]
 material = "watermelon_unripe"
-color = [70, 120, 50, 255]
+color = [87, 139, 59, 255]
 texture = "art/watermelon_unripe.png"
 
 [[appearance]]
 material = "watermelon_ripe"
-color = [40, 128, 60, 255]
+color = [43, 121, 59, 255]
 texture = "art/watermelon_ripe.png"
 
 [[appearance]]
 material = "pumpkin_sprout"
-color = [92, 150, 52, 255]
+color = [93, 151, 53, 255]
 texture = "art/pumpkin_sprout.png"
 
 [[appearance]]
 material = "pumpkin_young"
-color = [86, 144, 50, 255]
+color = [92, 149, 56, 255]
 texture = "art/pumpkin_young.png"
 
 [[appearance]]
 material = "pumpkin_vine"
-color = [76, 134, 46, 255]
+color = [85, 143, 55, 255]
 texture = "art/pumpkin_vine.png"
 
 [[appearance]]
 material = "pumpkin_unripe"
-color = [92, 130, 48, 255]
+color = [110, 148, 56, 255]
 texture = "art/pumpkin_unripe.png"
 
 [[appearance]]
 material = "pumpkin_ripe"
-color = [232, 122, 28, 255]
+color = [219, 115, 29, 255]
 texture = "art/pumpkin_ripe.png"
 
 [[items]]
