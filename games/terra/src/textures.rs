@@ -150,154 +150,8 @@ fn gate_gap(face: usize, x: usize, y: usize) -> bool {
     }
 }
 
-/// Flat plants, drawn on all three tiles so a cross reads from any side; `None` is clear.
-const SPRITES: [&str; 15] = [
-    "wheat_sprout",
-    "wheat_young",
-    "wheat_green",
-    "wheat_ripe",
-    "berry_sprout",
-    "berry_bush",
-    "berry_ripe",
-    "cane",
-    "mushroom",
-    "vine",
-    "kelp",
-    "oak_sapling",
-    "apple_sapling",
-    "apple_unripe",
-    "apple_ripe",
-];
-
-fn sprite(name: &str, x: usize, y: usize) -> Option<[u8; 3]> {
-    let n = noise(x, y, 7);
-    let (xi, yi) = (x as i16, y as i16);
-    match name {
-        "wheat_sprout" | "wheat_young" | "wheat_green" | "wheat_ripe" => {
-            let stage = SPRITES.iter().position(|s| *s == name).unwrap();
-            let height = [3, 6, 10, 13][stage];
-            let stalk = [3, 6, 9, 12]
-                .iter()
-                .any(|&c| (xi - c - noise(c as usize, 0, 9) % 2).abs() == 0);
-            let top = 16 - height;
-            if !stalk || yi < top {
-                return None;
-            }
-            if stage == 3 {
-                let ear = yi < top + 4;
-                return Some(if ear {
-                    tint([214, 178, 70], (n - 128) / 14)
-                } else {
-                    tint([160, 150, 60], (n - 128) / 14)
-                });
-            }
-            Some(tint(
-                [92 + 18 * stage as u8, 158, 52],
-                (n - 128) / 14 + (16 - yi),
-            ))
-        }
-        "berry_sprout" | "berry_bush" | "berry_ripe" => {
-            let radius = if name == "berry_sprout" { 3 } else { 6 };
-            let (dx, dy) = (xi * 2 - 15, (yi - 10) * 2);
-            if dx * dx + dy * dy * 2 > radius * radius * 4 || yi < 4 {
-                return None;
-            }
-            if name == "berry_ripe" && n > 205 {
-                return Some([186, 36, 62]);
-            }
-            Some(tint(
-                [52, 112, 44],
-                (n - 128) / 10 - if dy < 0 { 0 } else { 14 },
-            ))
-        }
-        "cane" => {
-            let reed = matches!(xi, 4..=5 | 8..=9 | 12);
-            if !reed || (xi == 12 && yi < 5) {
-                return None;
-            }
-            let node = yi % 5 == 0;
-            Some(tint(
-                [140, 190, 90],
-                if node { -34 } else { (n - 128) / 12 } + (xi % 2) * 8,
-            ))
-        }
-        "mushroom" => {
-            let cap = (7..=10).contains(&yi) && (xi - 7).abs() * 2 <= 2 * (yi - 6) + 1;
-            let stem = (11..=15).contains(&yi) && (7..=8).contains(&xi);
-            if cap {
-                Some(if (xi + yi) % 4 == 0 {
-                    [236, 226, 206]
-                } else {
-                    tint([138, 74, 52], (n - 128) / 14)
-                })
-            } else if stem {
-                Some(tint([222, 210, 186], (n - 128) / 18))
-            } else {
-                None
-            }
-        }
-        "vine" => {
-            let strand = (7..=8).contains(&(xi - yi / 3 % 2));
-            let leaf = yi % 4 == 1 && ((4..=11).contains(&xi)) && n > 80;
-            (strand || leaf).then(|| tint([56, 118, 44], (n - 128) / 12))
-        }
-        "kelp" => {
-            let sway = 2 * (yi / 3 % 2) - 1;
-            if xi == 7 + sway || xi == 8 + sway {
-                Some(tint([44, 110, 70], (n - 128) / 12))
-            } else if yi % 4 == 1 && (xi == 5 + sway || xi == 10 + sway) {
-                Some(tint([60, 140, 84], (n - 128) / 14))
-            } else {
-                None
-            }
-        }
-        "oak_sapling" | "apple_sapling" => {
-            if (7..=8).contains(&xi) && yi >= 9 {
-                return Some(tint([110, 78, 44], (n - 128) / 14));
-            }
-            let (dx, dy) = ((xi * 2 - 15).abs(), ((yi - 5) * 2 - 1).abs());
-            if dx + dy * 6 / 5 < 10 && n > 60 {
-                if name == "apple_sapling" && n > 235 {
-                    return Some([196, 44, 40]);
-                }
-                return Some(tint(
-                    [62, 138, 44],
-                    (n - 128) / 10 - if yi > 6 { 14 } else { 0 },
-                ));
-            }
-            None
-        }
-        "apple_unripe" | "apple_ripe" => {
-            let ripe = name == "apple_ripe";
-            let (radius, top) = if ripe { (5, 4) } else { (3, 7) };
-            let (dx, dy) = (xi * 2 - 15, (yi - top - radius) * 2);
-            if (6..=7).contains(&xi) && yi == top - 1 {
-                return Some([88, 60, 34]);
-            }
-            if xi == 9 && yi == top - 1 || xi == 10 && yi == top - 2 {
-                return Some([70, 140, 48]);
-            }
-            if dx * dx + dy * dy > radius * radius * 4 {
-                return None;
-            }
-            let (body, under) = if ripe {
-                ([196, 44, 40], [140, 28, 30])
-            } else {
-                ([128, 168, 58], [92, 130, 44])
-            };
-            Some(tint(if dy > radius { under } else { body }, (n - 128) / 18))
-        }
-        _ => None,
-    }
-}
-
 fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] {
     let n = cells(x, y, 1, face + 3);
-    let name = match name {
-        "oak_log" | "apple_log" => "wood",
-        "oak_leaves" | "apple_leaves" => "leaves",
-        other => other,
-    };
     match name {
         "stone" => {
             if (x + 2 * y) % EDGE == 0 && cells(x, y, 4, 19) > 145 {
@@ -529,18 +383,13 @@ pub fn texture(name: &str, [r, g, b, opacity]: [u8; 4]) -> Vec<u8> {
     for y in 0..EDGE {
         for face in 0..3 {
             for x in 0..EDGE {
-                let drawn = SPRITES.contains(&name).then(|| sprite(name, x, y));
-                let colour = drawn
-                    .flatten()
-                    .unwrap_or_else(|| pixel(name, face, x, y, [r, g, b]));
+                let colour = pixel(name, face, x, y, [r, g, b]);
                 let [r, g, b] = if matches!(name, "glass" | "lava" | "lamp") {
                     colour
                 } else {
                     albedo(colour)
                 };
-                let alpha = if drawn == Some(None) {
-                    0
-                } else if name.starts_with("gate") {
+                let alpha = if name.starts_with("gate") {
                     if gate_gap(face, x, y) { 0 } else { opacity }
                 } else if name != "glass" {
                     opacity
