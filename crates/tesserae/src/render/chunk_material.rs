@@ -2,8 +2,8 @@
 //!
 //! Extending `StandardMaterial` rather than writing a bare `Material` is what
 //! buys shadows, clustered lighting, fog and tonemapping from `bevy_pbr` — the
-//! decision in DESIGN.md's "Bevy depth" row. The texture is shared with item
-//! rendering; a later Look pack can replace appearance through this boundary.
+//! decision in DESIGN.md's "Bevy depth" row. A later Look pack can replace
+//! appearance through this boundary.
 
 use bevy::asset::AssetPath;
 use bevy::mesh::{MeshVertexBufferLayoutRef, VertexBufferLayout};
@@ -26,8 +26,8 @@ pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtensi
 /// Material ids with a colour of their own.
 pub const PALETTE_LEN: usize = 256;
 
-/// One bit per palette slot and the flame slot, in `UVec4`s of 128 bits.
-pub const TEXTURED_VECS: usize = (PALETTE_LEN + 1).div_ceil(128);
+/// One face word per palette slot and the flame slot, four to a `UVec4`.
+pub const FACE_WORD_VECS: usize = (PALETTE_LEN + 1).div_ceil(4);
 
 /// The palette slot after the Materials': what a [`tesserae_core::mesh::FLAME`]
 /// quad is drawn in, so no Material's appearance row can recolour flames.
@@ -54,11 +54,13 @@ pub struct ChunkMaterialExtension {
     /// of one zero word discards nothing.
     #[storage(102, read_only)]
     pub drawn: Handle<ShaderBuffer>,
-    #[texture(103)]
+    /// One layer per distinct Material face, found through `face_words`.
+    #[texture(103, dimension = "2d_array")]
     #[sampler(104)]
     pub texture: Option<Handle<Image>>,
+    /// Per slot, `texture_atlas::face_word`: zero is untextured.
     #[uniform(105)]
-    pub textured: [UVec4; TEXTURED_VECS],
+    pub face_words: [UVec4; FACE_WORD_VECS],
     /// Every Chunk layer's quads, in `render::quad_buffer`'s ranges.
     #[storage(106, read_only)]
     pub quads: Handle<ShaderBuffer>,
@@ -106,7 +108,7 @@ impl Default for ChunkMaterialExtension {
             lod: LodParams::default(),
             drawn: Handle::default(),
             texture: None,
-            textured: [UVec4::ZERO; TEXTURED_VECS],
+            face_words: [UVec4::ZERO; FACE_WORD_VECS],
             quads: Handle::default(),
             coverage_test: true,
         }
@@ -156,12 +158,8 @@ impl MaterialExtension for ChunkMaterialExtension {
                 super::texture_atlas::EDGE as u32,
             ),
             ShaderDefVal::UInt(
-                "CHUNK_TEXTURE_WIDTH".into(),
-                super::texture_atlas::WIDTH as u32,
-            ),
-            ShaderDefVal::UInt(
-                "CHUNK_TEXTURE_HEIGHT".into(),
-                super::texture_atlas::HEIGHT as u32,
+                "CHUNK_FACE_LAYER_BITS".into(),
+                super::texture_atlas::FACE_LAYER_BITS,
             ),
         ];
         defs.extend(quad_layout_defs());

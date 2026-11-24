@@ -6,16 +6,26 @@ use super::{
 };
 use crate::content::{ItemLooks, MaterialTextures};
 use crate::render::{
-    chunk_material::{ChunkMaterialExtension, FLAME_SLOT, TEXTURED_VECS},
-    texture_atlas::{EDGE, HEIGHT, ROWS, WIDTH},
+    chunk_material::{ChunkMaterialExtension, FACE_WORD_VECS, FLAME_SLOT},
+    texture_atlas::{EDGE, FACES, HEIGHT, ROWS, WIDTH, face_word},
+    texture_mips::{LEVELS, mip_chain},
 };
 use crate::session::SessionApp;
 use bevy::{
     asset::RenderAssetUsages,
     ecs::system::SystemParam,
-    image::ImageSampler,
+    image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    render::{
+        ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
+        render_asset::RenderAssets,
+        render_resource::{
+            Extent3d, Origin3d, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
+            TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+        },
+        renderer::RenderQueue,
+        texture::GpuImage,
+    },
 };
 use std::collections::HashMap;
 
@@ -23,7 +33,12 @@ const GHOST_OPACITY: f32 = 0.75;
 
 #[derive(Resource)]
 pub(super) struct Textures {
+    /// Item models and tile icons, which sample one face up close.
     atlas: Option<Handle<Image>>,
+    /// Terrain, which also sees faces far off and at grazing angles.
+    faces: Option<Handle<Image>>,
+    /// Each slot's layers in `faces`, `texture_atlas::face_word`.
+    face_words: [u32; ROWS],
     present: [bool; ROWS],
     alpha: [AlphaMode; ROWS],
     /// Each Item's own sprite, by its place in the Server's item order.
@@ -34,6 +49,8 @@ impl Default for Textures {
     fn default() -> Self {
         Self {
             atlas: None,
+            faces: None,
+            face_words: [0; ROWS],
             present: [false; ROWS],
             alpha: [AlphaMode::Opaque; ROWS],
             sprites: HashMap::new(),
@@ -73,13 +90,16 @@ impl Textures {
             .and(self.atlas.clone())
     }
 
+    #[cfg(test)]
+    pub(super) fn faces(&self) -> Option<&Handle<Image>> {
+        self.faces.as_ref()
+    }
+
     pub(super) fn apply(&self, extension: &mut ChunkMaterialExtension) {
-        extension.texture = self.atlas.clone();
-        extension.textured = [UVec4::ZERO; TEXTURED_VECS];
-        for (slot, &present) in self.present.iter().enumerate() {
-            if present {
-                extension.textured[slot / 128][slot / 32 % 4] |= 1 << (slot % 32);
-            }
+        extension.texture = self.faces.clone();
+        extension.face_words = [UVec4::ZERO; FACE_WORD_VECS];
+        for (slot, &word) in self.face_words.iter().enumerate() {
+            extension.face_words[slot / 4][slot % 4] = word;
         }
     }
 
@@ -117,7 +137,71 @@ impl Textures {
     }
 }
 
+/// The face array's texels, one buffer per mip level holding every layer, for
+/// the render world to write once the texture exists. Bevy's own upload is one
+/// write per layer per mip; after that many small writes Apple's GPU
+/// performance controller held the clock low for the rest of the process once
+/// the GPU got busy, which more than doubled the slowest `flight` frames.
+#[derive(Resource, Default)]
+pub(super) struct FaceUpload(Option<(AssetId<Image>, Vec<Vec<u8>>)>);
+
+#[derive(Resource, Default)]
+struct PendingFaceUpload(Option<(AssetId<Image>, Vec<Vec<u8>>)>);
+
+fn take_face_upload(mut main: ResMut<MainWorld>, mut pending: ResMut<PendingFaceUpload>) {
+    if let Some(mut upload) = main.get_resource_mut::<FaceUpload>()
+        && upload.0.is_some()
+    {
+        pending.0 = upload.0.take();
+    }
+}
+
+fn write_face_upload(
+    mut pending: ResMut<PendingFaceUpload>,
+    images: Res<RenderAssets<GpuImage>>,
+    queue: Res<RenderQueue>,
+) {
+    let Some(gpu) = pending.0.as_ref().and_then(|(id, _)| images.get(*id)) else {
+        return;
+    };
+    let Some((_, levels)) = pending.0.take() else {
+        return;
+    };
+    for (level, bytes) in levels.iter().enumerate() {
+        let edge = (EDGE >> level) as u32;
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &gpu.texture,
+                mip_level: level as u32,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            bytes,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(edge * 4),
+                rows_per_image: Some(edge),
+            },
+            Extent3d {
+                width: edge,
+                height: edge,
+                depth_or_array_layers: gpu.texture.depth_or_array_layers(),
+            },
+        );
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<FaceUpload>();
+    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+        render_app
+            .init_resource::<PendingFaceUpload>()
+            .add_systems(ExtractSchedule, take_face_upload)
+            .add_systems(
+                Render,
+                write_face_upload.in_set(RenderSystems::PrepareResources),
+            );
+    }
     app.init_session_state::<Textures>()
         .add_session_message::<MaterialTextures>()
         .add_session_message::<ItemLooks>()
@@ -147,6 +231,7 @@ pub(super) fn receive(
     mut messages: MessageReader<MaterialTextures>,
     mut textures: ResMut<Textures>,
     mut images: ResMut<Assets<Image>>,
+    mut upload: ResMut<FaceUpload>,
 ) {
     if textures.atlas.is_some() && messages.is_empty() {
         return;
@@ -166,9 +251,93 @@ pub(super) fn receive(
             textures.alpha[slot] = alpha_of(row);
         }
     }
+    let (faces, words, levels) = face_array(&pixels, &textures.present, &textures.alpha);
+    info!(
+        "Material faces: {} layers",
+        faces.texture_descriptor.size.depth_or_array_layers
+    );
+    textures.face_words = words;
+    let faces = images.add(faces);
+    upload.0 = Some((faces.id(), levels));
+    if let Some(old) = textures.faces.replace(faces) {
+        images.remove(old.id());
+    }
     if let Some(old) = textures.atlas.replace(images.add(image(pixels))) {
         images.remove(old.id());
     }
+}
+
+/// One layer per distinct face, each with its own mip chain, so a face
+/// repeats across a merged quad and filters down with no neighbour to bleed
+/// into. Only textured slots get layers, and identical faces share one: the GPU
+/// frame grows with layers times mips, which at one layer for every slot's
+/// every face more than doubled the slowest `flight` frames. Anisotropy needs
+/// every filter linear; the shader snaps magnified texels back to crisp ones.
+/// The texels come back apart, by mip level, for [`FaceUpload`].
+fn face_array(
+    atlas: &[u8],
+    present: &[bool; ROWS],
+    alpha: &[AlphaMode; ROWS],
+) -> (Image, [u32; ROWS], Vec<Vec<u8>>) {
+    let mut levels = vec![Vec::new(); LEVELS as usize];
+    let mut layers: HashMap<(Vec<u8>, Option<u32>), u32> = HashMap::new();
+    let mut words = [0; ROWS];
+    for slot in (0..ROWS).filter(|&slot| present[slot]) {
+        let cutoff = match alpha[slot] {
+            AlphaMode::Mask(cutoff) => Some(cutoff),
+            _ => None,
+        };
+        let mut face_layers = [0; FACES];
+        for (face, layer) in face_layers.iter_mut().enumerate() {
+            let mut tile = Vec::with_capacity(EDGE * EDGE * 4);
+            for y in 0..EDGE {
+                let start = ((slot * EDGE + y) * WIDTH + face * EDGE) * 4;
+                tile.extend_from_slice(&atlas[start..start + EDGE * 4]);
+            }
+            let next = layers.len() as u32;
+            *layer = *layers
+                .entry((tile, cutoff.map(f32::to_bits)))
+                .or_insert_with_key(|(tile, _)| {
+                    let chain = mip_chain(tile, cutoff);
+                    let mut at = 0;
+                    for (level, bytes) in levels.iter_mut().enumerate() {
+                        let len = (EDGE >> level) * (EDGE >> level) * 4;
+                        bytes.extend_from_slice(&chain[at..at + len]);
+                        at += len;
+                    }
+                    next
+                });
+        }
+        words[slot] = face_word(face_layers);
+    }
+    // Up to every slot's every face, past WebGPU's default limit of 256 layers;
+    // Bevy requests the adapter's own limits, and Metal allows 2048.
+    let mut image = Image::new_uninit(
+        Extent3d {
+            width: EDGE as u32,
+            height: EDGE as u32,
+            depth_or_array_layers: layers.len() as u32,
+        },
+        TextureDimension::D2,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.mip_level_count = LEVELS;
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::D2Array),
+        ..default()
+    });
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        label: Some("material faces".into()),
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: 16,
+        ..default()
+    });
+    (image, words, levels)
 }
 
 fn alpha_of(pixels: &[u8]) -> AlphaMode {
@@ -246,6 +415,7 @@ fn flame() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::texture_atlas::{FACE_LAYER_BITS, TEXTURED};
     use tesserae_core::SHAPE_FULL_CUBE;
     use tesserae_mods::MATERIAL_TEXTURE_BYTES;
 
@@ -287,8 +457,8 @@ mod tests {
         );
         assert_eq!(
             app.world().resource::<Assets<Image>>().len(),
-            1,
-            "one atlas shared by Materials and the engine flame"
+            2,
+            "one atlas and one face array, each shared by Materials and the engine flame"
         );
         assert_ne!(
             app.world().resource::<Textures>().texture(held).unwrap(),
@@ -327,6 +497,81 @@ mod tests {
                 .alpha_mode,
             AlphaMode::Mask(0.5)
         );
+    }
+
+    #[test]
+    fn terrain_faces_are_mipmapped_layers_shared_by_identical_faces_with_an_anisotropic_sampler() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>().add_plugins(plugin);
+        let mut leaves = vec![255; MATERIAL_TEXTURE_BYTES];
+        for (i, texel) in leaves.chunks_mut(4).enumerate() {
+            texel[3] = if i.is_multiple_of(3) { 255 } else { 0 };
+        }
+        app.world_mut().write_message(MaterialTextures(vec![
+            (23, leaves),
+            (40, vec![200; MATERIAL_TEXTURE_BYTES]),
+            (41, vec![200; MATERIAL_TEXTURE_BYTES]),
+        ]));
+        app.update();
+        let textures = app.world().resource::<Textures>();
+        let layer =
+            |slot: usize, face: u32| (textures.face_words[slot] >> (face * FACE_LAYER_BITS)) & 1023;
+        assert_eq!(textures.face_words[24], 0, "untextured");
+        assert_ne!(textures.face_words[23] & TEXTURED, 0);
+        assert!(
+            (0..3).all(|face| layer(40, face) == layer(41, 0)),
+            "one layer for six faces"
+        );
+        let distinct: std::collections::HashSet<u32> = [23, 40, FLAME_SLOT]
+            .iter()
+            .flat_map(|&slot| (0..3).map(move |face| layer(slot, face)))
+            .collect();
+        let image = app
+            .world()
+            .resource::<Assets<Image>>()
+            .get(textures.faces().unwrap().id())
+            .unwrap();
+        let size = image.texture_descriptor.size;
+        assert_eq!(
+            [size.width, size.height, size.depth_or_array_layers],
+            [EDGE as u32, EDGE as u32, distinct.len() as u32]
+        );
+        assert_eq!(image.texture_descriptor.mip_level_count, LEVELS);
+        assert!(image.data.is_none(), "the render world writes it, by level");
+        let upload = app.world().resource::<FaceUpload>().0.as_ref().unwrap();
+        assert_eq!(upload.0, textures.faces().unwrap().id());
+        let levels = &upload.1;
+        assert_eq!(levels.len(), LEVELS as usize);
+        for (level, bytes) in levels.iter().enumerate() {
+            let edge = EDGE >> level;
+            assert_eq!(bytes.len(), distinct.len() * edge * edge * 4);
+        }
+        assert_eq!(
+            image.texture_view_descriptor.as_ref().unwrap().dimension,
+            Some(TextureViewDimension::D2Array),
+            "wgpu would infer one layer as D2"
+        );
+        let ImageSampler::Descriptor(sampler) = &image.sampler else {
+            panic!("{:?}", image.sampler);
+        };
+        assert_eq!(sampler.anisotropy_clamp, 16);
+        assert_eq!(sampler.address_mode_u, ImageAddressMode::Repeat);
+        for filter in [
+            sampler.mag_filter,
+            sampler.min_filter,
+            sampler.mipmap_filter,
+        ] {
+            assert_eq!(
+                filter,
+                ImageFilterMode::Linear,
+                "wgpu refuses anisotropy otherwise"
+            );
+        }
+        // The cutout's side face, at 2x2: plain averaging would leave no texel
+        // over the cutoff.
+        let two = layer(23, 1) as usize * 2 * 2 * 4;
+        let side = &levels[3][two..two + 16];
+        assert!(side.chunks(4).any(|t| t[3] > 127), "{side:?}");
     }
 
     #[test]

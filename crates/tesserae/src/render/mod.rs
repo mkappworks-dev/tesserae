@@ -4,6 +4,7 @@ pub mod chunk_material;
 pub mod fog;
 pub mod quad_buffer;
 pub(crate) mod texture_atlas;
+pub(crate) mod texture_mips;
 pub(crate) mod tile_icon;
 mod view_caches;
 

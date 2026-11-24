@@ -115,7 +115,7 @@ impl Default for MapWindow {
 
 impl MapWindow {
     /// Open from the first frame, for a capture of the window.
-    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub(super) fn opened() -> Self {
         Self {
             open: true,
