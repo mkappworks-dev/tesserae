@@ -16,8 +16,15 @@ use bevy::{
     ecs::system::SystemParam,
     image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     prelude::*,
-    render::render_resource::{
-        Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+    render::{
+        ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
+        render_asset::RenderAssets,
+        render_resource::{
+            Extent3d, Origin3d, TexelCopyBufferLayout, TexelCopyTextureInfo, TextureAspect,
+            TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+        },
+        renderer::RenderQueue,
+        texture::GpuImage,
     },
 };
 use std::collections::HashMap;
@@ -130,7 +137,71 @@ impl Textures {
     }
 }
 
+/// The face array's texels, one buffer per mip level holding every layer, for
+/// the render world to write once the texture exists. Bevy's own upload is one
+/// write per layer per mip; after that many small writes Apple's GPU
+/// performance controller held the clock low for the rest of the process once
+/// the GPU got busy, which more than doubled the slowest `flight` frames.
+#[derive(Resource, Default)]
+pub(super) struct FaceUpload(Option<(AssetId<Image>, Vec<Vec<u8>>)>);
+
+#[derive(Resource, Default)]
+struct PendingFaceUpload(Option<(AssetId<Image>, Vec<Vec<u8>>)>);
+
+fn take_face_upload(mut main: ResMut<MainWorld>, mut pending: ResMut<PendingFaceUpload>) {
+    if let Some(mut upload) = main.get_resource_mut::<FaceUpload>()
+        && upload.0.is_some()
+    {
+        pending.0 = upload.0.take();
+    }
+}
+
+fn write_face_upload(
+    mut pending: ResMut<PendingFaceUpload>,
+    images: Res<RenderAssets<GpuImage>>,
+    queue: Res<RenderQueue>,
+) {
+    let Some(gpu) = pending.0.as_ref().and_then(|(id, _)| images.get(*id)) else {
+        return;
+    };
+    let Some((_, levels)) = pending.0.take() else {
+        return;
+    };
+    for (level, bytes) in levels.iter().enumerate() {
+        let edge = (EDGE >> level) as u32;
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &gpu.texture,
+                mip_level: level as u32,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            bytes,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(edge * 4),
+                rows_per_image: Some(edge),
+            },
+            Extent3d {
+                width: edge,
+                height: edge,
+                depth_or_array_layers: gpu.texture.depth_or_array_layers(),
+            },
+        );
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<FaceUpload>();
+    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+        render_app
+            .init_resource::<PendingFaceUpload>()
+            .add_systems(ExtractSchedule, take_face_upload)
+            .add_systems(
+                Render,
+                write_face_upload.in_set(RenderSystems::PrepareResources),
+            );
+    }
     app.init_session_state::<Textures>()
         .add_session_message::<MaterialTextures>()
         .add_session_message::<ItemLooks>()
@@ -160,6 +231,7 @@ pub(super) fn receive(
     mut messages: MessageReader<MaterialTextures>,
     mut textures: ResMut<Textures>,
     mut images: ResMut<Assets<Image>>,
+    mut upload: ResMut<FaceUpload>,
 ) {
     if textures.atlas.is_some() && messages.is_empty() {
         return;
@@ -179,13 +251,15 @@ pub(super) fn receive(
             textures.alpha[slot] = alpha_of(row);
         }
     }
-    let (faces, words) = face_array(&pixels, &textures.present, &textures.alpha);
+    let (faces, words, levels) = face_array(&pixels, &textures.present, &textures.alpha);
     info!(
         "Material faces: {} layers",
         faces.texture_descriptor.size.depth_or_array_layers
     );
     textures.face_words = words;
-    if let Some(old) = textures.faces.replace(images.add(faces)) {
+    let faces = images.add(faces);
+    upload.0 = Some((faces.id(), levels));
+    if let Some(old) = textures.faces.replace(faces) {
         images.remove(old.id());
     }
     if let Some(old) = textures.atlas.replace(images.add(image(pixels))) {
@@ -199,12 +273,13 @@ pub(super) fn receive(
 /// frame grows with layers times mips, which at one layer for every slot's
 /// every face more than doubled the slowest `flight` frames. Anisotropy needs
 /// every filter linear; the shader snaps magnified texels back to crisp ones.
+/// The texels come back apart, by mip level, for [`FaceUpload`].
 fn face_array(
     atlas: &[u8],
     present: &[bool; ROWS],
     alpha: &[AlphaMode; ROWS],
-) -> (Image, [u32; ROWS]) {
-    let mut data = Vec::new();
+) -> (Image, [u32; ROWS], Vec<Vec<u8>>) {
+    let mut levels = vec![Vec::new(); LEVELS as usize];
     let mut layers: HashMap<(Vec<u8>, Option<u32>), u32> = HashMap::new();
     let mut words = [0; ROWS];
     for slot in (0..ROWS).filter(|&slot| present[slot]) {
@@ -223,7 +298,13 @@ fn face_array(
             *layer = *layers
                 .entry((tile, cutoff.map(f32::to_bits)))
                 .or_insert_with_key(|(tile, _)| {
-                    data.extend(mip_chain(tile, cutoff));
+                    let chain = mip_chain(tile, cutoff);
+                    let mut at = 0;
+                    for (level, bytes) in levels.iter_mut().enumerate() {
+                        let len = (EDGE >> level) * (EDGE >> level) * 4;
+                        bytes.extend_from_slice(&chain[at..at + len]);
+                        at += len;
+                    }
                     next
                 });
         }
@@ -241,9 +322,6 @@ fn face_array(
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     );
-    // Image::new would assert the data holds mip 0 alone; this is the default
-    // layer-major order, every layer's whole chain in turn.
-    image.data = Some(data);
     image.texture_descriptor.mip_level_count = LEVELS;
     image.texture_view_descriptor = Some(TextureViewDescriptor {
         dimension: Some(TextureViewDimension::D2Array),
@@ -259,7 +337,7 @@ fn face_array(
         anisotropy_clamp: 16,
         ..default()
     });
-    (image, words)
+    (image, words, levels)
 }
 
 fn alpha_of(pixels: &[u8]) -> AlphaMode {
@@ -338,7 +416,6 @@ fn flame() -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::render::texture_atlas::{FACE_LAYER_BITS, TEXTURED};
-    use crate::render::texture_mips::CHAIN_BYTES;
     use tesserae_core::SHAPE_FULL_CUBE;
     use tesserae_mods::MATERIAL_TEXTURE_BYTES;
 
@@ -460,10 +537,15 @@ mod tests {
             [EDGE as u32, EDGE as u32, distinct.len() as u32]
         );
         assert_eq!(image.texture_descriptor.mip_level_count, LEVELS);
-        assert_eq!(
-            image.data.as_ref().unwrap().len(),
-            distinct.len() * CHAIN_BYTES
-        );
+        assert!(image.data.is_none(), "the render world writes it, by level");
+        let upload = app.world().resource::<FaceUpload>().0.as_ref().unwrap();
+        assert_eq!(upload.0, textures.faces().unwrap().id());
+        let levels = &upload.1;
+        assert_eq!(levels.len(), LEVELS as usize);
+        for (level, bytes) in levels.iter().enumerate() {
+            let edge = EDGE >> level;
+            assert_eq!(bytes.len(), distinct.len() * edge * edge * 4);
+        }
         assert_eq!(
             image.texture_view_descriptor.as_ref().unwrap().dimension,
             Some(TextureViewDimension::D2Array),
@@ -487,10 +569,9 @@ mod tests {
         }
         // The cutout's side face, at 2x2: plain averaging would leave no texel
         // over the cutoff.
-        let side = layer(23, 1) as usize * CHAIN_BYTES;
-        let two = side + (256 + 64 + 16) * 4;
-        let chain = &image.data.as_ref().unwrap()[two..two + 16];
-        assert!(chain.chunks(4).any(|t| t[3] > 127), "{chain:?}");
+        let two = layer(23, 1) as usize * 2 * 2 * 4;
+        let side = &levels[3][two..two + 16];
+        assert!(side.chunks(4).any(|t| t[3] > 127), "{side:?}");
     }
 
     #[test]
