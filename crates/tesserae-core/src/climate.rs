@@ -731,7 +731,8 @@ pub struct SurfaceVine {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceTree {
     pub trunk: MaterialId,
-    pub canopy: MaterialId,
+    pub canopy: crate::plant::Canopies,
+    pub storeys: crate::plant::Storeys,
     pub trunk_height_m: (f32, f32),
     pub canopy_radius_m: f32,
     pub fruit: Option<SurfaceFruit>,
@@ -743,10 +744,30 @@ pub struct SurfaceTree {
 }
 
 impl SurfaceTree {
-    /// How far the tree reaches from its column, in metres.
+    pub fn own_band(&self) -> crate::plant::Band {
+        crate::plant::Band {
+            trunk_height_m: self.trunk_height_m,
+            canopy_radius_m: self.canopy_radius_m,
+            branching: self.branching,
+        }
+    }
+
+    /// How far its widest band reaches from its column, in metres.
     pub fn reach_m(&self) -> f32 {
-        self.branching
-            .map_or(self.canopy_radius_m, |b| b.extent_m(self.canopy_radius_m))
+        let bands = self.storeys.bands(self.own_band());
+        bands.map(|b| b.reach_m()).fold(0.0, f32::max)
+    }
+
+    /// How far its tallest band stands above its base, in metres, before rounding to Voxels.
+    pub fn rise_m(&self) -> f32 {
+        let bands = self.storeys.bands(self.own_band());
+        bands
+            .map(|b| {
+                b.trunk_height_m.1
+                    + b.canopy_radius_m
+                        .max(b.branching.map_or(0.0, |b| b.lobe_radius_m))
+            })
+            .fold(0.0, f32::max)
     }
 
     /// Voxels a branched tree's cells can stand past its extent in metres: the lean, spread, limb
@@ -810,7 +831,8 @@ impl SurfacePlant {
                 all
             }
             SurfacePlantKind::Tree(t) => {
-                let mut all = vec![t.trunk, t.canopy];
+                let mut all = vec![t.trunk];
+                all.extend_from_slice(t.canopy.as_slice());
                 if let Some(f) = t.fruit {
                     all.extend_from_slice(&f.stages[..f.len as usize]);
                 }
@@ -826,11 +848,7 @@ impl SurfacePlant {
             SurfacePlantKind::Stages { .. } => 0.0,
             SurfacePlantKind::Column { max_height_m, .. } => max_height_m,
             SurfacePlantKind::Vine(_) => 0.0,
-            SurfacePlantKind::Tree(t) => {
-                t.trunk_height_m.1
-                    + t.canopy_radius_m
-                        .max(t.branching.map_or(0.0, |b| b.lobe_radius_m))
-            }
+            SurfacePlantKind::Tree(t) => t.rise_m(),
         }
     }
 
@@ -894,8 +912,11 @@ impl SurfacePlant {
                 {
                     return Err(bad("a tree's branching must be one the generator can draw"));
                 }
+                if t.storeys.check(t.own_band()).is_err() {
+                    return Err(bad("a tree's storeys must be ones the generator can draw"));
+                }
                 if t.trunk == AIR
-                    || t.canopy == AIR
+                    || t.canopy.contains(AIR)
                     || !finite_pos(low)
                     || !matches!(
                         low.partial_cmp(&high),

@@ -58,9 +58,10 @@ fn crop_field(
 }
 
 // Rare trees come first and ground cover last, so where chances sum past 1 the cover gives way and
-// no tree is starved. Density classes follow the approved mockup: dense jungle and swamp (trees 4 m,
-// understory 30 to 40% of the ground), moderate temperate and cold forest (trees about 7 to 10 m, in
-// groves, ground cover 10 to 15%), sparse savanna and desert (trees 26 to 40 m, cover under 8%).
+// no tree is starved. Density classes follow the approved mockup: dense jungle and swamp (trees 5
+// to 6 m, understory 30 to 40% of the ground), moderate temperate and cold forest (trees about 7
+// to 10 m, in groves, ground cover 10 to 15%), sparse savanna and desert (trees 26 to 40 m, cover
+// under 8%).
 // A clump is `(scale_m, strength)`; a 12 to 16 m scale makes ground cover patches 4 to 10 m across
 // with bare ground between, a 24 m scale crops and berries, a 48 m scale groves, 96 m sparse trees.
 // A clump never concentrates a feature past twice its mean, so a flower is a few blooms to a patch.
@@ -157,7 +158,7 @@ pub fn cold() -> Vec<SurfaceFeature> {
 
 pub fn jungle() -> Vec<SurfaceFeature> {
     plants(&[
-        ("flora:jungle", 4.0, 32.0, 0.5),
+        ("flora:jungle", 6.0, 32.0, 0.25),
         ("flora:palm", 8.0, 32.0, 0.5),
         ("flora:orchid", 5.5, 14.0, 0.9),
         ("crops:berry", 14.0, 22.0, 0.95),
@@ -170,7 +171,7 @@ pub fn jungle() -> Vec<SurfaceFeature> {
 
 pub fn swamp() -> Vec<SurfaceFeature> {
     plants(&[
-        ("flora:swamp", 4.0, 32.0, 0.7),
+        ("flora:swamp", 5.0, 32.0, 0.7),
         ("flora:orchid", 6.5, 14.0, 0.9),
         ("crops:berry", 20.0, 22.0, 0.95),
         ("flora:mushroom_brown", 5.5, 16.0, 0.95),

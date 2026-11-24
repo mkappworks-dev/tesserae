@@ -651,7 +651,12 @@ interface content {
         /// The tree's grown Materials, solid and `<mod id>:<name>`: made only
         /// by growth and worldgen, never placeable and named by no Item.
         trunk: string,
-        canopy: string,
+        /// One canopy, or up to 4 alike but for colour: each tree grows one,
+        /// drawn by the World seed and where it stands.
+        canopy: list<string>,
+        /// Up to 4 height bands, each tree in one, drawn like its canopy.
+        /// Empty is one band, `trunk-height-m` under `canopy-radius-m`.
+        storeys: list<storey-def>,
         /// A low and high, above 0 and at most 32, chosen per tree.
         trunk-height-m: tuple<f32, f32>,
         /// Above 0 and at most 8.
@@ -672,6 +677,19 @@ interface content {
         /// generating, above 0 and at most 12. `none` is 1.5 times
         /// `canopy-radius-m`; a dense stand declares less.
         crowding-m: option<f32>,
+    }
+
+    /// One height band of a tree. Its `branching` is the row's, its reach,
+    /// lean and lobes scaled by this crown over the row's `canopy-radius-m`.
+    /// Where two trees' crowns meet, the taller storey's Voxel stands.
+    record storey-def {
+        /// This storey's share of the row's trees, against the others';
+        /// above 0.
+        weight: f32,
+        /// A low and high, above 0 and at most 32.
+        trunk-height-m: tuple<f32, f32>,
+        /// Above 0 and at most 8; `none` is the row's `canopy-radius-m`.
+        canopy-radius-m: option<f32>,
     }
 
     /// The vines worldgen hangs from a tree, by a pure function of the tree and

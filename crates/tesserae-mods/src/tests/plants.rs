@@ -280,6 +280,43 @@ fn a_data_mod_declares_stands_in_in_its_column_row() {
 }
 
 #[test]
+fn a_data_mod_names_one_canopy_or_a_list_and_storeys_in_its_tree_row() {
+    let parse = |canopy: &str, storeys: &str| {
+        let toml = format!(
+            "[[plants]]\nname = \"oak\"\nkind = \"tree\"\nseed = \"t:sapling\"\n\
+             sapling = \"t:sapling\"\ntrunk = \"t:log\"\ncanopy = {canopy}\n{storeys}\
+             trunk-height-m = [3.0, 5.0]\ncanopy-radius-m = 2.5\n\
+             mean-seconds = 60.0\nsapling-yield = [1, 1]\n[plants.needs]\nsoil = [\"t:sand\"]\n"
+        );
+        let payload = crate::trust::CheckedPayload::for_test(
+            "content.toml",
+            [("content.toml", toml.into_bytes())],
+        );
+        let declared = crate::data::parse("t", &payload).unwrap();
+        let content::PlantKind::Tree(tree) = declared.plants[0].kind.clone() else {
+            panic!("a tree");
+        };
+        tree
+    };
+    let one = parse("\"t:leaf\"", "");
+    assert_eq!(one.canopy, ["t:leaf"]);
+    assert!(one.storeys.is_empty());
+    let many = parse(
+        "[\"t:leaf\", \"t:leaf_dark\"]",
+        "storeys = [{ weight = 0.7, trunk-height-m = [4.0, 5.0] }, \
+         { weight = 0.3, trunk-height-m = [2.0, 3.0], canopy-radius-m = 1.5 }]\n",
+    );
+    assert_eq!(many.canopy, ["t:leaf", "t:leaf_dark"]);
+    assert_eq!(
+        many.storeys
+            .iter()
+            .map(|s| (s.weight, s.trunk_height_m, s.canopy_radius_m))
+            .collect::<Vec<_>>(),
+        [(0.7, (4.0, 5.0), None), (0.3, (2.0, 3.0), Some(1.5))]
+    );
+}
+
+#[test]
 fn a_data_mod_names_a_plants_and_a_fruits_shape_in_its_rows() {
     let toml = "[[plants]]\nname = \"oak\"\nkind = \"tree\"\nseed = \"t:sapling\"\n\
          shape = \"t:cross\"\nsapling = \"t:sapling\"\ntrunk = \"t:log\"\n\
@@ -364,7 +401,8 @@ mod surface_features {
                     sapling: "t:sapling".into(),
                     sapling_yields: Vec::new(),
                     trunk: "t:log".into(),
-                    canopy: "t:leaf".into(),
+                    canopy: vec!["t:leaf".into()],
+                    storeys: Vec::new(),
                     trunk_height_m: (3.0, 5.0),
                     canopy_radius_m: 2.5,
                     mean_seconds: 60.0,
@@ -459,8 +497,20 @@ mod surface_features {
     ) -> Result<(tesserae_core::BiomeTable, Tables, Registry), ModError> {
         let mut d = empty();
         d.materials = [
-            "sand", "wheat0", "wheat1", "wheat2", "sapling", "log", "leaf", "apple0", "apple1",
-            "kelp", "hanger", "vine", "grass",
+            "sand",
+            "wheat0",
+            "wheat1",
+            "wheat2",
+            "sapling",
+            "log",
+            "leaf",
+            "apple0",
+            "apple1",
+            "kelp",
+            "hanger",
+            "vine",
+            "grass",
+            "leaf_dark",
         ]
         .map(|n| material(n, true))
         .into();
@@ -834,7 +884,7 @@ mod surface_features {
         assert_eq!(
             (
                 tree.trunk,
-                tree.canopy,
+                tree.canopy.first(),
                 tree.canopy_radius_m,
                 fruit.len,
                 fruit.density
@@ -1120,6 +1170,100 @@ mod surface_features {
             (
                 "no length",
                 refused(vines("t:vine", 0.3, 0.0), Some("t:plane"), &both),
+            ),
+        ] {
+            assert!(err.contains("oak"), "{what}: {err}");
+        }
+    }
+
+    fn storeyed(edit: impl Fn(&mut content::TreeDef)) -> Vec<content::PlantDef> {
+        let mut rows = plants();
+        for row in &mut rows {
+            if let content::PlantKind::Tree(tree) = &mut row.kind {
+                tree.canopy = vec!["t:leaf".into(), "t:leaf_dark".into()];
+                tree.storeys = vec![
+                    content::StoreyDef {
+                        weight: 0.7,
+                        trunk_height_m: (4.0, 5.0),
+                        canopy_radius_m: None,
+                    },
+                    content::StoreyDef {
+                        weight: 0.3,
+                        trunk_height_m: (2.0, 3.0),
+                        canopy_radius_m: Some(1.5),
+                    },
+                ];
+                edit(tree);
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn canopy_variants_and_storeys_resolve_and_freeze_into_the_biome() {
+        let (biomes, tables, registry) =
+            resolved_with(vec![feature(None, Some("t:oak"), None)], storeyed(|_| {})).unwrap();
+        let Kind::Tree(tree) = &tables.plants.plants()[1].kind else {
+            panic!("a tree");
+        };
+        let (leaf, dark) = (id(&registry, "t:leaf"), id(&registry, "t:leaf_dark"));
+        assert_eq!(tree.canopy.as_slice(), [leaf, dark]);
+        let storeys = tree.storeys.as_slice();
+        assert_eq!(
+            storeys
+                .iter()
+                .map(|s| (s.weight, s.trunk_height_m, s.canopy_radius_m))
+                .collect::<Vec<_>>(),
+            [(0.7, (4.0, 5.0), 2.5), (0.3, (2.0, 3.0), 1.5)],
+            "a storey naming no crown takes the row's"
+        );
+        for m in [leaf, dark] {
+            assert_eq!(
+                tables.plants.of(m).map(|r| r.role),
+                Some(tesserae_core::PlantRole::Canopy)
+            );
+        }
+        let SurfacePlantKind::Tree(frozen) = biomes.as_slice()[0].surface_features.as_slice()[0]
+            .plant
+            .unwrap()
+            .kind
+        else {
+            panic!("a tree");
+        };
+        assert_eq!((frozen.canopy, frozen.storeys), (tree.canopy, tree.storeys));
+    }
+
+    #[test]
+    fn storeys_or_canopies_the_generator_cannot_draw_are_a_load_error_naming_the_tree() {
+        let refused = |edit: &dyn Fn(&mut content::TreeDef)| {
+            resolved_with(vec![], storeyed(edit))
+                .unwrap_err()
+                .to_string()
+        };
+        let storey = content::StoreyDef {
+            weight: 1.0,
+            trunk_height_m: (3.0, 4.0),
+            canopy_radius_m: None,
+        };
+        for (what, err) in [
+            ("a weight", refused(&|t| t.storeys[0].weight = 0.0)),
+            (
+                "a height",
+                refused(&|t| t.storeys[1].trunk_height_m = (3.0, 2.0)),
+            ),
+            (
+                "a crown",
+                refused(&|t| t.storeys[1].canopy_radius_m = Some(9.0)),
+            ),
+            ("five storeys", refused(&|t| t.storeys = vec![storey; 5])),
+            ("no canopy", refused(&|t| t.canopy.clear())),
+            (
+                "five canopies",
+                refused(&|t| t.canopy = vec!["t:leaf".into(); 5]),
+            ),
+            (
+                "an unknown canopy",
+                refused(&|t| t.canopy[1] = "t:nope".into()),
             ),
         ] {
             assert!(err.contains("oak"), "{what}: {err}");

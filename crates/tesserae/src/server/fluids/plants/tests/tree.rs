@@ -68,11 +68,12 @@ pub(super) fn regrowing(
     let placed = material(Occlusion::Never);
     let every = Some(tesserae_core::plant::SAMPLE_INTERVAL_S);
     let tree = Tree {
+        storeys: tesserae_core::plant::Storeys::NONE,
         vines: None,
         branching,
         crowding_m: None,
         trunk,
-        canopy,
+        canopy: tesserae_core::plant::Canopies::one(canopy),
         trunk_height_m,
         canopy_radius_m,
         mean_seconds: tesserae_core::plant::SAMPLE_INTERVAL_S,
@@ -552,7 +553,7 @@ fn bare_tree(size: f32, o: &Orchard) -> (Farm, Vec<[i32; 3]>) {
         let material = if v.part == Part::Trunk {
             v.material
         } else {
-            o.tree.canopy
+            o.tree.canopy.first()
         };
         if v.part != Part::Trunk {
             leaves.push(v.at);
@@ -608,7 +609,7 @@ fn fruit_picked_from_a_full_tree_grows_back_elsewhere() {
         .iter()
         .find(|&&c| o.fruit.contains(&at(&farm, c)))
         .unwrap();
-    farm.solid(picked, Voxel::cube(o.tree.canopy));
+    farm.solid(picked, Voxel::cube(o.tree.canopy.first()));
     assert_eq!(fruit_on(&farm, &o, &leaves), cap - 1);
     assert!(until(&mut farm, 300_000, |f| fruit_on(f, &o, &leaves) >= cap));
 }
@@ -648,7 +649,7 @@ fn a_tree_in_the_dark_grows_no_fruit_until_light_reaches_it() {
         let material = if v.part == Part::Trunk {
             v.material
         } else {
-            o.tree.canopy
+            o.tree.canopy.first()
         };
         if v.part != Part::Trunk {
             leaves.push(v.at);
