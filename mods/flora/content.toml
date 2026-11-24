@@ -693,11 +693,13 @@ variation = "turned-and-patched"
 material = "oak_leaves_dark"
 color = [72, 99, 47, 255]
 texture = "art/oak_leaves_dark.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "oak_leaves_light"
 color = [76, 116, 55, 255]
 texture = "art/oak_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "oak_sapling"
@@ -803,11 +805,13 @@ variation = "turned-and-patched"
 material = "jungle_leaves_dark"
 color = [69, 107, 53, 255]
 texture = "art/jungle_leaves_dark.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "jungle_leaves_light"
 color = [72, 126, 63, 255]
 texture = "art/jungle_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "jungle_sapling"
@@ -829,11 +833,13 @@ variation = "turned-and-patched"
 material = "swamp_leaves_dark"
 color = [75, 86, 48, 255]
 texture = "art/swamp_leaves_dark.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "swamp_leaves_light"
 color = [82, 101, 57, 255]
 texture = "art/swamp_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "swamp_sapling"
@@ -855,11 +861,13 @@ variation = "turned-and-patched"
 material = "apple_leaves_dark"
 color = [71, 98, 46, 255]
 texture = "art/apple_leaves_dark.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_leaves_light"
 color = [76, 116, 55, 255]
 texture = "art/apple_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_sapling"
@@ -881,11 +889,13 @@ variation = "turned-and-patched"
 material = "orange_leaves_dark"
 color = [65, 93, 47, 255]
 texture = "art/orange_leaves_dark.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "orange_leaves_light"
 color = [69, 109, 55, 255]
 texture = "art/orange_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "orange_sapling"
@@ -907,11 +917,13 @@ variation = "turned-and-patched"
 material = "cherry_leaves_dark"
 color = [89, 111, 57, 255]
 texture = "art/cherry_leaves_dark.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "cherry_leaves_light"
 color = [96, 131, 67, 255]
 texture = "art/cherry_leaves_light.png"
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "cherry_sapling"
