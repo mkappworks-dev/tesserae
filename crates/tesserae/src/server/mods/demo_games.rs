@@ -289,6 +289,48 @@ fn terra_lava_hurts_on_contact() {
     assert_eq!(lavas, 1);
 }
 
+/// A grey sky makes the greens below it louder, so a Biome's character lives in its fog.
+#[test]
+fn every_terra_sky_is_blue_overhead_under_a_lighter_fog() {
+    let (_install, loaded) = loaded("terra", 0.5);
+    let world = loaded.world.unwrap();
+    let luminance = |c: [u8; 3]| {
+        let [r, g, b] = c.map(|c| {
+            let c = c as f32 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        });
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let mut checked = 0;
+    for b in world.biomes.as_slice() {
+        if !b.name.as_str().starts_with("terra:") {
+            continue;
+        }
+        let colours = b.sky_fog.expect("every Biome of Terra has a pair");
+        let [r, g, blue] = colours.sky;
+        let saturation = 1.0 - r.min(g).min(blue) as f32 / blue as f32;
+        assert!(
+            blue > r && blue > g && saturation >= 0.3,
+            "{} sky {:?} is blue",
+            b.name,
+            colours.sky
+        );
+        assert!(
+            luminance(colours.fog) > luminance(colours.sky),
+            "{} fog {:?} is lighter than its sky {:?}",
+            b.name,
+            colours.fog,
+            colours.sky
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 9, "Terra's six Biomes and the land's three");
+}
+
 #[test]
 fn terra_shows_its_six_biomes_with_the_approved_sky_and_fog() {
     let (_install, loaded) = loaded("terra", 0.5);
@@ -296,12 +338,12 @@ fn terra_shows_its_six_biomes_with_the_approved_sky_and_fog() {
     assert_eq!(
         palette(&world),
         [
-            ("terra:temperate", [126, 146, 168], [136, 160, 190]),
-            ("terra:dry", [176, 160, 128], [196, 178, 142]),
-            ("terra:cold", [150, 164, 184], [176, 190, 208]),
-            ("terra:jungle", [112, 148, 128], [126, 166, 140]),
-            ("terra:swamp", [108, 126, 114], [124, 142, 126]),
-            ("terra:savanna", [170, 160, 124], [192, 178, 136]),
+            ("terra:temperate", [112, 150, 190], [176, 190, 206]),
+            ("terra:dry", [118, 156, 196], [212, 196, 166]),
+            ("terra:cold", [124, 158, 198], [214, 222, 232]),
+            ("terra:jungle", [106, 148, 188], [178, 194, 184]),
+            ("terra:swamp", [110, 140, 172], [166, 174, 156]),
+            ("terra:savanna", [120, 158, 200], [214, 196, 158]),
         ]
     );
     for b in world.biomes.as_slice() {

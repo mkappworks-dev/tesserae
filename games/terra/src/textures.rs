@@ -111,7 +111,7 @@ pub(crate) fn mean(pixels: &[u8], faces: Range<usize>) -> [u8; 3] {
 }
 
 fn dirt(x: usize, y: usize, face: usize) -> [u8; 3] {
-    let soil = tint([107, 74, 46], spread(x, y, face, 2, 43, 7));
+    let soil = tint([104, 86, 62], spread(x, y, face, 2, 43, 7));
     if fleck(x, y, 47 + face, 236) {
         scale(soil, FLECK)
     } else {
@@ -185,19 +185,19 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 dirt(x, y, face)
             } else {
                 let patch = cells(x, y, 2, 71);
-                tint([80, 144, 49], (patch - 128) / 5 + (n - 128) / 16)
+                tint([101, 131, 67], (patch - 128) / 5 + (n - 128) / 16)
             }
         }
         "leaves" => {
             if cells(x, y, 2, 37) < 90 {
-                tint([25, 75, 29], spread(x, y, face, 2, 39, 14))
+                tint([44, 68, 36], spread(x, y, face, 2, 39, 14))
             } else {
                 // Leaves 4 texels across, every other row of them shifted by half a leaf.
                 let lx = (x + 2 * (y / 4 % 2)) % 4;
                 let ly = y % 4;
                 let between = (lx == 0 || lx == 3) && (ly == 0 || ly == 3);
                 tint(
-                    [60, 136, 44],
+                    [87, 124, 61],
                     spread(x, y, face, 2, 41, 12) - if between { 14 } else { 0 },
                 )
             }
