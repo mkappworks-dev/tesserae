@@ -1,6 +1,6 @@
 # 01: Copying a World's seed does not work
 
-Status: ready-for-agent
+Status: done
 
 ## What happens
 
@@ -21,9 +21,9 @@ menus (#73), so `main` has it too.
 
 ## Acceptance
 
-- [ ] Copying a seed on macOS puts it on the system clipboard, and pasting it
+- [x] Copying a seed on macOS puts it on the system clipboard, and pasting it
       elsewhere gives the same number.
-- [ ] A failure still says "Could not copy the seed".
+- [x] A failure still says "Could not copy the seed".
 
 ## Comments
 
@@ -34,3 +34,10 @@ in-process buffer unless Bevy's `system_clipboard` feature is on (it pulls in
 `cargo tree -i arboard` finds nothing. The fix is that feature, on its own
 `fix/` branch from `main`, since #73 shipped it there; check `cargo deny` for
 `arboard`'s dependencies.
+
+2026-11-26: fixed on `fix/colour-art-and-shader` rather than its own branch:
+the user plays this branch, and `main` takes it when this merges. Bevy's
+`system_clipboard` feature is on in `crates/tesserae/Cargo.toml`; `arboard`
+was already in the lockfile, and `cargo deny check` passes. Checked on macOS
+with a throwaway test (not committed): Bevy's `Clipboard::set_text` with a
+seed, then `pbpaste` gave the same number. The failure notice is unchanged.
