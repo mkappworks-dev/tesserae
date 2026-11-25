@@ -13,11 +13,11 @@ mod templates;
 mod textures;
 
 use tesserae::mods::content::{
-    TileVariation, Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams,
+    Appearance, BiomeDef, BiomeSelectors, BiomeStratum, BurnAfter, BurnEnd, ClimateParams,
     CombustionDef, FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef,
     MaterialDef, Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack,
-    RenderClass, SelectorRange, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
-    VoxelUse, VoxelUseKind, WaterParams,
+    RenderClass, SelectorRange, ShapeDef, SkyFog, SurfaceFeature, TileVariation, ToolDef, ToolKind,
+    ViewParams, VoxelUse, VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{Arm, CollisionBox, ConnectDef, NodeBox, Srgba};
 
