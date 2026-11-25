@@ -328,7 +328,10 @@ fn every_terra_sky_is_blue_overhead_under_a_lighter_fog() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 9, "Terra's six Biomes and the land's three");
+    assert_eq!(
+        checked, 10,
+        "Terra's six Biomes, the land's three and the river"
+    );
 }
 
 #[test]

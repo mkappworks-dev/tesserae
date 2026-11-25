@@ -33,7 +33,7 @@ pub fn river() -> BiomeDef {
             surface: "terra:sand".into(),
         }),
         sky_fog: Some(SkyFog {
-            sky: (128, 160, 182),
+            sky: (112, 150, 190),
             fog: (146, 176, 196),
         }),
         cave_scale: Some(0.0),
