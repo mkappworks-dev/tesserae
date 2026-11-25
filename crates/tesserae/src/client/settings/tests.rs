@@ -86,7 +86,7 @@ fn wait(app: &mut App, seconds: f32) {
 fn a_change_applies_at_once_and_survives_leaving_settings() {
     use super::super::minimap::MinimapSize;
     type Read = fn(&Preferences) -> bool;
-    let cases: [(Tab, Operation, Read); 9] = [
+    let cases: [(Tab, Operation, Read); 10] = [
         (Tab::Behavior, Operation::Invert(true), |p| p.invert_y),
         (Tab::Behavior, Operation::Repeat(true), |p| p.repeat_held),
         (Tab::Behavior, Operation::Ghost(true), |p| p.placement_ghost),

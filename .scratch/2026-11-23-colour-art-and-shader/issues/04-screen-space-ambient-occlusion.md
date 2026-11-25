@@ -68,4 +68,12 @@ in 6 of 9 Medium runs). Medians of the fast-state runs, ms:
 The cut saves little: the main camera's added cost went from 1.10 to 0.98 ms on
 Medium and from 1.43 to 1.24 ms on High, since level 0 is almost all of the
 prepass (its share is about 0.5 ms either way). The SSAO passes are the rest.
-Captures: `/tmp/colour-04/v2/`.
+Captures: `/tmp/colour-04/v2/`, before 79ec13cf and after with the setting on,
+each fully loaded (level 1 at 6743 Chunks on both sides).
+
+Two fixes the cut prepass needed, found on those captures: with a normal
+prepass bevy_pbr's main pass takes N from it, which is empty for a coarse face
+and the floor's for water, so the chunk material drops `LOAD_PREPASS_NORMALS`
+and keeps its own face normal; and a coarse face ignores the AO texel, which
+the prepass never wrote. The table above predates both; neither changes the
+cost. Jungle floor mean 27.98 → 27.67.
