@@ -43,11 +43,12 @@ fn block() -> Template {
 
 fn oak() -> SurfaceTree {
     SurfaceTree {
-        storeys: tesserae_core::plant::Storeys::NONE,
+        storeys: 0,
+        variants: 0,
         branching: None,
         crowding_m: None,
         trunk: TRUNK,
-        canopy: tesserae_core::plant::Canopies::one(CANOPY),
+        canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
         canopy_radius_m: 2.5,
         vines: None,
@@ -185,7 +186,7 @@ fn row() -> Tree {
         branching: None,
         crowding_m: None,
         trunk: o.trunk,
-        canopy: o.canopy,
+        canopy: tesserae_core::plant::Canopies::one(o.canopy),
         trunk_height_m: o.trunk_height_m,
         canopy_radius_m: o.canopy_radius_m,
         mean_seconds: 0.0,

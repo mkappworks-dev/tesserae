@@ -179,7 +179,7 @@ impl<'a> PlantCeiling<'a> {
         };
         let reach_m = plants()
             .filter_map(|p| match p.kind {
-                SurfacePlantKind::Tree(t) => Some(t.reach_m()),
+                SurfacePlantKind::Tree(t) => Some(t.reach_m(params.biomes.variety())),
                 SurfacePlantKind::Vine(v) => Some(v.reach_m),
                 _ => None,
             })
@@ -189,7 +189,9 @@ impl<'a> PlantCeiling<'a> {
             reach_m <= CHUNK_SIZE as f32 * generator.voxel_size(),
             "a crown reaches {reach_m} m, past the next Chunk column"
         );
-        let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
+        let rise_m = plants()
+            .map(|p| p.rise_m(params.biomes.variety()))
+            .fold(0.0, f32::max);
         Self {
             generator,
             lift_m: params.landforms.overhang_m + rise_m + slack_m,
@@ -411,7 +413,7 @@ fn beach_grown_by_accident(mut loaded: super::LoadedMods) -> super::LoadedMods {
     let temperate = super::biome(world, "terra:temperate").surface_features;
     let beach = biomes.iter_mut().find(|b| b.name.as_str() == "terra:beach");
     beach.unwrap().surface_features = temperate;
-    world.biomes = tesserae_core::BiomeTable::new(&biomes)
+    world.biomes = tesserae_core::BiomeTable::new_with_variety(&biomes, world.biomes.variety())
         .and_then(|t| t.with_selectors(world.biomes.selectors()))
         .and_then(|t| t.with_strata(world.biomes.strata()))
         .unwrap();

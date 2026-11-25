@@ -405,7 +405,7 @@ impl WorldgenParams {
             .flat_map(|b| b.surface_features.as_slice())
         {
             if let Some(plant) = feature.plant {
-                for m in plant.materials() {
+                for m in plant.materials(self.biomes.variety()) {
                     require(
                         tables.materials.contains(m),
                         "biomes.surface_features.plant",
@@ -913,10 +913,13 @@ impl SurfaceScatter {
                 .flat_map(|b| b.surface_features.as_slice())
                 .filter_map(|f| f.plant)
         };
-        let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
+        let variety = params.biomes.variety();
+        let rise_m = plants().map(|p| p.rise_m(variety)).fold(0.0, f32::max);
         let reach_m = plants()
             .filter_map(|p| match p.kind {
-                SurfacePlantKind::Tree(t) => Some(t.reach_m() + t.rounding_slack_m(voxel_size)),
+                SurfacePlantKind::Tree(t) => {
+                    Some(t.reach_m(variety) + t.rounding_slack_m(voxel_size))
+                }
                 SurfacePlantKind::Vine(v) => Some(v.reach_m),
                 _ => None,
             })
@@ -3322,11 +3325,12 @@ impl Worldgen {
     }
 
     /// The Plant's tree as the generator grows it: a Tree row holding only what shape needs.
-    fn tree_of(tree: &SurfaceTree) -> Tree {
+    fn tree_of(&self, tree: &SurfaceTree) -> Tree {
+        let variety = self.params.biomes.variety();
         Tree {
             trunk: tree.trunk,
-            canopy: tree.canopy,
-            storeys: tree.storeys,
+            canopy: tree.canopies(variety),
+            storeys: *tree.storeys(variety),
             trunk_height_m: tree.trunk_height_m,
             canopy_radius_m: tree.canopy_radius_m,
             branching: tree.branching,
@@ -3360,7 +3364,7 @@ impl Worldgen {
         let seed = u64::from(self.seed);
         let column = [base[0], 0, base[2]];
         storey_band(
-            &tree.storeys,
+            tree.storeys(self.params.biomes.variety()),
             tree.own_band(),
             seed,
             column,
@@ -3372,7 +3376,7 @@ impl Worldgen {
     /// Stages. Grown from the ground's height 0 and shifted up, so the tree is a function of its
     /// column in metres and not of which Voxel the ground rounds to at this Voxel size.
     fn tree_cells(&self, tree: &SurfaceTree, base: [i32; 3]) -> Vec<([i32; 3], Voxel)> {
-        let row = Self::tree_of(tree);
+        let row = self.tree_of(tree);
         let seed = u64::from(self.seed);
         tree_voxels(&row, seed, [base[0], 0, base[2]], self.voxel_size)
             .into_iter()
@@ -3401,7 +3405,7 @@ impl Worldgen {
         };
         let seed = u64::from(self.seed);
         let grown = tree_voxels(
-            &Self::tree_of(tree),
+            &self.tree_of(tree),
             seed,
             [base[0], 0, base[2]],
             self.voxel_size,
@@ -3409,7 +3413,7 @@ impl Worldgen {
         vine_voxels(&grown, &vines, seed, self.voxel_size)
             .into_iter()
             .map(|vine| {
-                let voxel = Voxel::new(vines.material, vines.shape, vine.orientation);
+                let voxel = Voxel::new(vines.material.get(), vines.shape, vine.orientation);
                 let ground = top_index(
                     self.surface_height_m(self.global_m(vine.top[0]), self.global_m(vine.top[2])),
                     0.0,
@@ -3493,7 +3497,8 @@ impl Worldgen {
                     }
                 }
                 SurfacePlantKind::Tree(tree) => {
-                    let reach = (tree.reach_m() / self.voxel_size).ceil() as i32
+                    let reach = (tree.reach_m(self.params.biomes.variety()) / self.voxel_size)
+                        .ceil() as i32
                         + 1
                         + tree.rounding_slack_voxels();
                     // A vine hangs from the canopy, so it can reach below the base on a slope.
@@ -3602,7 +3607,7 @@ impl Worldgen {
         // Level 0's order: the taller storey first.
         trees.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (_, tree, base) in trees {
-            let row = Self::tree_of(&tree);
+            let row = self.tree_of(&tree);
             let column = [base[0], 0, base[2]];
             let canopy = canopy_of(&row, seed, column, self.voxel_size);
             for v in tree_voxels(&row, seed, column, self.voxel_size) {
@@ -3645,7 +3650,7 @@ impl Worldgen {
         let seed = u64::from(self.seed);
         let size = self.voxel_size;
         let shape = |tree: &SurfaceTree| {
-            let row = Self::tree_of(tree);
+            let row = self.tree_of(tree);
             let (mut area, mut top) = (0.0, 0.0);
             for i in 0..CANOPY_SAMPLES {
                 let base = [i * 1013, 0, i * 769];
@@ -3657,7 +3662,9 @@ impl Worldgen {
                 top += (highest - base[1] + 1) as f32 * size;
             }
             let n = CANOPY_SAMPLES as f32;
-            let radius_m = tree.storeys.mean_canopy_radius_m(tree.own_band());
+            let radius_m = tree
+                .storeys(self.params.biomes.variety())
+                .mean_canopy_radius_m(tree.own_band());
             CanopyShape {
                 area_m2: area / n,
                 top_m: top / n,
@@ -3785,13 +3792,14 @@ impl Worldgen {
         let &(lead, tree, shape) = covers.first()?;
         let sparse = covers
             .iter()
-            .find(|t| t.1.canopy != tree.canopy)
+            .find(|t| (t.1.canopy, t.1.variants) != (tree.canopy, tree.variants))
             .filter(|t| 2.0 * t.0 >= lead)
             .map_or((tree, shape), |t| (t.1, t.2));
         // One variant per crown-sized cell, so a coarse level's crowns are not a speckle.
         let variant = |tree: &SurfaceTree, shape: CanopyShape| {
             let cell = [x_m, z_m].map(|m| (m / shape.crown_m).floor() as i32);
-            canopy_at(&tree.canopy, u64::from(self.seed), cell, shape.crown_m)
+            let canopies = tree.canopies(self.params.biomes.variety());
+            canopy_at(&canopies, u64::from(self.seed), cell, shape.crown_m)
         };
         let canopy = Canopy {
             material: variant(tree, shape),

@@ -111,9 +111,10 @@ impl Terra {
             .iter()
             .flat_map(|b| b.surface_features.as_slice())
             .filter_map(|f| match f.plant?.kind {
-                SurfacePlantKind::Tree(t) => {
-                    Some(std::iter::once(t.trunk).chain(t.canopy.as_slice().to_vec()))
-                }
+                SurfacePlantKind::Tree(t) => Some(
+                    std::iter::once(t.trunk)
+                        .chain(t.canopies(params.biomes.variety()).as_slice().to_vec()),
+                ),
                 _ => None,
             })
             .flatten()

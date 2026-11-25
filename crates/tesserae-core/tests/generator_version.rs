@@ -24,7 +24,7 @@ use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
     Biome, BiomeName, BiomeTable, CHUNK_SIZE, Chunk, ChunkOverlay, Fluid, GroundParams, MaterialId,
     PlantTable, SHAPE_FULL_CUBE, SurfaceFeature, SurfaceFeatures, SurfacePlant, SurfacePlantKind,
-    SurfaceTree, Tables, Worldgen, WorldgenParams,
+    SurfaceTree, Tables, TreeVariety, Worldgen, WorldgenParams,
 };
 
 const SEEDS: [u64; 3] = [0x7e55_e2ae_0000_0001, 1, 0xdead_beef_cafe_f00d];
@@ -228,8 +228,9 @@ const DARK_LEAVES: MaterialId = 201;
 fn forest_tree() -> SurfaceTree {
     SurfaceTree {
         trunk: WOOD,
-        storeys: Storeys::NONE,
-        canopy: Canopies::one(fixtures().leaves),
+        storeys: 0,
+        variants: 0,
+        canopy: fixtures().leaves,
         trunk_height_m: (3.0, 5.0),
         canopy_radius_m: 2.5,
         fruit: None,
@@ -242,7 +243,7 @@ fn forest_tree() -> SurfaceTree {
 /// The fixture ground and sea under one Biome of trees close enough to crowd, and no Settlement,
 /// so a Player spawns on the dry land nearest the origin.
 fn forest() -> WorldgenParams {
-    forest_of(forest_tree())
+    forest_of(forest_tree(), &TreeVariety::NONE)
 }
 
 /// The forest's trees in two storeys, crowding less than their crowns so the storeys contest
@@ -253,16 +254,21 @@ fn storeyed_forest() -> WorldgenParams {
         trunk_height_m,
         canopy_radius_m,
     };
-    forest_of(SurfaceTree {
-        canopy: Canopies::new(&[fixtures().leaves, DARK_LEAVES]).unwrap(),
-        storeys: Storeys::new(&[storey(0.3, (6.0, 8.0), 3.0), storey(0.7, (3.0, 5.0), 2.0)])
-            .unwrap(),
-        crowding_m: Some(2.0),
-        ..forest_tree()
-    })
+    let mut variety = TreeVariety::NONE;
+    let tree = variety
+        .freeze(
+            SurfaceTree {
+                crowding_m: Some(2.0),
+                ..forest_tree()
+            },
+            &Canopies::new(&[fixtures().leaves, DARK_LEAVES]).unwrap(),
+            &Storeys::new(&[storey(0.3, (6.0, 8.0), 3.0), storey(0.7, (3.0, 5.0), 2.0)]).unwrap(),
+        )
+        .unwrap();
+    forest_of(tree, &variety)
 }
 
-fn forest_of(tree: SurfaceTree) -> WorldgenParams {
+fn forest_of(tree: SurfaceTree, variety: &TreeVariety) -> WorldgenParams {
     let tree = SurfaceFeature {
         material: WOOD,
         spacing_m: 6.0,
@@ -274,15 +280,18 @@ fn forest_of(tree: SurfaceTree) -> WorldgenParams {
         field: None,
     };
     WorldgenParams {
-        biomes: BiomeTable::new(&[Biome {
-            name: BiomeName::new("t:forest").unwrap(),
-            temperature: 0.5,
-            humidity: 0.5,
-            ground: None,
-            sky_fog: None,
-            cave_scale: None,
-            surface_features: SurfaceFeatures::new(&[tree]).unwrap(),
-        }])
+        biomes: BiomeTable::new_with_variety(
+            &[Biome {
+                name: BiomeName::new("t:forest").unwrap(),
+                temperature: 0.5,
+                humidity: 0.5,
+                ground: None,
+                sky_fog: None,
+                cave_scale: None,
+                surface_features: SurfaceFeatures::new(&[tree]).unwrap(),
+            }],
+            variety,
+        )
         .unwrap(),
         ..world_params()
     }

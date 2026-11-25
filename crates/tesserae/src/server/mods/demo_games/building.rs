@@ -77,7 +77,7 @@ fn laid(loaded: &LoadedMods) -> HashSet<MaterialId> {
                 }
                 SurfacePlantKind::Tree(tree) => {
                     laid.insert(tree.trunk);
-                    laid.extend(tree.canopy.as_slice());
+                    laid.extend(tree.canopies(world.biomes.variety()).as_slice());
                 }
                 SurfacePlantKind::Vine(vine) => {
                     laid.insert(vine.material);

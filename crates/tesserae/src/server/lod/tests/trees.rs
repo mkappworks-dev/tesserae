@@ -33,9 +33,10 @@ pub(super) fn forest_spaced(spacing_m: f32, crowding_m: Option<f32>) -> Worldgen
         plant: Some(SurfacePlant {
             shape: 0,
             kind: SurfacePlantKind::Tree(SurfaceTree {
-                storeys: tesserae_core::plant::Storeys::NONE,
+                storeys: 0,
+                variants: 0,
                 trunk: trunk(),
-                canopy: tesserae_core::plant::Canopies::one(canopy()),
+                canopy: canopy(),
                 trunk_height_m: (3.0, 5.0),
                 canopy_radius_m: 2.5,
                 fruit: None,

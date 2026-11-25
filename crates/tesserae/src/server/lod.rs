@@ -1053,7 +1053,7 @@ fn tree_materials(params: &WorldgenParams) -> TreeMaterials {
             if !trees.trunks.contains(&t.trunk) {
                 trees.trunks.push(t.trunk);
             }
-            for &canopy in t.canopy.as_slice() {
+            for &canopy in t.canopies(params.biomes.variety()).as_slice() {
                 if !trees.canopies.contains(&canopy) {
                     trees.canopies.push(canopy);
                 }

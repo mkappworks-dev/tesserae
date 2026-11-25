@@ -1146,8 +1146,13 @@ impl Generation {
                         .zip(p.biomes.selectors())
                         .zip(p.biomes.strata())
                         .map(|((b, selectors), strata)| {
-                            let mut saved =
-                                saved_biome(b, &kept_templates, &kept_settlements, mapping)?;
+                            let mut saved = saved_biome(
+                                b,
+                                p.biomes.variety(),
+                                &kept_templates,
+                                &kept_settlements,
+                                mapping,
+                            )?;
                             saved.selectors = (*selectors != crate::BiomeSelectors::default())
                                 .then_some(*selectors);
                             saved.strata = strata
@@ -1389,6 +1394,7 @@ fn restored_cave_biome(b: &SavedCaveBiome, mapping: &Mapping) -> Result<crate::C
 
 fn saved_biome(
     b: &crate::Biome,
+    variety: &crate::TreeVariety,
     kept_templates: &[u16],
     kept_settlements: &[u16],
     mapping: &Mapping,
@@ -1410,7 +1416,10 @@ fn saved_biome(
                 Ok(SavedSurfaceFeature {
                     material: mapping.material_name(f.material)?,
                     spacing_m: f.spacing_m,
-                    plant: f.plant.map(|p| saved_plant(&p, mapping)).transpose()?,
+                    plant: f
+                        .plant
+                        .map(|p| saved_plant(&p, variety, mapping))
+                        .transpose()?,
                     clump: f.clump.map(|c| SavedClump {
                         scale_m: c.scale_m,
                         strength: c.strength,
@@ -1675,6 +1684,7 @@ fn ground_ids(names: &[String; 3], mapping: &Mapping) -> Result<crate::GroundPar
 }
 
 fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::BiomeTable, Error> {
+    let mut variety = crate::TreeVariety::NONE;
     let biomes = saved
         .iter()
         .map(|b| {
@@ -1689,7 +1699,7 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
                     .transpose()?,
                 sky_fog: b.sky_fog,
                 cave_scale: b.cave_scale,
-                surface_features: restored_features(b, mapping)?,
+                surface_features: restored_features(b, &mut variety, mapping)?,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
@@ -1713,13 +1723,17 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
             crate::Strata::new(&layers).map_err(|e| Error::Corrupt(e.to_string()))
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    crate::BiomeTable::new(&biomes)
+    crate::BiomeTable::new_with_variety(&biomes, &variety)
         .and_then(|t| t.with_selectors(&selectors))
         .and_then(|t| t.with_strata(&strata))
         .map_err(|e| Error::Corrupt(e.to_string()))
 }
 
-fn restored_features(b: &SavedBiome, mapping: &Mapping) -> Result<crate::SurfaceFeatures, Error> {
+fn restored_features(
+    b: &SavedBiome,
+    variety: &mut crate::TreeVariety,
+    mapping: &Mapping,
+) -> Result<crate::SurfaceFeatures, Error> {
     let features = b
         .surface_features
         .iter()
@@ -1730,7 +1744,7 @@ fn restored_features(b: &SavedBiome, mapping: &Mapping) -> Result<crate::Surface
                 plant: f
                     .plant
                     .as_ref()
-                    .map(|p| restored_plant(p, mapping))
+                    .map(|p| restored_plant(p, variety, mapping))
                     .transpose()?,
                 clump: f.clump.map(|c| crate::Clump {
                     scale_m: c.scale_m,
@@ -1850,7 +1864,11 @@ fn restored_crop_field(f: &SavedCropField, mapping: &Mapping) -> Result<crate::C
     Ok(field)
 }
 
-fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant, Error> {
+fn saved_plant(
+    p: &crate::SurfacePlant,
+    variety: &crate::TreeVariety,
+    mapping: &Mapping,
+) -> Result<SavedPlant, Error> {
     use crate::SurfacePlantKind as K;
     let name = |m| mapping.material_name(m);
     let names = |ms: &[crate::MaterialId]| ms.iter().map(|&m| name(m)).collect::<Result<_, _>>();
@@ -1909,13 +1927,13 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
             },
             K::Tree(t) => SavedPlantKind::Tree {
                 trunk: name(t.trunk)?,
-                canopy: name(t.canopy.first())?,
-                more_canopies: t.canopy.as_slice()[1..]
+                canopy: name(t.canopy)?,
+                more_canopies: t.canopies(variety).as_slice()[1..]
                     .iter()
                     .map(|&m| name(m))
                     .collect::<Result<_, _>>()?,
                 storeys: t
-                    .storeys
+                    .storeys(variety)
                     .as_slice()
                     .iter()
                     .map(|s| SavedStorey {
@@ -1959,7 +1977,7 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
                     .vines
                     .map(|v| {
                         Ok::<_, Error>(SavedVines {
-                            material: name(v.material)?,
+                            material: name(v.material.get())?,
                             shape: mapping.shapes.get(&v.shape).cloned().ok_or_else(|| {
                                 Error::Incompatible(format!("unregistered Shape id {}", v.shape))
                             })?,
@@ -1974,7 +1992,11 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
     })
 }
 
-fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePlant, Error> {
+fn restored_plant(
+    p: &SavedPlant,
+    variety: &mut crate::TreeVariety,
+    mapping: &Mapping,
+) -> Result<crate::SurfacePlant, Error> {
     use crate::SurfacePlantKind as K;
     let id = |n: &String| mapping.material_id(n);
     let ids = |ns: &[String], most: usize| -> Result<Vec<crate::MaterialId>, Error> {
@@ -2058,43 +2080,16 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
             vines,
             branching,
             crowding_m,
-        } => K::Tree(crate::SurfaceTree {
-            crowding_m: *crowding_m,
-            branching: branching.as_ref().map(|b| crate::plant::Branching {
-                limbs: crate::plant::CountRange {
-                    min: b.limbs[0],
-                    max: b.limbs[1],
-                },
-                start: b.start,
-                reach_m: b.reach_m,
-                rise: b.rise,
-                fork: b.fork,
-                lean_m: b.lean_m,
-                tiers: b.tiers,
-                lobe_radius_m: b.lobe_radius_m,
-            }),
-            vines: vines
-                .as_ref()
-                .map(|v| {
-                    Ok::<_, Error>(crate::SurfaceVines {
-                        material: id(&v.material)?,
-                        shape: mapping.shape_id(&v.shape)?,
-                        orientations: v.orientations,
-                        density: v.density,
-                        length_m: v.length_m,
-                    })
-                })
-                .transpose()?,
-            trunk: id(trunk)?,
-            canopy: {
+        } => {
+            let canopies = {
                 let mut all = vec![id(canopy)?];
                 for n in more_canopies {
                     all.push(id(n)?);
                 }
                 crate::plant::Canopies::new(&all)
                     .ok_or_else(|| Error::Corrupt("a saved tree has too many canopies".into()))?
-            },
-            storeys: crate::plant::Storeys::new(
+            };
+            let storeys = crate::plant::Storeys::new(
                 &storeys
                     .iter()
                     .map(|s| crate::plant::Storey {
@@ -2104,36 +2099,76 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
                     })
                     .collect::<Vec<_>>(),
             )
-            .ok_or_else(|| Error::Corrupt("a saved tree has too many storeys".into()))?,
-            trunk_height_m: (trunk_height_m[0], trunk_height_m[1]),
-            canopy_radius_m: *canopy_radius_m,
-            fruit: fruit
-                .as_ref()
-                .map(|f| {
-                    let found = ids(&f.stages, crate::MAX_SURFACE_FRUIT_STAGES)?;
-                    let mut stages = [crate::voxel::AIR; crate::MAX_SURFACE_FRUIT_STAGES];
-                    stages[..found.len()].copy_from_slice(&found);
-                    Ok::<_, Error>(crate::SurfaceFruit {
-                        stages,
-                        len: found.len() as u8,
-                        density: f.density,
-                        shape: f
-                            .shape
-                            .as_ref()
-                            .map(|n| mapping.shape_id(n))
-                            .transpose()?
-                            .unwrap_or(crate::SHAPE_FULL_CUBE),
-                        stage_shapes: {
-                            let mut shapes = [None; crate::MAX_SURFACE_FRUIT_STAGES];
-                            for (slot, name) in shapes.iter_mut().zip(&f.stage_shapes) {
-                                *slot = name.as_ref().map(|n| mapping.shape_id(n)).transpose()?;
-                            }
-                            shapes
-                        },
+            .ok_or_else(|| Error::Corrupt("a saved tree has too many storeys".into()))?;
+            let tree = crate::SurfaceTree {
+                crowding_m: *crowding_m,
+                branching: branching.as_ref().map(|b| crate::plant::Branching {
+                    limbs: crate::plant::CountRange {
+                        min: b.limbs[0],
+                        max: b.limbs[1],
+                    },
+                    start: b.start,
+                    reach_m: b.reach_m,
+                    rise: b.rise,
+                    fork: b.fork,
+                    lean_m: b.lean_m,
+                    tiers: b.tiers,
+                    lobe_radius_m: b.lobe_radius_m,
+                }),
+                vines: vines
+                    .as_ref()
+                    .map(|v| {
+                        Ok::<_, Error>(crate::SurfaceVines {
+                            material: std::num::NonZeroU16::new(id(&v.material)?).ok_or_else(
+                                || Error::Corrupt("a saved tree hangs vines of Air".into()),
+                            )?,
+                            shape: mapping.shape_id(&v.shape)?,
+                            orientations: v.orientations,
+                            density: v.density,
+                            length_m: v.length_m,
+                        })
                     })
-                })
-                .transpose()?,
-        }),
+                    .transpose()?,
+                trunk: id(trunk)?,
+                canopy: canopies.first(),
+                variants: 0,
+                storeys: 0,
+                trunk_height_m: (trunk_height_m[0], trunk_height_m[1]),
+                canopy_radius_m: *canopy_radius_m,
+                fruit: fruit
+                    .as_ref()
+                    .map(|f| {
+                        let found = ids(&f.stages, crate::MAX_SURFACE_FRUIT_STAGES)?;
+                        let mut stages = [crate::voxel::AIR; crate::MAX_SURFACE_FRUIT_STAGES];
+                        stages[..found.len()].copy_from_slice(&found);
+                        Ok::<_, Error>(crate::SurfaceFruit {
+                            stages,
+                            len: found.len() as u8,
+                            density: f.density,
+                            shape: f
+                                .shape
+                                .as_ref()
+                                .map(|n| mapping.shape_id(n))
+                                .transpose()?
+                                .unwrap_or(crate::SHAPE_FULL_CUBE),
+                            stage_shapes: {
+                                let mut shapes = [None; crate::MAX_SURFACE_FRUIT_STAGES];
+                                for (slot, name) in shapes.iter_mut().zip(&f.stage_shapes) {
+                                    *slot =
+                                        name.as_ref().map(|n| mapping.shape_id(n)).transpose()?;
+                                }
+                                shapes
+                            },
+                        })
+                    })
+                    .transpose()?,
+            };
+            K::Tree(
+                variety
+                    .freeze(tree, &canopies, &storeys)
+                    .map_err(|e| Error::Corrupt(e.to_string()))?,
+            )
+        }
     };
     Ok(crate::SurfacePlant { shape, kind })
 }

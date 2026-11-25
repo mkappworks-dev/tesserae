@@ -79,7 +79,8 @@ impl BiomeEdits {
         if !declared.is_empty() && kept.is_empty() {
             return Err("A World needs at least one Biome".into());
         }
-        let biomes = BiomeTable::new(&kept).map_err(|e| e.to_string())?;
+        let biomes = BiomeTable::new_with_variety(&kept, params.biomes.variety())
+            .map_err(|e| e.to_string())?;
         let mut ores = Vec::new();
         for ore in params.ores.as_slice() {
             let mut ore = *ore;

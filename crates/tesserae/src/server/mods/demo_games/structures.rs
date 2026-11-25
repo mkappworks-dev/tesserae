@@ -721,7 +721,7 @@ pub(in crate::server) fn terra_town_m(loaded: &LoadedMods) -> [f32; 2] {
             }
         })
         .collect();
-    world.biomes = BiomeTable::new(&biomes)
+    world.biomes = BiomeTable::new_with_variety(&biomes, world.biomes.variety())
         .and_then(|t| t.with_selectors(world.biomes.selectors()))
         .and_then(|t| t.with_strata(world.biomes.strata()))
         .unwrap();

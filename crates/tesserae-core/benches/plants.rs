@@ -265,10 +265,11 @@ fn sixteen(cross: u8, branched: bool) -> Vec<SurfaceFeature> {
         },
     ];
     let tree = |trunk_m: (f32, f32), radius, shape: usize| SurfaceTree {
-        storeys: tesserae_core::plant::Storeys::NONE,
+        storeys: 0,
+        variants: 0,
         trunk: TRUNK,
         crowding_m: None,
-        canopy: tesserae_core::plant::Canopies::one(CANOPY),
+        canopy: CANOPY,
         trunk_height_m: trunk_m,
         canopy_radius_m: radius,
         fruit: None,

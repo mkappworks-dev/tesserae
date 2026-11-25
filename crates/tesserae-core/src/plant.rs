@@ -861,7 +861,8 @@ impl PlantTable {
                 .bits();
         }
         Ok(crate::SurfaceVines {
-            material: plant.first,
+            material: std::num::NonZeroU16::new(plant.first)
+                .ok_or_else(|| format!("vines name `{}`, which grows Air", vines.plant))?,
             shape,
             orientations,
             density: vines.density,
