@@ -21,9 +21,9 @@ before the next:
 
 ## Acceptance
 
-- [ ] Every period-bound pattern in Terra tiles across a Voxel edge (test).
-- [ ] Terra's appearance colours equal their tile's linear mean (test).
-- [ ] Terra's existing texture tests pass.
+- [x] Every period-bound pattern in Terra tiles across a Voxel edge (test).
+- [x] Terra's appearance colours equal their tile's linear mean (test).
+- [x] Terra's existing texture tests pass.
 - [ ] Each step approved on near, mid (70 and 110 m) and far captures, against
       the baseline.
 - [ ] No sunlit sand or snow top above about 85% value on `dry-ground` and

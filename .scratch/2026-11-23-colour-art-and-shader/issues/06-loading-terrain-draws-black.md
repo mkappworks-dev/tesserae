@@ -19,10 +19,10 @@ rejected: it left large voids mid-load.
 
 ## Acceptance
 
-- [ ] The cause named, with a reproduction (a test where the cause allows one).
-- [ ] A capture taken mid-load at `jungle-top-medium` and `far` shows no black
+- [x] The cause named, with a reproduction (a test where the cause allows one).
+- [x] A capture taken mid-load at `jungle-top-medium` and `far` shows no black
       terrain.
-- [ ] No regression in time to a settled view; `flight` GPU frame no worse than
+- [x] No regression in time to a settled view; `flight` GPU frame no worse than
       `main` beyond noise.
 
 ## Comments

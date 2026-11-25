@@ -21,16 +21,16 @@ Solution item 5, two steps, each on captures the user approves:
 
 ## Acceptance
 
-- [ ] A tree row with one canopy and no storeys generates exactly as before
+- [x] A tree row with one canopy and no storeys generates exactly as before
       (test).
-- [ ] Storey and variant choice deterministic per seed and position, and the
+- [x] Storey and variant choice deterministic per seed and position, and the
       same at another Voxel size (tests).
-- [ ] v3 digests recorded again in the commit that changes them.
+- [x] v3 digests recorded again in the commit that changes them.
 - [ ] `jungle-top-medium`, `jungle-ground-close`, `jungle-ground-110m`,
       `swamp-ground` and `swamp-forest-ground` show separate trees; approved.
-- [ ] Impostors match level 0's storeys and variants; Canopy cover picks one
+- [x] Impostors match level 0's storeys and variants; Canopy cover picks one
       variant per crown-sized cell (Q77); the LOD agreement tests pass.
-- [ ] Coarse levels keep one variant per crown, not speckle.
+- [x] Coarse levels keep one variant per crown, not speckle.
 
 ## Comments
 

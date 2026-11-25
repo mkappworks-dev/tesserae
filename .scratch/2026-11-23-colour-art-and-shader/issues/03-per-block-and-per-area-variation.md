@@ -22,7 +22,7 @@ through any rotation.
 
 ## Acceptance
 
-- [ ] A Material without the flag draws exactly as before (test).
+- [x] A Material without the flag draws exactly as before (test).
 - [ ] Merged quads rotate per Voxel, not per quad; no seam or mip jump at Voxel
       edges up close.
 - [ ] The variation is the same at another Voxel size (in metres).
@@ -97,3 +97,9 @@ The branch over `main` falls from +0.66 / +0.77 / +0.67 ms to +0.41 / +0.45 /
 +0.34 ms (p50 / p95 / p99). On Q68's `main` that puts the branch's p95 near
 6.68 ms: under the 6.9 ms budget, short of the 6.6 ms aim. What is left is the
 per-Voxel turn itself in the main pass; going lower changes the look.
+
+2026-11-25: final frame check against `main` 0b03c594, 8 interleaved runs per
+side, offscreen 2560x1440, medians: `flight` p95 6.28 -> 6.65 ms (+0.37),
+`stationary` 5.18 -> 5.62, `teleport` 5.42 -> 5.81. Inside the 6.9 ms budget
+but not "no worse than `main`": the cost of sampling a per-Voxel turn, left
+open for the user. Logs: `/tmp/colour-final-2/`.

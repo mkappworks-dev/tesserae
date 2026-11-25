@@ -25,14 +25,14 @@ capture the user approves:
 
 ## Acceptance
 
-- [ ] The cause of what remains after 01 is named from captures, not guessed.
+- [x] The cause of what remains after 01 is named from captures, not guessed.
 - [ ] The mid-distance village and jungle views at 70 and 110 m fade and cool
       with distance; approved.
 - [ ] `jungle-ground-close` and `swamp-forest-ground` floors readable; approved.
-- [ ] Block light's relation to `Exposure` decided on `cave`.
+- [x] Block light's relation to `Exposure` decided on `cave`.
 - [ ] The sky reads blue with a lighter horizon and a sun in every Biome's
       `{biome}-far`; the terrain meets the horizon with no edge; approved.
-- [ ] Fog tests pass, including at a different Voxel size.
+- [x] Fog tests pass, including at a different Voxel size.
 
 ## Comments
 
