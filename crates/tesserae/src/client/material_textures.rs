@@ -420,7 +420,9 @@ fn flame() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render::texture_atlas::{FACE_LAYER_BITS, TEXTURED};
+    use crate::render::texture_atlas::{
+        FACE_LAYER_BITS, LOOK_FIXED, LOOK_SHIFT, LOOK_TURNED, LOOK_TURNED_AND_PATCHED,
+    };
     use tesserae_core::SHAPE_FULL_CUBE;
     use tesserae_mods::MATERIAL_TEXTURE_BYTES;
 
@@ -524,7 +526,7 @@ mod tests {
         let layer =
             |slot: usize, face: u32| (textures.face_words[slot] >> (face * FACE_LAYER_BITS)) & 1023;
         assert_eq!(textures.face_words[24], 0, "untextured");
-        assert_ne!(textures.face_words[23] & TEXTURED, 0);
+        assert_eq!(textures.face_words[23] >> LOOK_SHIFT, LOOK_FIXED);
         assert!(
             (0..3).all(|face| layer(40, face) == layer(41, 0)),
             "one layer for six faces"
@@ -582,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn a_material_without_variation_keeps_the_face_word_it_drew_by_before() {
+    fn each_tile_variation_keeps_the_layers_and_sets_only_its_look() {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>().add_plugins(plugin);
         let tile = vec![200; MATERIAL_TEXTURE_BYTES];
@@ -593,13 +595,14 @@ mod tests {
         ]));
         app.update();
         let words = app.world().resource::<Textures>().face_words;
-        let layers = words[40] & ((1 << 30) - 1);
-        assert_eq!(words[40], 1 << 31 | layers, "textured, and nothing else");
-        for slot in [41, 42] {
-            assert_eq!(words[slot] & ((1 << 30) - 1), layers, "slot {slot}");
+        let layers = words[40] & ((1 << LOOK_SHIFT) - 1);
+        for (slot, look) in [
+            (40, LOOK_FIXED),
+            (41, LOOK_TURNED),
+            (42, LOOK_TURNED_AND_PATCHED),
+        ] {
+            assert_eq!(words[slot], look << LOOK_SHIFT | layers, "slot {slot}");
         }
-        let distinct: std::collections::HashSet<u32> = words[40..43].iter().copied().collect();
-        assert_eq!(distinct.len(), 3, "{words:x?}");
     }
 
     #[test]

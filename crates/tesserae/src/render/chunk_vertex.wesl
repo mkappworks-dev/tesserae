@@ -148,7 +148,13 @@ fn vertex_level(in: ChunkVertex) -> u32 {
 }
 
 // Ten bits of a cell coordinate: the turns repeat every 1024 cells, out of sight.
-const KEY_CELL_MASK: u32 = 0x3ffu;
+const KEY_CELL_BITS: u32 = 10u;
+const KEY_CELL_MASK: u32 = (1u << KEY_CELL_BITS) - 1u;
+const KEY_V_SHIFT: u32 = KEY_CELL_BITS;
+const KEY_DEPTH_SHIFT: u32 = 2u * KEY_CELL_BITS;
+const KEY_AXIS_SHIFT: u32 = 3u * KEY_CELL_BITS;
+// The cell along the normal and the normal's axis, which a step across the face keeps.
+const KEY_PLANE_MASK: u32 = ~((1u << KEY_DEPTH_SHIFT) - 1u);
 
 // A Voxel in world cells as one word: its cells along the face's u and v axes,
 // then along the normal, then the normal's axis. A merged quad keys its first
@@ -157,14 +163,14 @@ const KEY_CELL_MASK: u32 = 0x3ffu;
 fn voxel_key(cell: vec3<i32>, normal: vec3<f32>) -> u32 {
     let d = select(select(2u, 1u, abs(normal.y) > 0.5), 0u, abs(normal.x) > 0.5);
     let c = bitcast<vec3<u32>>(cell) & vec3<u32>(KEY_CELL_MASK);
-    return c[(d + 1u) % 3u] | (c[(d + 2u) % 3u] << 10u) | (c[d] << 20u) | (d << 30u);
+    return c[(d + 1u) % 3u] | (c[(d + 2u) % 3u] << KEY_V_SHIFT) | (c[d] << KEY_DEPTH_SHIFT) | (d << KEY_AXIS_SHIFT);
 }
 
 fn voxel_at(key: u32, uv: vec2<f32>) -> u32 {
     let step = vec2<u32>(floor(uv));
     let u = (key + step.x) & KEY_CELL_MASK;
-    let v = ((key >> 10u) + step.y) & KEY_CELL_MASK;
-    return u | (v << 10u) | (key & 0xfff00000u);
+    let v = ((key >> KEY_V_SHIFT) + step.y) & KEY_CELL_MASK;
+    return u | (v << KEY_V_SHIFT) | (key & KEY_PLANE_MASK);
 }
 
 // No area and nothing rasterizes: every corner at one point outside the clip volume.
