@@ -134,6 +134,14 @@ fn expand(at: u32, vertex: u32) -> Expanded {
     return out;
 }
 
+// The LOD level of the layer this vertex belongs to.
+fn vertex_level(in: ChunkVertex) -> u32 {
+    return quads[mesh_functions::get_tag(in.instance_index) + constants::CHUNK_HEADER_LEVEL];
+}
+
+// No area and nothing rasterizes: every corner at one point outside the clip volume.
+const NO_AREA: vec4<f32> = vec4<f32>(2.0, 2.0, 0.5, 1.0);
+
 fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     // The tag is where the layer's words start; the vertex, less the mesh's
     // own first vertex, is the index the placeholder drew it by.
@@ -141,9 +149,8 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     let vertex = in.vertex_index - mesh[in.instance_index].first_vertex_index;
     var out: ChunkVertexOutput;
     if vertex / constants::CHUNK_VERTICES_PER_QUAD >= quads[at + constants::CHUNK_HEADER_QUADS] {
-        // The bucket's padding: every corner at one point outside the clip
-        // volume, so its triangles have no area and nothing rasterizes.
-        out.clip_position = vec4<f32>(2.0, 2.0, 0.5, 1.0);
+        // The bucket's padding.
+        out.clip_position = NO_AREA;
         return out;
     }
     let quad = expand(at, vertex);

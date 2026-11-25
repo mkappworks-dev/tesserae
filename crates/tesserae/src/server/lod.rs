@@ -1053,8 +1053,10 @@ fn tree_materials(params: &WorldgenParams) -> TreeMaterials {
             if !trees.trunks.contains(&t.trunk) {
                 trees.trunks.push(t.trunk);
             }
-            if !trees.canopies.contains(&t.canopy) {
-                trees.canopies.push(t.canopy);
+            for &canopy in t.canopy.as_slice() {
+                if !trees.canopies.contains(&canopy) {
+                    trees.canopies.push(canopy);
+                }
             }
         }
     }

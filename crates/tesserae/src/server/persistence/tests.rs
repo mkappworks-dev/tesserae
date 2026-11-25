@@ -462,7 +462,7 @@ fn a_grown_crop_and_tree_reopen_as_the_materials_they_grew_to() {
         .plants()
         .iter()
         .find_map(|p| match &p.kind {
-            PlantKind::Tree(t) => Some((t.trunk, t.canopy)),
+            PlantKind::Tree(t) => Some((t.trunk, t.canopy.first())),
             _ => None,
         })
         .expect("Terra's shared Mods declare a tree");
@@ -1891,11 +1891,12 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
                 stage_shapes: [None; tesserae_core::MAX_SURFACE_STAGES],
             }),
             feature(SurfacePlantKind::Tree(SurfaceTree {
+                storeys: tesserae_core::plant::Storeys::NONE,
                 vines: None,
                 branching: None,
                 crowding_m: None,
                 trunk: id("terra:wood"),
-                canopy: id("terra:leaves"),
+                canopy: tesserae_core::plant::Canopies::one(id("terra:leaves")),
                 trunk_height_m: (3.0, 5.0),
                 canopy_radius_m: 2.5,
                 fruit: None,

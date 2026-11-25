@@ -522,12 +522,13 @@ A `[[plants]]` row declares a Plant the Server grows, of kind `crop`, `tree`,
 `column`, `spreader` or `climber`, with its needs in `[plants.needs]`. A `tree`
 may add a `branching` record (limbs, fork, lean and lobes, in metres) and a
 `crowding-m`, how near a stronger tree's trunk keeps it from generating (1.5
-crown radii when absent). A crop or fruit Stage may add a `shape` of its own, a
-crop may add a `fruit-vine` that its ripe Stage bears on the ground, and a
-`spreader` may add `min-neighbours`. Every field, an example of each kind and
-the rules for grown Materials, tags and Biome placement are in the authoring
-guide's [Plants](authoring-guide.md#plants). A crop in full, which any Game can
-copy (the data-only starter declares one like it):
+crown radii when absent), a list of `canopy` variants and weighted `storeys`. A
+crop or fruit Stage may add a `shape` of its own, a crop may add a `fruit-vine`
+that its ripe Stage bears on the ground, and a `spreader` may add
+`min-neighbours`. Every field, an example of each kind and the rules for grown
+Materials, tags and Biome placement are in the authoring guide's
+[Plants](authoring-guide.md#plants). A crop in full, which any Game can copy
+(the data-only starter declares one like it):
 
 ```toml
 [[items]]

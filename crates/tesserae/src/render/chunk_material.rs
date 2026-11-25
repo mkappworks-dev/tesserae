@@ -163,6 +163,7 @@ impl MaterialExtension for ChunkMaterialExtension {
             ),
         ];
         defs.extend(quad_layout_defs());
+        defs.extend(super::fog::haze_shader_defs());
         #[cfg(feature = "profiling")]
         let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
         #[cfg(not(feature = "profiling"))]
@@ -173,6 +174,11 @@ impl MaterialExtension for ChunkMaterialExtension {
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
             fragment.shader_defs.extend_from_slice(&defs);
+            // AO's prepass draws level 0 only, and water is not in it, so its normal would be
+            // empty or the floor's; a Voxel face's own normal is exact.
+            fragment
+                .shader_defs
+                .retain(|def| def != &ShaderDefVal::from("LOAD_PREPASS_NORMALS"));
         }
         Ok(())
     }

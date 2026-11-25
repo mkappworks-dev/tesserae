@@ -982,6 +982,13 @@ pub enum SavedPlantKind {
     Tree {
         trunk: String,
         canopy: String,
+        /// The canopy variants after `canopy`; absent is one canopy, as every tree saved before
+        /// them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        more_canopies: Vec<String>,
+        /// Absent is one band, as every tree saved before storeys.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        storeys: Vec<SavedStorey>,
         trunk_height_m: [f32; 2],
         canopy_radius_m: f32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -996,6 +1003,14 @@ pub enum SavedPlantKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         crowding_m: Option<f32>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedStorey {
+    pub weight: f32,
+    pub trunk_height_m: [f32; 2],
+    pub canopy_radius_m: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1894,7 +1909,21 @@ fn saved_plant(p: &crate::SurfacePlant, mapping: &Mapping) -> Result<SavedPlant,
             },
             K::Tree(t) => SavedPlantKind::Tree {
                 trunk: name(t.trunk)?,
-                canopy: name(t.canopy)?,
+                canopy: name(t.canopy.first())?,
+                more_canopies: t.canopy.as_slice()[1..]
+                    .iter()
+                    .map(|&m| name(m))
+                    .collect::<Result<_, _>>()?,
+                storeys: t
+                    .storeys
+                    .as_slice()
+                    .iter()
+                    .map(|s| SavedStorey {
+                        weight: s.weight,
+                        trunk_height_m: [s.trunk_height_m.0, s.trunk_height_m.1],
+                        canopy_radius_m: s.canopy_radius_m,
+                    })
+                    .collect(),
                 trunk_height_m: [t.trunk_height_m.0, t.trunk_height_m.1],
                 canopy_radius_m: t.canopy_radius_m,
                 crowding_m: t.crowding_m,
@@ -2021,6 +2050,8 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
         SavedPlantKind::Tree {
             trunk,
             canopy,
+            more_canopies,
+            storeys,
             trunk_height_m,
             canopy_radius_m,
             fruit,
@@ -2055,7 +2086,25 @@ fn restored_plant(p: &SavedPlant, mapping: &Mapping) -> Result<crate::SurfacePla
                 })
                 .transpose()?,
             trunk: id(trunk)?,
-            canopy: id(canopy)?,
+            canopy: {
+                let mut all = vec![id(canopy)?];
+                for n in more_canopies {
+                    all.push(id(n)?);
+                }
+                crate::plant::Canopies::new(&all)
+                    .ok_or_else(|| Error::Corrupt("a saved tree has too many canopies".into()))?
+            },
+            storeys: crate::plant::Storeys::new(
+                &storeys
+                    .iter()
+                    .map(|s| crate::plant::Storey {
+                        weight: s.weight,
+                        trunk_height_m: (s.trunk_height_m[0], s.trunk_height_m[1]),
+                        canopy_radius_m: s.canopy_radius_m,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .ok_or_else(|| Error::Corrupt("a saved tree has too many storeys".into()))?,
             trunk_height_m: (trunk_height_m[0], trunk_height_m[1]),
             canopy_radius_m: *canopy_radius_m,
             fruit: fruit

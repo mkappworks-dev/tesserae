@@ -96,6 +96,7 @@ macro_rules! food {
                 material: $food.name.into(),
                 color: crate::tesserae::mods::types::Srgba { r, g, b, a },
                 texture: Some($food.texture($pixel)),
+                variation: crate::tesserae::mods::content::TileVariation::Fixed,
             }
         }
 

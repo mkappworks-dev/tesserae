@@ -263,6 +263,7 @@ pub(super) fn run(
                 Operation::Cap(cap) => p.fps_cap = cap,
                 Operation::AntiAliasing(aa) => p.anti_aliasing = aa,
                 Operation::Scale(scale) => p.render_scale = scale,
+                Operation::AmbientOcclusion(on) => p.ambient_occlusion = on,
                 Operation::TextScale(scale) => p.text_scale = scale,
                 Operation::ReducedMotion(on) => p.reduced_motion = on,
                 Operation::SolidBackground(on) => p.solid_background = on,

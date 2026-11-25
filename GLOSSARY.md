@@ -191,9 +191,12 @@ Impostors.
 Material, as level 0 does at that column's centre in metres.
 
 **Distance fog** — how much of a surface's colour is replaced by the fog colour,
-as a function of its distance from the Eye in metres. Sized from the full-detail
-radius and the reach, so it is the same fog at any Voxel size. The fog colour
-and the colour of the sky behind the terrain are two values, not one.
+as a function of its distance from the Eye in metres. Two parts: a haze in
+metres that fades blue first and stops short of hiding anything, so 100 m reads
+farther off than 2 m at any reach; and a fade sized from the full-detail radius
+and the reach, complete at the reach. Neither takes a Voxel size, so it is the
+same fog at any Voxel size. The fog colour is the sky's at the horizon; the
+sky's own colour is its zenith.
 
 **Downsample** — producing a coarse Chunk's Voxels from the eight finer Chunks
 it covers: the dominant Material by volume, solid if half the volume is. At

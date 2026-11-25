@@ -1,8 +1,9 @@
 //! Every Mod's `plants`, resolved against the World's Materials and Items.
 
 use tesserae_core::plant::{
-    Branching, CountRange, DEFAULT_VINE_FRUIT, DEFAULT_VINE_GAP_M, DEFAULT_VINE_REACH_M, Direction,
-    Fruit, Kind, Needs, Plant, PlantTable, Stage, Tree, TreeVines, VineFruit, Water, Yield,
+    Branching, Canopies, CountRange, DEFAULT_VINE_FRUIT, DEFAULT_VINE_GAP_M, DEFAULT_VINE_REACH_M,
+    Direction, Fruit, Kind, MAX_CANOPIES, MAX_STOREYS, Needs, Plant, PlantTable, Stage, Storey,
+    Storeys, Tree, TreeVines, VineFruit, Water, Yield,
 };
 use tesserae_core::{MaterialId, ShapeId, Tables, Voxel};
 
@@ -86,8 +87,8 @@ impl DeclaredPlants {
             };
             table.vines(&tables.shapes, vines).map_err(&fail)?;
             let holds = |plant: &Plant| {
-                [tree.trunk, tree.canopy]
-                    .iter()
+                std::iter::once(&tree.trunk)
+                    .chain(tree.canopy.as_slice())
                     .any(|m| plant.needs.soil.contains(m))
             };
             if !table
@@ -189,6 +190,28 @@ fn material(registry: &Registry, name: &str) -> Result<MaterialId, String> {
         .id_of(NameKind::Material, name)
         .map(|id| id as MaterialId)
         .ok_or_else(|| format!("names Material `{name}`, which no loaded Mod declares"))
+}
+
+fn canopies(registry: &Registry, tables: &Tables, names: &[String]) -> Result<Canopies, String> {
+    let materials = names
+        .iter()
+        .map(|n| solid(registry, tables, n))
+        .collect::<Result<Vec<_>, _>>()?;
+    Canopies::new(&materials).ok_or_else(|| format!("canopy names 1 to {MAX_CANOPIES} Materials"))
+}
+
+/// A storey's crown defaults to the row's; the core checks the rest once the row is whole.
+fn storeys(tree: &content::TreeDef) -> Result<Storeys, String> {
+    let list: Vec<Storey> = tree
+        .storeys
+        .iter()
+        .map(|s| Storey {
+            weight: s.weight,
+            trunk_height_m: s.trunk_height_m,
+            canopy_radius_m: s.canopy_radius_m.unwrap_or(tree.canopy_radius_m),
+        })
+        .collect();
+    Storeys::new(&list).ok_or_else(|| format!("a tree declares at most {MAX_STOREYS} storeys"))
 }
 
 fn solid(registry: &Registry, tables: &Tables, name: &str) -> Result<MaterialId, String> {
@@ -297,7 +320,8 @@ fn plant(
                 solid(registry, tables, &tree.sapling)?,
                 Kind::Tree(Tree {
                     trunk: solid(registry, tables, &tree.trunk)?,
-                    canopy: solid(registry, tables, &tree.canopy)?,
+                    canopy: canopies(registry, tables, &tree.canopy)?,
+                    storeys: storeys(tree)?,
                     trunk_height_m: tree.trunk_height_m,
                     canopy_radius_m: tree.canopy_radius_m,
                     mean_seconds: tree.mean_seconds,
