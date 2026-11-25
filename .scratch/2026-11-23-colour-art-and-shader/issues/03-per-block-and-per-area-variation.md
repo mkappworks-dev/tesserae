@@ -60,3 +60,40 @@ the slow GPU mode:
 
 Unflagged draws within noise of main; the flagged path costs about 0.3 ms at
 p50, p95 unchanged. 2D patches on a cheaper hash did not move it.
+
+2026-11-25: `flight` cost cut (Q68). Profiled first, on a `profiling` build
+with temporary shader switches: one measured `flight` run per variant per
+round, variants rotated, 6 to 8 rounds, GPU frame from the timestamp markers,
+2560x1440 offscreen. Over no turn at all, a turn uniform per Material cost
++0.09 ms p50, one per merged quad +0.2, one per Voxel +0.33. The cost is
+neighbouring Voxels sampling apart inside a 2x2 pixel quad, not the turn's
+arithmetic: two cheaper hashes and a float hash moved it 0 to 0.15 ms, and
+per-Voxel layers of pre-turned tiles cost the same as turned UVs. About half
+of it was in the sun's cascades (leaf cutouts); patches cost about 0.06 ms.
+
+Changed: the Voxel is keyed per quad in the vertex stage (a flat word, the
+quad's first Voxel in world cells) and a fragment steps from it by its UV's
+whole part, so no fragment reads its world position or the mesh transform;
+and the sun's cascades no longer turn the tile, since a leaf's holes blur into
+the same dapple either way. The key hashes differently, so which way a given
+Voxel turns changed; the grass and canopy carpets read the same.
+
+Captures in `/tmp/colour-03-perf/{before,after}` (never committed), sheets in
+`sheets/` (before above, after below): village 70 m and 110 m, jungle 110 m,
+`jungle-top-medium`, and a jungle floor under the canopy for the dapple. All
+fully loaded (level 1 at 6743 Chunks), `dev,profiling` release builds.
+
+`scripts/profile-frames` `flight --instruments gpu`, offscreen 2560x1440,
+release `profiling`, 3 rounds of 3 repeats per side in rotating order, median
+of per-run figures (host slower today than in Q68: `main` p95 6.55, not 6.23):
+
+| Side                 | p50 ms | p95 ms | p99 ms |
+| -------------------- | ------ | ------ | ------ |
+| `main` 0b03c594      | 5.77   | 6.55   | 6.99   |
+| branch d82b525d      | 6.43   | 7.31   | 7.66   |
+| branch + this change | 6.18   | 6.99   | 7.33   |
+
+The branch over `main` falls from +0.66 / +0.77 / +0.67 ms to +0.41 / +0.45 /
++0.34 ms (p50 / p95 / p99). On Q68's `main` that puts the branch's p95 near
+6.68 ms: under the 6.9 ms budget, short of the 6.6 ms aim. What is left is the
+per-Voxel turn itself in the main pass; going lower changes the look.

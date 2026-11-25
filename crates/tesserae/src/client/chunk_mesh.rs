@@ -292,6 +292,8 @@ fn wide_indices(quads: u32) -> bool {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Expanded {
     pub corner: Corner,
+    /// The Voxel behind the quad's first Voxel, in the layer's cells.
+    pub voxel: [i32; 3],
     pub material: u32,
     pub light: u32,
     pub level: u32,
@@ -326,6 +328,7 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Option<Expanded> {
     let kind = field(lo, 0, KIND_BITS);
     let mut position = [0.0f32; 3];
     let mut normal = [0.0f32; 3];
+    let mut voxel = [0i32; 3];
     let uv;
     if kind < FACES {
         let positive = kind & 1 == 1;
@@ -351,8 +354,12 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Option<Expanded> {
             (cu - u0 / sub * sub) as f32 / sub as f32,
             (cv - v0 / sub * sub) as f32 / sub as f32,
         ];
+        voxel[d] = (plane as f32 / sub as f32 - normal[d] * 0.5).floor() as i32;
+        voxel[u] = (u0 / sub) as i32;
+        voxel[v] = (v0 / sub) as i32;
     } else {
         let cell = [0, 1, 2].map(|a| field(lo, CELL_SHIFT + a * CELL_BITS, CELL_BITS));
+        voxel = cell.map(|c| c as i32);
         let reversed = field(lo, REVERSED_SHIFT, 1) == 1;
         let i = if reversed { 3 - corner } else { corner };
         let (high_u, high_v) = (i == 1 || i == 2, i >= 2);
@@ -386,6 +393,7 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Option<Expanded> {
             normal,
             uv,
         },
+        voxel,
         material: paint & MATERIAL_MASK,
         light: paint >> LIGHT_SHIFT,
         level,
@@ -535,9 +543,33 @@ mod tests {
                 assert_eq!(expanded.material, quad.material, "{what}: quad {q}");
                 assert_eq!(expanded.light, u32::from(quad.light.packed()), "{what}");
                 assert_eq!(expanded.level, level);
+                assert_face_uv_counts_voxels(&expanded, quad, &format!("{what}: quad {q}"));
             }
         }
         assert_eq!(packed.quads().collect::<Vec<_>>(), layer.quads, "{what}");
+    }
+
+    /// The shader finds a merged face's Voxel per fragment as the quad's first
+    /// Voxel plus the UV's whole part, so the turn is per Voxel, not per quad.
+    fn assert_face_uv_counts_voxels(expanded: &Expanded, quad: &Quad, what: &str) {
+        use tesserae_core::mesh::layout::{FACES, KIND_BITS, mask};
+        if quad.geometry[0] & mask(KIND_BITS) >= FACES {
+            return;
+        }
+        let Corner {
+            position,
+            normal,
+            uv,
+        } = expanded.corner;
+        let d = normal
+            .iter()
+            .position(|n| *n != 0.0)
+            .expect("a face normal");
+        let (u, v) = ((d + 1) % 3, (d + 2) % 3);
+        assert_eq!(position[u] - uv[0], expanded.voxel[u] as f32, "{what}");
+        assert_eq!(position[v] - uv[1], expanded.voxel[v] as f32, "{what}");
+        let behind = (position[d] - normal[d] * 0.5).floor() as i32;
+        assert_eq!(expanded.voxel[d], behind, "{what}");
     }
 
     #[test]

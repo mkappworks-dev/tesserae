@@ -1,4 +1,4 @@
-import bevy_pbr::render::mesh_functions::get_world_from_local;
+import super::chunk_vertex::voxel_at;
 
 // One layer per distinct Material face, each with its own mips.
 @group(constants::MATERIAL_BIND_GROUP) @binding(103)
@@ -66,9 +66,8 @@ fn draws_the_top(word: u32, face: u32) -> bool {
     return face_layer(word, face) == face_layer(word, 0u);
 }
 
-fn hash(p: vec3<i32>) -> u32 {
-    let k = bitcast<vec3<u32>>(p) * vec3<u32>(0x8da6b343u, 0xd8163841u, 0xcb1ab31fu);
-    var h = k.x ^ k.y ^ k.z;
+fn hash(key: u32) -> u32 {
+    var h = key;
     h ^= h >> 16u;
     h *= 0x7feb352du;
     h ^= h >> 15u;
@@ -85,11 +84,9 @@ struct Turn {
     sign: vec2<f32>,
 }
 
-fn turn_for(world: vec3<f32>, instance: u32, normal: vec3<f32>, free: bool) -> Turn {
-    // The Voxel behind the face, whatever the quad it was merged into, in the
-    // cells of its level: the mesh's scale is that level's Voxel in metres.
-    let cell = world / length(get_world_from_local(instance)[0].xyz);
-    let bits = hash(vec3<i32>(floor(cell - normal * 0.5)));
+// Per Voxel, whatever the quad it was merged into, in the cells of its level.
+fn turn_for(voxel: u32, uv: vec2<f32>, free: bool) -> Turn {
+    let bits = hash(voxel_at(voxel, uv));
     let flip = vec2<bool>((bits & 1u) != 0u, (bits & 2u) != 0u && free);
     return Turn((bits & 4u) != 0u && free, select(vec2<f32>(1.0), vec2<f32>(-1.0), flip));
 }
@@ -135,7 +132,7 @@ fn patch_colour(rgb: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
     return max(hued, vec3<f32>(0.0)) * (1.0 + n.x * PATCH_VALUE);
 }
 
-fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f32>, world: vec3<f32>, instance: u32) -> vec4<f32> {
+fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f32>, voxel: u32) -> vec4<f32> {
     let face = face_of(slot, normal);
     // Turns the face's UV upright on its texture: (u, -v).
     var axes = mat2x2<f32>(1.0, 0.0, 0.0, -1.0);
@@ -153,9 +150,12 @@ fn sample_texture(slot: u32, uv: vec2<f32>, gradient: UvGradient, normal: vec3<f
 
     let word = face_word(slot);
     // The derivatives turn with the UV, or a turned Voxel samples the wrong
-    // mip and anisotropy axis.
+    // mip and anisotropy axis. Not in the sun's cascades: a leaf's holes blur
+    // into the same dapple however they are turned, and neighbouring Voxels
+    // sampling apart cost about 0.15 ms of a 6 ms `flight` frame there.
+    @if(!CHUNK_SUN_SHADOW)
     if (word & TURNED) != 0u {
-        let turn = turn_for(world, instance, normal, draws_the_top(word, face));
+        let turn = turn_for(voxel, uv, draws_the_top(word, face));
         coord = turned(turn, coord);
         ddx = turned(turn, ddx);
         ddy = turned(turn, ddy);
