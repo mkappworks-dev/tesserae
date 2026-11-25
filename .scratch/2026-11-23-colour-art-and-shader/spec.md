@@ -93,7 +93,9 @@ lands.
   if the picture is still loud after the art pass.
 - The art pass covers the shared Mods Terra ships, since they are most of the
   screen: palette and pattern edits of the existing PNGs, no new art. `crops`
-  and the smaller Mods wait for a capture that shows them.
+  gets its thicker wheat, the shared painters' linear-light shading and its
+  appearance colours by the rule below (Q73); its palette and the smaller Mods
+  wait for a capture that shows them.
 - Pattern rules, for `textures.rs` and the Mod PNGs alike:
   - Every period divides 16; one mortar or plank line per tile edge.
   - Leaves get a period of 4 or 8 with clumped gaps, not a regular grid.
@@ -106,8 +108,8 @@ lands.
   - Non-emissive texels stay within about 50 to 243 sRGB; `INK` rises to about
     50. Glass, lava and the lamp are exempt.
   - Thin sprite features are at least 2 texels wide; ripe wheat covers 25 to
-    35% of its tile. A sprite's appearance colour is its edge colour, so
-    transparent texels do not bleed a fringe.
+    35% of its tile. A sprite's appearance colour is its edge colour (below),
+    so transparent texels do not bleed a fringe.
 - Colour targets, starting points the user approves on captures:
   - Grass top and Terra's leaves move together toward the acacia's chroma, at
     most about S 0.5 (C\* 35 to 40), slightly darker. `flora`'s jungle, oak,
@@ -125,9 +127,13 @@ lands.
   tree aliases are deleted: a Game's appearance row only reaches its own
   Materials, so nothing Terra declares used them. Thicker wheat is drawn in
   `crops`' PNGs.
-- A Material's appearance colour is its tile's linear mean (grass: its top),
-  set after the pattern changes. Terra's are tested; the Mods' `content.toml`
-  colours are set by hand from the same measure.
+- A block's appearance colour is its tile's linear mean (grass and turf: their
+  top). A sprite's, a Material a Plant places on a cross or plane Shape, is its
+  edge colour: the linear mean of its drawn texels that have a clear texel
+  beside them (left, right, above or below, on the same face), so the filtered
+  rim of a cutout shows no fringe (Q75). Both are set after the pattern changes
+  and tested for Terra and the Mods it ships; the Mods' `content.toml` colours
+  are set from the same measure.
 - Aerial perspective lives in Distance fog, not a new full-screen pass: a haze
   in metres that does not depend on the reach, fading blue first, beside the
   reach-sized fade. The glossary's Distance fog entry changes with it.
@@ -197,8 +203,9 @@ lands.
   swamp tree views, and the mid-distance village and jungle views at 70 and
   110 m.
 - Terra's texture tests keep passing. New: every period-bound pattern tiles
-  across a Voxel edge; Terra's appearance colours match their tile's linear
-  mean. Pattern and palette changes are reviewed on captures, not asserted.
+  across a Voxel edge; the appearance colours of Terra and the Mods it ships
+  match a block's tile mean and a sprite's edge colour. Pattern and palette
+  changes are reviewed on captures, not asserted.
 - Tile variation: a Material without the flag draws exactly as before.
 - Screen-space AO: GPU frame time on `flight` against `main`.
 - Tree variety: a tree row with one canopy and no storeys generates exactly as

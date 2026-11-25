@@ -3243,9 +3243,11 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     /// The map and untextured draws show the appearance colour, so it must be what the textured
-    /// surface averages to from afar: the linear mean of its drawn texels.
+    /// surface averages to from afar: the linear mean of a block's drawn texels. A sprite's is its
+    /// edge colour, the linear mean of its drawn texels with a clear one beside them (left, right,
+    /// above or below on the same face), so a cutout's filtered rim shows no fringe.
     #[test]
-    fn terra_appearance_colours_are_their_tiles_linear_mean() {
+    fn terra_appearance_colours_are_a_blocks_tile_mean_and_a_sprites_edge_colour() {
         let loaded = super::runtime::tests::terra_loaded(1.0);
         let linear = |c: u8| {
             let c = c as f64 / 255.0;
@@ -3263,9 +3265,15 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                     1.055 * l.powf(1.0 / 2.4) - 0.055
                 }
         };
-        let mut checked = 0;
+        let sprites = sprite_materials(&loaded.tables);
+        let (mut blocks, mut drawn_sprites) = (0, 0);
         for (id, name) in loaded.registry.names(Kind::Material) {
-            if !name.starts_with("terra:") {
+            let sprite = sprites.contains(&(id as MaterialId));
+            // The other Mods' blocks keep the colours they were declared with.
+            let measured = ["terra:", "flora:", "strata:", "crops:"]
+                .iter()
+                .any(|m| name.starts_with(m));
+            if !sprite && !measured {
                 continue;
             }
             let Some((_, pixels, _)) = loaded.textures.iter().find(|(m, ..)| *m as usize == id)
@@ -3277,28 +3285,69 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 .iter()
                 .find(|(m, _)| *m as usize == id)
                 .unwrap();
-            // A grass block is seen from above.
-            let faces = if name == "terra:grass" { 0..1 } else { 0..3 };
-            let drawn: Vec<&[u8; 4]> = pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .enumerate()
-                .filter(|(i, p)| faces.contains(&(i / 16 % 3)) && p[3] > 0)
-                .map(|(_, p)| p)
+            let texels = pixels.as_chunks::<4>().0;
+            let clear = |i: usize| texels[i][3] == 0;
+            let edge = |i: usize| {
+                let (x, y) = (i % 16, i / 48);
+                (x > 0 && clear(i - 1))
+                    || (x < 15 && clear(i + 1))
+                    || (y > 0 && clear(i - 48))
+                    || (y < 15 && clear(i + 48))
+            };
+            // Grass and turf are seen from above.
+            let faces = if matches!(name, "terra:grass" | "strata:turf") {
+                0..1
+            } else {
+                0..3
+            };
+            let measure: Vec<&[u8; 4]> = (0..texels.len())
+                .filter(|&i| faces.contains(&(i / 16 % 3)) && !clear(i) && (!sprite || edge(i)))
+                .map(|i| &texels[i])
                 .collect();
             for c in 0..3 {
-                let mean = drawn.iter().map(|p| linear(p[c])).sum::<f64>() / drawn.len() as f64;
+                let mean =
+                    measure.iter().map(|p| linear(p[c])).sum::<f64>() / measure.len() as f64;
                 assert!(
                     (srgb(mean) - colour[c] as f64).abs() <= 1.0,
-                    "{name} channel {c}: appearance {} against a mean of {:.1}",
+                    "{name} channel {c}: appearance {} against {} {:.1}",
                     colour[c],
+                    if sprite { "an edge colour of" } else { "a mean of" },
                     srgb(mean)
                 );
             }
-            checked += 1;
+            if sprite {
+                drawn_sprites += 1;
+            } else {
+                blocks += 1;
+            }
         }
-        assert!(checked >= 40, "only {checked} Terra Materials checked");
+        assert!(blocks >= 120, "only {blocks} blocks checked");
+        assert!(drawn_sprites >= 40, "only {drawn_sprites} sprites checked");
+    }
+
+    /// The Materials a Plant places on a flat Shape, a cross or a plane: its sprites.
+    fn sprite_materials(tables: &Tables) -> HashSet<MaterialId> {
+        use tesserae_core::Voxel;
+        use tesserae_core::plant::Kind as PlantKind;
+        let flat = |shape: Option<ShapeId>| {
+            shape.is_some_and(|s| tables.shapes.form_of(Voxel::new(1, s, 0)).is_flat())
+        };
+        let mut sprites = HashSet::new();
+        for plant in tables.plants.plants() {
+            match &plant.kind {
+                PlantKind::Crop { stages, .. } => sprites.extend(
+                    stages
+                        .iter()
+                        .filter(|s| flat(s.shape.or(plant.shape)))
+                        .map(|s| s.material),
+                ),
+                _ if flat(plant.shape) => {
+                    sprites.insert(plant.first);
+                }
+                _ => {}
+            }
+        }
+        sprites
     }
 
     #[test]
