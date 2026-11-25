@@ -37,9 +37,12 @@ the stone beside the bed.
 Fix, as the user chose (Q61): from level 2 up a level also meshes its hole,
 the region the next finer level draws, and keeps each of those Chunks until
 the finer levels have sent all of its region, then unloads it; the Client
-draws the finer Chunks over it as they land (ADR-0019). A gap at a finer level
-shows the coarser ground, not what lies under it. Level 1's hole is level 0's.
-The top level, with nothing coarser, still sends its ground in groups that no
-unsent ground borders, as does any level where the coarser one has not arrived.
-Test: `every_sent_chunk_borders_ground_that_some_level_draws`. Captures in
-`/tmp/colour-06`.
+draws the finer Chunks over it as they land (ADR-0019). Level 1's hole is
+level 0's. A Chunk is sent once each neighbour it borders is sent, air, or
+drawn by the next coarser level: a level further out stood so far off the
+ground that a finer Chunk's side showed dark across the step. Where none of
+those holds (the top level, or the next level not yet arrived) the Chunk
+waits, with any neighbour whose region nothing else draws. Stand-ins do not
+count for the hole-first order, or the finer levels stop filling coarsest
+first. Test: `every_sent_chunk_borders_ground_that_some_level_draws`.
+Captures in `/tmp/colour-06/v2`.

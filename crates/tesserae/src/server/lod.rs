@@ -500,6 +500,21 @@ pub(in crate::server) struct LodState {
     children: super::streaming::stats::Children,
 }
 
+impl Level {
+    /// Delivered for its shell rather than standing in for its hole ([`hand_over`]). Only these
+    /// count for the hole-first order, which would otherwise stop filling the finer levels
+    /// coarsest first wherever a stand-in is drawn.
+    fn holds(&self, level: u32, coord: ChunkCoord) -> bool {
+        let stands_in = level >= 2
+            && self
+                .anchor
+                .zip(self.rings)
+                .and_then(|(anchor, rings)| rings.mesh.hole.map(|hole| (anchor, hole)))
+                .is_some_and(|(anchor, hole)| hole.contains(delta(anchor, coord)));
+        self.delivered.contains(&coord) && !stands_in
+    }
+}
+
 impl LodState {
     fn level_mut(&mut self, level: u32) -> &mut Level {
         let index = level as usize - 1;
@@ -1530,7 +1545,13 @@ impl SentBelow {
             let sent = state.levels.get(finer as usize - 1).into_iter();
             let next = levels[finer as usize - 1]
                 .iter()
-                .chain(sent.flat_map(|l| &l.delivered))
+                .copied()
+                .chain(sent.flat_map(|l| {
+                    l.delivered
+                        .iter()
+                        .copied()
+                        .filter(move |&c| l.holds(finer, c))
+                }))
                 .map(|c| c.parent())
                 .collect();
             levels.push(next);
@@ -1552,7 +1573,7 @@ fn is_hole(top: u32, state: &LodState, below: &SentBelow, (level, coord): LodKey
         state
             .levels
             .get(l as usize - 1)
-            .is_some_and(|lv| lv.delivered.contains(&c))
+            .is_some_and(|lv| lv.holds(l, c))
     };
     if delivered(level, coord) || below.contains((level, coord)) {
         return false;
@@ -1992,8 +2013,8 @@ fn land_meshes(
 }
 
 /// Sends the withheld meshes no gap borders: a gap is a face neighbour the level meshes
-/// ([`meshed_extent`]) that is neither sent nor air and that neither a coarser level nor the
-/// finer ones draw. Sent beside one, a Chunk is seen through it, where the ground or water over
+/// ([`meshed_extent`]) that is neither sent nor air and that neither the next coarser level nor
+/// the finer ones draw. Sent beside one, a Chunk is seen through it, where the ground or water over
 /// a cave or a lake bed will be, and the bed, lit dark as it lies, drew as black terrain while
 /// the level loaded. Below the top level a coarser Chunk stands in the gap (see [`hand_over`]),
 /// so a Chunk waits only where the coarser level has not arrived either.
@@ -2008,15 +2029,13 @@ fn send_withheld(
         let Some(level) = state.levels.get(Plan::index(plan.level)) else {
             continue;
         };
+        // Only the next level: its seam walls close the step to this one, and a level further
+        // out stands far enough off the ground for this one's side to show across the gap.
         let drawn_coarser = |coord: ChunkCoord| {
-            let mut covering = coord;
-            (plan.level + 1..=plans.len() as u32).any(|coarser| {
-                covering = covering.parent();
-                state
-                    .levels
-                    .get(coarser as usize - 1)
-                    .is_some_and(|lv| lv.delivered.contains(&covering))
-            })
+            state
+                .levels
+                .get(plan.level as usize)
+                .is_some_and(|coarser| coarser.delivered.contains(&coord.parent()))
         };
         let filled = |n: ChunkCoord| {
             !meshed_extent(plan).contains(delta(plan.anchor, n))
@@ -2026,7 +2045,8 @@ fn send_withheld(
                 || drawn_coarser(n)
                 || covered_by_finer(state, level_zero, (plan.level, n))
         };
-        // Sent, a withheld neighbour of a blocked Chunk would border the gap that one leaves.
+        // Sent, a withheld neighbour of a blocked Chunk would border the gap that one leaves,
+        // unless something else draws that one's region.
         let mut blocked: Vec<ChunkCoord> = level
             .withheld
             .keys()
@@ -2039,6 +2059,9 @@ fn send_withheld(
             .collect();
         let mut held_back: HashSet<ChunkCoord> = blocked.iter().copied().collect();
         while let Some(c) = blocked.pop() {
+            if filled(c) {
+                continue;
+            }
             for n in face_neighbors(c) {
                 if level.withheld.contains_key(&n) && held_back.insert(n) {
                     blocked.push(n);
@@ -3900,7 +3923,7 @@ mod tests {
                     _ => mesh.outer.contains(d),
                 };
                 for n in face_neighbors(m.coord) {
-                    let mut covering = (m.level, n);
+                    let covering = (m.level, n);
                     let air = h
                         .lod_store()
                         .shown(m.level, n)
@@ -3912,10 +3935,7 @@ mod tests {
                             .deferred
                             .contains(&n)
                         || finer_draws(covering)
-                        || (m.level + 1..levels).any(|coarser| {
-                            covering = (coarser, covering.1.parent());
-                            drawn.contains(&covering)
-                        });
+                        || drawn.contains(&(m.level + 1, n.parent()));
                     assert!(
                         filled,
                         "level {} {} was sent beside a gap at {n}",
