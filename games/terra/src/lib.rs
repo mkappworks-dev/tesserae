@@ -174,7 +174,6 @@ pub(crate) fn appearance(material: &str, base: [u8; 4]) -> Appearance {
     }
 }
 
-/// Planks, brick and logs keep their orientation; natural ground turns.
 fn variation(material: &str) -> TileVariation {
     match material {
         "leaves" | "grass" => TileVariation::TurnedAndPatched,
