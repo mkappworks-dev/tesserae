@@ -46,3 +46,11 @@ waits, with any neighbour whose region nothing else draws. Stand-ins do not
 count for the hole-first order, or the finer levels stop filling coarsest
 first. Test: `every_sent_chunk_borders_ground_that_some_level_draws`.
 Captures in `/tmp/colour-06/v2`.
+
+Measured against `79ec13cf`, dev builds, interleaved, load 3 to 11. Mid-load,
+three pairs per view: black share 1.9% before, 0.00% (`far`) and 0.08%
+(`jungle`, tree shadow, as settled) after. Time to levels 2 to 4 shown: `far`
+42, 33, 32 s before, 38, 32, 33 s after; `jungle` 86 s before, 72 s after.
+`flight` GPU frame (`--instruments gpu`, two series of three each): median
+4.02 to 4.20 ms before, 3.73 to 3.77 ms after; p99 5.13 to 5.40 ms before,
+4.66 to 4.76 ms after.
