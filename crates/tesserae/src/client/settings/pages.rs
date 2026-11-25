@@ -565,6 +565,12 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allo
                 }),
             Operation::Scale,
         );
+        setting_row(
+            card,
+            "Ambient occlusion",
+            "Shade where blocks meet. Costs GPU time; not drawn with MSAA.",
+            |row| toggle(row, p.ambient_occlusion, Operation::AmbientOcclusion),
+        );
     });
     group(list, "MAP AND COMPASS", |card| {
         setting_row(
