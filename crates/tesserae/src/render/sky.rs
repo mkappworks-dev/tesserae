@@ -192,6 +192,7 @@ fn follow_air(
 mod tests {
     use super::*;
     use crate::render::fog;
+    use crate::server::streaming::StreamingSettings;
 
     #[test]
     fn the_sky_shows_over_the_air_and_not_over_water_or_the_probe() {
@@ -223,6 +224,9 @@ mod tests {
         app.init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<SkyMaterial>>()
             .add_plugins(fog::plugin)
+            .init_resource::<StreamingSettings>()
+            // VisibilityPlugin registers this in the app; the test has no renderer.
+            .register_required_components::<Mesh3d, Visibility>()
             .add_systems(Startup, build_assets)
             .add_systems(Update, (spawn_under_camera, follow_air).chain());
         app.world_mut().spawn((
