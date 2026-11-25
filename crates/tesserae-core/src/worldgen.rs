@@ -3878,7 +3878,7 @@ impl Worldgen {
         let &(lead, tree, shape) = covers.first()?;
         let sparse = covers
             .iter()
-            .find(|t| (t.1.canopy, t.1.variants) != (tree.canopy, tree.variants))
+            .find(|t| (t.1.canopy, t.1.canopies_index) != (tree.canopy, tree.canopies_index))
             .filter(|t| 2.0 * t.0 >= lead)
             .map_or((tree, shape), |t| (t.1, t.2));
         // One variant per crown-sized cell, so a coarse level's crowns are not a speckle.

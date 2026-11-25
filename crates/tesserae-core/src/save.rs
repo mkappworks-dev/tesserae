@@ -2131,8 +2131,8 @@ fn restored_plant(
                     .transpose()?,
                 trunk: id(trunk)?,
                 canopy: canopies.first(),
-                variants: 0,
-                storeys: 0,
+                canopies_index: 0,
+                storeys_index: 0,
                 trunk_height_m: (trunk_height_m[0], trunk_height_m[1]),
                 canopy_radius_m: *canopy_radius_m,
                 fruit: fruit

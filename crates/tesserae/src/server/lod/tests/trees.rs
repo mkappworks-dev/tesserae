@@ -33,8 +33,8 @@ pub(super) fn forest_spaced(spacing_m: f32, crowding_m: Option<f32>) -> Worldgen
         plant: Some(SurfacePlant {
             shape: 0,
             kind: SurfacePlantKind::Tree(SurfaceTree {
-                storeys: 0,
-                variants: 0,
+                storeys_index: 0,
+                canopies_index: 0,
                 trunk: trunk(),
                 canopy: canopy(),
                 trunk_height_m: (3.0, 5.0),

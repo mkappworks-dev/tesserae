@@ -265,8 +265,8 @@ fn sixteen(cross: u8, branched: bool) -> Vec<SurfaceFeature> {
         },
     ];
     let tree = |trunk_m: (f32, f32), radius, shape: usize| SurfaceTree {
-        storeys: 0,
-        variants: 0,
+        storeys_index: 0,
+        canopies_index: 0,
         trunk: TRUNK,
         crowding_m: None,
         canopy: CANOPY,

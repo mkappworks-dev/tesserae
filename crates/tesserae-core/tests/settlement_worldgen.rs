@@ -676,8 +676,8 @@ fn settlements_no_biome_lists_change_nothing() {
 
 fn oak() -> SurfaceTree {
     SurfaceTree {
-        storeys: 0,
-        variants: 0,
+        storeys_index: 0,
+        canopies_index: 0,
         branching: None,
         crowding_m: None,
         trunk: TRUNK,
