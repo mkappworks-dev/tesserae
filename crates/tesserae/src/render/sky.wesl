@@ -13,9 +13,9 @@ struct Sky {
 var<uniform> sky: Sky;
 
 // How fast the horizon's colour gives way to the zenith's with height: half of
-// the way by about 6 degrees, so even a view pitched down shows blue above a
+// the way by about 3 degrees, so even a view pitched down shows blue above a
 // lighter band.
-const HORIZON_FALLOFF: f32 = 6.0;
+const HORIZON_FALLOFF: f32 = 12.0;
 
 // Larger than the real sun's quarter degree, which is under two pixels at the
 // default field of view.
@@ -51,6 +51,16 @@ fn vertex(in: Vertex) -> SkyOutput {
     return out;
 }
 
+// What the tonemapper shows `colour` as, so the sky can be mixed in screen
+// colour: the horizon as the fogged terrain shows it, the zenith as authored.
+fn seen(colour: vec3<f32>) -> vec3<f32> {
+    var out = vec4<f32>(colour, 1.0);
+    @if(TONEMAP_IN_SHADER) {
+        out = tone_mapping(out, view.color_grading);
+    }
+    return out.rgb;
+}
+
 @fragment
 fn fragment(in: SkyOutput) -> @location(0) vec4<f32> {
     let near = view.world_from_clip * vec4<f32>(in.ndc, 1.0, 1.0);
@@ -58,7 +68,7 @@ fn fragment(in: SkyOutput) -> @location(0) vec4<f32> {
 
     var horizon = sky.zenith.rgb;
     @if(DISTANCE_FOG) {
-        horizon = fog.base_color.rgb;
+        horizon = seen(fog.base_color.rgb);
     }
     let up = 1.0 - exp(-max(direction.y, 0.0) * HORIZON_FALLOFF);
     var colour = mix(horizon, sky.zenith.rgb, up);
@@ -68,11 +78,6 @@ fn fragment(in: SkyOutput) -> @location(0) vec4<f32> {
     let disc = 1.0 - smoothstep(SUN_RADIUS_RAD, SUN_RADIUS_RAD + SUN_EDGE_RAD, angle);
     let toward = max(facing, 0.0);
     let glow = GLOW_WIDE * pow(toward, GLOW_WIDE_POWER) + GLOW_TIGHT * pow(toward, GLOW_TIGHT_POWER);
-    colour = mix(colour + GLOW_COLOUR * glow, SUN_COLOUR, disc);
-
-    var out = vec4<f32>(colour, 1.0);
-    @if(TONEMAP_IN_SHADER) {
-        out = tone_mapping(out, view.color_grading);
-    }
-    return out;
+    colour = mix(colour + seen(GLOW_COLOUR * glow), seen(SUN_COLOUR), disc);
+    return vec4<f32>(colour, 1.0);
 }

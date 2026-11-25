@@ -1,10 +1,12 @@
 //! The sky: the air's sky colour at the zenith, blending to its fog colour at
 //! the horizon, with a sun disc and glow toward the fixed light.
 //!
-//! Drawn in the main pass and tonemapped there, as the fogged terrain is, so its
-//! horizon is the fog uniform itself and the far terrain meets it with no edge
-//! whatever the tonemapper does. The clear colour stays what shows wherever the
-//! sky is hidden: under water, and the capture probe's magenta.
+//! Drawn in the main pass, so its horizon is the fog uniform through the same
+//! tonemapper as the fogged terrain, which meets it with no edge whatever the
+//! tonemapper does. The zenith skips the tonemapper, as the clear colour did,
+//! so it shows the sky colour as authored: through it a blue greys. The clear
+//! colour stays what shows wherever the sky is hidden: under water, and the
+//! capture probe's magenta.
 
 use bevy::asset::{AssetPath, RenderAssetUsages};
 use bevy::camera::visibility::{NoFrustumCulling, VisibilitySystems};
@@ -17,14 +19,13 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 
-use super::fog::{self, FogSettings};
+use super::fog::FogSettings;
 use crate::client::camera::MainCamera;
 use crate::session::SessionApp;
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone, PartialEq)]
 pub struct SkyMaterial {
-    /// Linear, lifted by [`fog::fog_toward`]: the tonemapper darkens it back to
-    /// the sky colour as the clear colour showed it.
+    /// Linear, as it shows on screen.
     #[uniform(0)]
     pub zenith: Vec4,
     /// Unit length, toward the sun.
@@ -141,7 +142,7 @@ fn spawn_under_camera(
 
 /// `sky` is sRGB, as the clear colour shows it.
 pub fn zenith(sky: [f32; 3]) -> Vec4 {
-    let [r, g, b] = fog::fog_toward(sky);
+    let [r, g, b] = sky;
     Color::srgb(r, g, b).to_linear().to_vec4()
 }
 
@@ -190,6 +191,7 @@ fn follow_air(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::fog;
 
     #[test]
     fn the_sky_shows_over_the_air_and_not_over_water_or_the_probe() {
@@ -207,18 +209,13 @@ mod tests {
     }
 
     #[test]
-    fn the_zenith_is_the_sky_lifted_as_the_fog_is() {
+    fn the_zenith_is_the_sky_colour_as_the_clear_colour_showed_it() {
         let sky = [0.44, 0.6, 0.78];
-        let lifted = fog::fog_toward(sky);
         let zenith = zenith(sky);
         let back = Color::linear_rgb(zenith.x, zenith.y, zenith.z).to_srgba();
-        for (got, want) in [back.red, back.green, back.blue].into_iter().zip(lifted) {
+        for (got, want) in [back.red, back.green, back.blue].into_iter().zip(sky) {
             assert!((got - want).abs() < 1e-4, "{got} for {want}");
         }
-        assert!(
-            (0..3).all(|c| lifted[c] > sky[c]),
-            "lighter, for the tonemapper to darken"
-        );
     }
 
     fn app() -> App {

@@ -190,8 +190,8 @@ pub struct Haze {
 }
 
 pub const HAZE: Haze = Haze {
-    most: 0.4,
-    scale_m: [700.0, 500.0, 350.0],
+    most: 0.2,
+    scale_m: [460.0, 330.0, 230.0],
 };
 
 /// The haze as the chunk shader's `constants::CHUNK_HAZE_*`: a shader def holds
@@ -586,7 +586,7 @@ mod tests {
             "a tree across a clearing is not in fog: {clearing}"
         );
         let [r, _, b] = HAZE.opacity_at(110.0);
-        assert!(b > 0.09 && r > 0.04, "110 m: {r} {b}");
+        assert!(b > 0.07 && r > 0.04, "110 m: {r} {b}");
         for channel in HAZE.opacity_at(100_000.0) {
             assert!(channel <= HAZE.most && channel > 0.95 * HAZE.most);
         }
