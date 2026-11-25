@@ -1,6 +1,6 @@
 # 01: Art pass
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Colour, art and light](../spec.md).
 

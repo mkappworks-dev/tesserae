@@ -1,6 +1,6 @@
 # 06: Loading terrain draws black
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Colour, art and light](../spec.md).
 

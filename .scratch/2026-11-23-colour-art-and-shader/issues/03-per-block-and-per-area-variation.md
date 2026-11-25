@@ -1,6 +1,6 @@
 # 03: Per-block and per-area variation
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Colour, art and light](../spec.md).
 

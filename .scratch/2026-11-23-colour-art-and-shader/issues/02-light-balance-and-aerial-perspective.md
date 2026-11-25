@@ -1,6 +1,6 @@
 # 02: Light balance, aerial perspective and the sky
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [Colour, art and light](../spec.md).
