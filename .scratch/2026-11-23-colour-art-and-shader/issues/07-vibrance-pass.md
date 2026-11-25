@@ -1,6 +1,6 @@
 # 07: Vibrance pass
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Colour, art and light](../spec.md).
 
@@ -109,3 +109,7 @@ user's pick ("branch + `main`'s art") at the same light.
 Tests written, not run: the sky share's shader defs in
 `render/chunk_material.rs`, and a compile-time check that an underside sees no
 more sky than a side and a side less than a top.
+
+2026-11-25: done. The generator re-run is byte-identical; the appearance-colour
+test is written and waits for the full test run after every ticket is merged,
+so its box stays open until then.
