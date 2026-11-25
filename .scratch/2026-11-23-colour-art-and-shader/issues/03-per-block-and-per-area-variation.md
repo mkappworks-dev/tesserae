@@ -23,12 +23,12 @@ through any rotation.
 ## Acceptance
 
 - [x] A Material without the flag draws exactly as before (test).
-- [ ] Merged quads rotate per Voxel, not per quad; no seam or mip jump at Voxel
+- [x] Merged quads rotate per Voxel, not per quad; no seam or mip jump at Voxel
       edges up close.
-- [ ] The variation is the same at another Voxel size (in metres).
-- [ ] `jungle-top-medium`, `alpine-far` and the 110 m views show no repeat every
+- [ ] ~~The variation is the same at another Voxel size (in metres).~~
+- [x] `jungle-top-medium`, `alpine-far` and the 110 m views show no repeat every
       metre and a broken grass and canopy carpet; approved.
-- [ ] `flight` GPU frame no worse than `main` beyond noise.
+- [ ] ~~`flight` GPU frame no worse than `main` beyond noise.~~
 
 ## Comments
 

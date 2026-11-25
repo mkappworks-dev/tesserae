@@ -15,7 +15,7 @@ by default, with the prepass cut to the levels AO can reach.
 ## Acceptance
 
 - [x] GPU frame time on `flight` against `main` recorded.
-- [ ] Canopies and building corners darken where blocks meet, and the jungle
+- [x] Canopies and building corners darken where blocks meet, and the jungle
       floor gets no darker than 02 leaves it; approved on captures.
 - [x] A player setting, off by default; its cost with the cut prepass recorded.
 
