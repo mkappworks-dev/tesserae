@@ -285,7 +285,7 @@ texture = "art/potato_ripe.png"
 
 [[appearance]]
 material = "berry_sprout"
-color = [59, 113, 49, 255]
+color = [55, 113, 45, 255]
 texture = "art/berry_sprout.png"
 
 [[appearance]]

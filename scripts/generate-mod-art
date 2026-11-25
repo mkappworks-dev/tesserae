@@ -7,6 +7,7 @@ is 48 by 16: three 16 by 16 faces side by side, in the order top, side, bottom. 
 anywhere; output is deterministic, so a re-run changes no file.
 """
 
+import colorsys
 import math
 import pathlib
 import struct
@@ -87,6 +88,26 @@ def drawn(texel):
         return CLEAR if c is None else (*albedo(c), 255)
 
     return paint
+
+
+def variant(paint, value, hue):
+    """A canopy variant of a leaves tile: each texel's HSV value times `value` and its hue turned by
+    `hue` degrees, its alpha kept."""
+
+    def texel(face, x, y):
+        r, g, b, a = paint(face, x, y)
+        if not a:
+            return None
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        return tuple(round(c * 255) for c in colorsys.hsv_to_rgb((h + hue / 360) % 1, s, min(1.0, v * value)))
+
+    return drawn(texel)
+
+
+def canopies(name, paint):
+    """A tree's other two canopies beside its leaves `paint`: 8% darker and 4 degrees one way, 8%
+    lighter and 4 degrees the other."""
+    return {f"{name}_dark": variant(paint, 0.92, -4.0), f"{name}_light": variant(paint, 1.08, 4.0)}
 
 
 def cells(x, y, size, salt, size_y=None):
@@ -351,6 +372,11 @@ def sprite(draw):
     return lambda face, x, y: draw(x, y) or CLEAR
 
 
+def drawn_sprite(draw):
+    """`sprite` from `draw(x, y)`, an RGB colour or None for clear, held to the albedo range."""
+    return drawn(lambda face, x, y: draw(x, y))
+
+
 def tuft(x, y):
     height = 5 + noise(x, 0, 131) % 8
     taper = abs(x % 4 - 1)
@@ -362,14 +388,14 @@ def tuft(x, y):
 def flower(petal, centre):
     def draw(x, y):
         if x in (7, 8) and 8 <= y < EDGE:
-            return tint((60, 124, 44), (noise(x, y, 137) - 128) // 14)
+            return shade((60, 124, 44), (noise(x, y, 137) - 128) // 14)
         if x in (5, 10) and y in (11, 12):
-            return tint((60, 124, 44), -10)
+            return shade((60, 124, 44), -10)
         dx, dy = abs(x - 7.5), abs(y - 5.5)
         if dx + dy < 1.5:
-            return (*centre, 255)
+            return centre
         if dx + dy < 4:
-            return tint(petal, (noise(x, y, 139) - 128) // 12)
+            return shade(petal, (noise(x, y, 139) - 128) // 12)
         return None
 
     return draw
@@ -377,10 +403,10 @@ def flower(petal, centre):
 
 def oak_sapling(x, y):
     if x in (7, 8) and 9 <= y < EDGE:
-        return tint((110, 78, 44), (noise(x, y, 141) - 128) // 14)
+        return shade((110, 78, 44), (noise(x, y, 141) - 128) // 14)
     dx, dy = abs(x - 7.5), abs(y - 5.5)
     if dx + dy * 1.2 < 5 and noise(x, y, 143) > 60:
-        return tint((62, 138, 44), (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+        return shade((62, 138, 44), (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
     return None
 
 
@@ -469,7 +495,7 @@ def disc(x, y, cx, cy, rx, ry=None):
 
 
 def grain(colour, x, y, salt, spread=40):
-    return tint(colour, (noise(x, y, salt) - 128) // spread)
+    return shade(colour, (noise(x, y, salt) - 128) // spread)
 
 
 def positional(top, side, bottom):
@@ -478,12 +504,12 @@ def positional(top, side, bottom):
     of a small Shape can have its own colour, stem and leaf, by painting that spot. `side` takes the
     height up from the Voxel's floor, so its row is flipped from the image's."""
 
-    def paint(face, x, y):
+    def texel(face, x, y):
         if face == 1:
-            return side(x, EDGE - 1 - y) or CLEAR
-        return (top if face == 0 else bottom)(x, y) or CLEAR
+            return side(x, EDGE - 1 - y)
+        return (top if face == 0 else bottom)(x, y)
 
-    return paint
+    return drawn(texel)
 
 
 def stacked_fruit(palette, rows, ring, stem, leaf=None):
@@ -604,14 +630,14 @@ def mushroom_cap(cap, rim, dots):
             return grain(rim, x, h, 103, 28)
         if 5 <= x < 11 and 7 <= h < 9:
             if dots and (x, h) in ((6, 8), (9, 7)):
-                return (240, 238, 226, 255)
+                return (240, 238, 226)
             return grain(cap, x, h, 105, 40)
         return None
 
     def top(x, z):
         if 5 <= x < 11 and 5 <= z < 11:
             if dots and (x, z) in ((6, 6), (9, 7), (7, 9)):
-                return (240, 238, 226, 255)
+                return (240, 238, 226)
             return grain(cap, x, z, 107, 40)
         if 4 <= x < 12 and 4 <= z < 12 or (10 <= x < 13 and 10 <= z < 13):
             return grain(rim, x, z, 109, 28)
@@ -652,7 +678,7 @@ def berry_bush(stage):
     stem_colour = (70, 104, 44)
 
     def leafy(x, h, shift=0):
-        return tint(BERRY_LEAF, (noise(x, h, 385) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8) + shift)
+        return shade(BERRY_LEAF, (noise(x, h, 385) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8) + shift)
 
     if stage == 1:
         leaves, stem = sides_of(SPROUT_LEAVES), sides_of([SPROUT_STEM])
@@ -673,7 +699,7 @@ def berry_bush(stage):
                 return leafy(x, z, 18)
             return None
 
-        return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
+        return positional(top, side, lambda x, z: shade(BERRY_LEAF, -30) if top(x, z) else None)
 
     tiers = BUSH_TIERS if stage == 2 else RIPE_TIERS
     mound, dark = sides_of(tiers), sides_of(RIPE_DARK) if stage == 3 else []
@@ -693,10 +719,10 @@ def berry_bush(stage):
             return grain(BERRY_RED, x, z, 393, 24)
         for x0, _, z0, x1, _, z1 in reversed(tiers):
             if x0 <= x < x1 and z0 <= z < z1:
-                return tint(BERRY_LEAF, (noise(x, z, 395) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
+                return shade(BERRY_LEAF, (noise(x, z, 395) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
         return None
 
-    return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
+    return positional(top, side, lambda x, z: shade(BERRY_LEAF, -30) if top(x, z) else None)
 
 
 # The boxes of the `watermelon` and `pumpkin` Shapes (and their small unripe ones) in
@@ -752,29 +778,29 @@ def sapling(leaf, form="round"):
         if form == "cone":
             half = (y - 1) * 0.42
             if 1 <= y < 12 and abs(x - 7.5) <= half and n > 50:
-                return tint(leaf, (n - 128) // 10 - (12 if y % 3 == 0 else 0))
+                return shade(leaf, (n - 128) // 10 - (12 if y % 3 == 0 else 0))
             if x in (7, 8) and 12 <= y < EDGE:
-                return tint(trunk, (n - 128) // 14)
+                return shade(trunk, (n - 128) // 14)
             return None
         if form == "palm":
             if x in (7, 8) and 6 <= y < EDGE:
-                return tint(trunk, (n - 128) // 14)
+                return shade(trunk, (n - 128) // 14)
             for tx, ty in ((2, 6), (13, 6), (4, 3), (11, 3), (7, 1)):
                 if abs((x - 7.5) * (ty - 6) - (y - 6) * (tx - 7.5)) < 0.9 * max(1, abs(tx - 7.5)) and (
                     min(tx, 7.5) - 1 <= x <= max(tx, 7.5) + 1 and ty - 1 <= y <= 7
                 ):
-                    return tint(leaf, (n - 128) // 12)
+                    return shade(leaf, (n - 128) // 12)
             return None
         if x in (7, 8) and 9 <= y < EDGE:
-            return tint(trunk, (n - 128) // 14)
+            return shade(trunk, (n - 128) // 14)
         dx, dy = abs(x - 7.5), abs(y - 5.5)
         if form == "flat":
             dx, dy = dx / 1.6, dy * 1.8
         if dx + dy * 1.2 < 5 and n > 60:
-            return tint(leaf, (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+            return shade(leaf, (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
         return None
 
-    return sprite(draw)
+    return drawn_sprite(draw)
 
 
 def blades(base, tall, salt=331, gap=5):
@@ -1096,6 +1122,12 @@ CHERRY_LOG = log((150, 104, 84), (126, 82, 68), (70, 40, 32), 2276)
 ORANGE_LOG = log((150, 108, 66), (145, 105, 67), (108, 68, 30), 2299)
 APPLE_LOG = log((150, 104, 60), (157, 111, 67), (120, 74, 30), 2322)
 
+OAK_LEAVES = foliage((38, 62, 30), (77, 113, 51), (92, 128, 65), 1000, 72)
+JUNGLE_LEAVES = foliage((38, 68, 35), (76, 125, 60), (88, 141, 74), 1017, 69)
+SWAMP_LEAVES = foliage((40, 52, 31), (82, 98, 52), (98, 114, 68), 1034, 70)
+APPLE_LEAVES = foliage((38, 62, 30), (76, 112, 50), (91, 127, 64), 1085, 47)
+ORANGE_LEAVES = foliage((35, 59, 31), (69, 105, 50), (84, 121, 65), 1068, 55)
+CHERRY_LEAVES = foliage((49, 72, 37), (96, 126, 62), (110, 140, 77), 1051, 55)
 
 TEXTURES = {
     "strata": {
@@ -1108,13 +1140,14 @@ TEXTURES = {
     },
     "flora": {
         "wood": OAK_LOG,
-        "leaves": foliage((38, 62, 30), (77, 113, 51), (92, 128, 65), 1000, 72),
+        "leaves": OAK_LEAVES,
+        **canopies("oak_leaves", OAK_LEAVES),
         "grass": grown(grass, green=True),
         "kelp": kelp,
         "tuft": grown(sprite(tuft), green=True),
-        "poppy": sprite(flower((206, 48, 40), (250, 214, 60))),
-        "daisy": sprite(flower((240, 238, 226), (236, 190, 40))),
-        "oak_sapling": sprite(oak_sapling),
+        "poppy": drawn_sprite(flower((206, 48, 40), (250, 214, 60))),
+        "daisy": drawn_sprite(flower((240, 238, 226), (236, 190, 40))),
+        "oak_sapling": drawn_sprite(oak_sapling),
         "frond": grown(sprite(frond), green=True),
         "birch_log": BIRCH_LOG,
         "birch_leaves": foliage((53, 97, 29), (111, 163, 47), (128, 180, 64), 1136, 44),
@@ -1129,19 +1162,24 @@ TEXTURES = {
         "acacia_leaves": foliage((63, 85, 25), (127, 147, 43), (145, 165, 61), 1119, 45),
         "acacia_sapling": sapling((140, 160, 56), "flat"),
         "jungle_log": JUNGLE_LOG,
-        "jungle_leaves": foliage((38, 68, 35), (76, 125, 60), (88, 141, 74), 1017, 69),
+        "jungle_leaves": JUNGLE_LEAVES,
+        **canopies("jungle_leaves", JUNGLE_LEAVES),
         "jungle_sapling": sapling((38, 150, 56)),
         "swamp_log": SWAMP_LOG,
-        "swamp_leaves": foliage((40, 52, 31), (82, 98, 52), (98, 114, 68), 1034, 70),
+        "swamp_leaves": SWAMP_LEAVES,
+        **canopies("swamp_leaves", SWAMP_LEAVES),
         "swamp_sapling": sapling((84, 120, 52), "flat"),
         "apple_log": APPLE_LOG,
-        "apple_leaves": foliage((38, 62, 30), (76, 112, 50), (91, 127, 64), 1085, 47),
+        "apple_leaves": APPLE_LEAVES,
+        **canopies("apple_leaves", APPLE_LEAVES),
         "apple_sapling": sapling((90, 140, 56)),
         "orange_log": ORANGE_LOG,
-        "orange_leaves": foliage((35, 59, 31), (69, 105, 50), (84, 121, 65), 1068, 55),
+        "orange_leaves": ORANGE_LEAVES,
+        **canopies("orange_leaves", ORANGE_LEAVES),
         "orange_sapling": sapling((70, 140, 52)),
         "cherry_log": CHERRY_LOG,
-        "cherry_leaves": foliage((49, 72, 37), (96, 126, 62), (110, 140, 77), 1051, 55),
+        "cherry_leaves": CHERRY_LEAVES,
+        **canopies("cherry_leaves", CHERRY_LEAVES),
         "cherry_sapling": sapling((100, 156, 64)),
         "apple_unripe": apple(False),
         "apple_ripe": apple(True),
@@ -1156,8 +1194,8 @@ TEXTURES = {
         "palm_wood": PALM_LOG,
         "acacia_wood": ACACIA_LOG,
         "jungle_wood": JUNGLE_LOG,
-        "dandelion": sprite(flower((244, 204, 40), (252, 236, 130))),
-        "orchid": sprite(flower((156, 92, 206), (246, 240, 250))),
+        "dandelion": drawn_sprite(flower((244, 204, 40), (252, 236, 130))),
+        "orchid": drawn_sprite(flower((156, 92, 206), (246, 240, 250))),
         "tall_grass": grown(blades((72, 150, 52), 14, 331, 6), green=True),
         "dry_grass": grown(blades((196, 170, 90), 9, 337, 4)),
         "fern": grown(sprite(fern), green=True),
