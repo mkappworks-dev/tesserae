@@ -824,6 +824,7 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
     commands.spawn((
         DirectionalLight {
             shadow_maps_enabled: shadows_enabled(),
+            illuminance: SUN_LUX,
             ..default()
         },
         bevy::light::CascadeShadowConfig {
@@ -838,8 +839,17 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
     // per face by the flood-fill's sky channel, so a face that cannot see the
     // sky does not receive it. The sun's own occlusion is the shadow map plus
     // the same sky channel; see `render/chunk_material.wesl`.
-    ambient.brightness = 900.0;
+    ambient.brightness = SKY_AMBIENT;
 }
+
+/// Under Bevy's 10 000 lux: a sunlit sand or snow top lands in the tonemapper's
+/// flat shoulder, so only less light brings it under about 85% value on screen.
+const SUN_LUX: f32 = 3600.0;
+
+/// Raised as the sun was lowered, so a floor lit by the sky alone, such as under
+/// a canopy, reads instead of going black. `UNLIT_AMBIENT` in
+/// `chunk_material.wesl` is scaled down by as much, so a cave stays as it was.
+const SKY_AMBIENT: f32 = 1500.0;
 
 /// How far the view tips down. Framing is a Client decision; where the Eye
 /// starts is the Server's, so the Client's camera starts where the Player does.
@@ -1096,6 +1106,37 @@ mod tests {
         assert!(sun.shadow_maps_enabled);
         assert_eq!(*layers, RenderLayers::layer(NEAR_LAYER));
         assert_eq!(cascades.bounds, SUN_CASCADE_BOUNDS);
+    }
+
+    /// Bevy's diffuse terms at its default Exposure, per unit albedo: the sun's
+    /// Lambert on a top face, and the ambient's `EnvBRDFApprox` at roughness 1.
+    fn top_face_light(app: &mut App) -> (f32, f32) {
+        let exposure = bevy::camera::Exposure::default().exposure();
+        let (sun, place) = app
+            .world_mut()
+            .query::<(&DirectionalLight, &Transform)>()
+            .single(app.world())
+            .unwrap();
+        let n_dot_l = place.back().dot(Vec3::Y);
+        let sun = sun.illuminance * exposure * n_dot_l / std::f32::consts::PI;
+        let sky = app.world().resource::<GlobalAmbientLight>().brightness * exposure * 0.45;
+        (sun, sky)
+    }
+
+    #[test]
+    fn sun_and_sky_keep_a_sunlit_snow_top_under_the_tonemappers_shoulder() {
+        let mut app = App::new();
+        app.init_resource::<GlobalAmbientLight>();
+        app.world_mut().run_system_once(spawn_light).unwrap();
+        let (sun, sky) = top_face_light(&mut app);
+        // Snow is about 90% value, 0.79 in linear albedo; measured on `cold-ground`,
+        // 1.3 before the tonemapper is about 85% value after it.
+        assert!(0.79 * (sun + sky) < 1.35, "snow top {}", 0.79 * (sun + sky));
+        assert!(sun > sky, "the sun still casts a shadow you can see");
+        assert!(
+            sky > 0.5 * sun,
+            "shade under a canopy is not black: {sky} of {sun}"
+        );
     }
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need

@@ -163,6 +163,7 @@ impl MaterialExtension for ChunkMaterialExtension {
             ),
         ];
         defs.extend(quad_layout_defs());
+        defs.extend(super::fog::haze_shader_defs());
         #[cfg(feature = "profiling")]
         let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
         #[cfg(not(feature = "profiling"))]
