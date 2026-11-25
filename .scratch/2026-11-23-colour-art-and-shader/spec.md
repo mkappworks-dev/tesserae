@@ -111,10 +111,17 @@ lands.
     35% of its tile. A sprite's appearance colour is its edge colour (below),
     so transparent texels do not bleed a fringe.
 - Colour targets, starting points the user approves on captures:
-  - Grass top and Terra's leaves move together toward the acacia's chroma, at
-    most about S 0.5 (C\* 35 to 40), slightly darker. `flora`'s jungle, oak,
-    cherry, orange and apple leaves follow; pine and acacia stay.
-  - Dirt to about S 0.40, hue toward yellow-brown.
+  - Grass top and leaves green and lively (07, after the play-test): Terra's
+    leaves and `flora`'s oak, jungle, cherry, orange and apple leaves at tile
+    C\* about 50, hue turned 6 degrees back toward green, lightness kept;
+    Terra's grass top at C\* 53, L\* 54; `flora`'s ground cover (grass, tuft,
+    tall grass, fern, frond, vine) at 0.85 of its drawn chroma, lightness and
+    hue kept. Pine, acacia, swamp and birch stay.
+  - Dirt `[109, 81, 60]`: S 0.45, a neutral to red brown, with more texel
+    contrast and about twice the pebbles of 01's, so it reads as soil and not
+    dust (07).
+  - Bark: furrows shift by a random step each 4 rows, with short dark scars and
+    1x2 moss, so a trunk does not read as one stamp per block (07).
   - Sand to L\* 70 to 75, C\* 20 to 25; snow to about 90% value. No sunlit sand
     or snow top above about 85% value on screen.
   - `flora:cane` (`[140, 190, 90]`, the swamp's pale cross plants) darker,
@@ -134,6 +141,11 @@ lands.
   rim of a cutout shows no fringe (Q75). Both are set after the pattern changes
   and tested for Terra and the Mods it ships; the Mods' `content.toml` colours
   are set from the same measure.
+- Sky light reaches a block face by which way it faces: a top all of it, a
+  side 0.45, an underside 0.4, a cross plant all of it (07, Q89, Q92). Only the
+  sky's ambient share: the sun and cast shadows keep their strength, so steps
+  and walls read layered while the shadows of trees and plants stay soft. A
+  stronger sun was rejected, as it darkens both alike.
 - Aerial perspective lives in Distance fog, not a new full-screen pass: a haze
   in metres that does not depend on the reach, fading blue first, beside the
   reach-sized fade. The glossary's Distance fog entry changes with it.
