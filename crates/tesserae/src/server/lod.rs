@@ -505,12 +505,11 @@ impl Level {
     /// count for the hole-first order, which would otherwise stop filling the finer levels
     /// coarsest first wherever a stand-in is drawn.
     fn holds(&self, level: u32, coord: ChunkCoord) -> bool {
-        let stands_in = level >= 2
-            && self
-                .anchor
-                .zip(self.rings)
-                .and_then(|(anchor, rings)| rings.mesh.hole.map(|hole| (anchor, hole)))
-                .is_some_and(|(anchor, hole)| hole.contains(delta(anchor, coord)));
+        let stands_in = self
+            .anchor
+            .zip(self.rings)
+            .and_then(|(anchor, rings)| hole_covered_at(level, &rings).map(|hole| (anchor, hole)))
+            .is_some_and(|(anchor, hole)| hole.contains(delta(anchor, coord)));
         self.delivered.contains(&coord) && !stands_in
     }
 }
@@ -2095,10 +2094,14 @@ fn send_withheld(
     }
 }
 
+fn covered_hole(plan: &Plan) -> Option<Extent> {
+    hole_covered_at(plan.level, &plan.rings)
+}
+
 /// The hole a level meshes until finer levels cover it. Level 1's is level 0's region, which
 /// level 0 fills first and on its own terms.
-fn covered_hole(plan: &Plan) -> Option<Extent> {
-    plan.rings.mesh.hole.filter(|_| plan.level >= 2)
+fn hole_covered_at(level: u32, rings: &LevelRings) -> Option<Extent> {
+    rings.mesh.hole.filter(|_| level >= 2)
 }
 
 /// Every Chunk a level meshes, the hole it covers included.
