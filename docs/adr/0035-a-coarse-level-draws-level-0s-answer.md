@@ -42,6 +42,14 @@ ms, which delayed the whole field and level 0's own fill. Levels 4 and 5 keep
 the agreed ground. Bridges stand at level 1 only, as their gap search costs
 seconds per square kilometre above it.
 
+**A far column reads its whole footprint.** Amended 2026-11-25, from the colour,
+art and light spec. A column wider than 8 m takes its Canopy cover as the mean
+over points at most 8 m apart across its footprint, up to 4 by 4; the leaves and
+height stay the centre's. A dense forest's clumps are 32 m across, as wide as a
+level-5 column, so read at the centre alone a column took a clump's clearing or
+grove for the whole of it. Each species' crown is its storeys' crowns weighted
+by their shares, each crowded by its own radius, as level 0 grows them.
+
 **Nothing new is stored.** Impostors and Canopy cover are pure functions of the
 seed, the parameters and metres, like every coarse Chunk. There is no LOD cache
 on disk or between Sessions. Level 0's column answers are kept in memory for the

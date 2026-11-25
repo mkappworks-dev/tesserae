@@ -1034,7 +1034,7 @@ fn cover_canopies(
         .collect();
     let canopies: Vec<_> = candidates
         .into_iter()
-        .zip(placement.canopy_cover(shapes, &columns))
+        .zip(placement.canopy_cover_over(shapes, &columns, span(level)))
         .filter_map(|(i, canopy)| Some((i, canopy?)))
         .collect();
     stand_canopy_cover(chunk, coord.y, voxel_m, agreed, &canopies);
