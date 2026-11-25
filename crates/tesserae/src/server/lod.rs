@@ -484,6 +484,9 @@ struct Level {
     delivered: HashSet<ChunkCoord>,
     /// Meshed and not yet sent: see [`send_withheld`].
     withheld: HashMap<ChunkCoord, ChunkMesh>,
+    /// Meshed without its Plants while standing in for the hole ([`bare`]): meshed again if the
+    /// anchor moves it out of the hole before finer levels cover it.
+    bare: HashSet<ChunkCoord>,
     generated: Counts<LodCause>,
     meshed: Counts<LodCause>,
     #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -1801,7 +1804,20 @@ fn retire(
             level.dirty.insert(coord, LodCause::Moved);
         }
 
+        let hole = hole_covered_at(plan.level, &plan.rings);
+        let left_hole: Vec<ChunkCoord> = level
+            .bare
+            .iter()
+            .copied()
+            .filter(|&c| hole.is_none_or(|h| !h.contains(delta(plan.anchor, c))))
+            .collect();
+        for coord in left_hole {
+            level.bare.remove(&coord);
+            level.dirty.insert(coord, LodCause::Moved);
+        }
+
         let inside = |c: ChunkCoord| plan.rings.evict.contains(delta(plan.anchor, c));
+        level.bare.retain(|&c| inside(c));
         level.dirty.retain(|&c| inside(c));
         level.stale.retain(|&c| inside(c));
         level.regenerating.retain(|&c| inside(c));
@@ -2113,6 +2129,30 @@ fn meshed_extent(plan: &Plan) -> Shell {
             .mesh
             .hole
             .filter(|_| covered_hole(plan).is_none()),
+    }
+}
+
+/// `shown` without its Plants: what a level draws while standing in for finer levels that have
+/// not arrived. Its trees are made for its own distance; nearer, its coarse Voxels read as one leaf
+/// block the size of a tree, while its ground still keeps the gap from showing.
+fn bare(shown: &Shown, tables: &Tables) -> Shown {
+    let plant = |v: Voxel| !v.is_air() && tables.plants.of(v.material()).is_some();
+    if !shown.chunk.kinds().iter().any(|&v| plant(v)) {
+        return shown.clone();
+    }
+    let mut chunk = (*shown.chunk).clone();
+    for z in 0..CHUNK_SIZE {
+        for y in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                if plant(chunk.get(x, y, z)) {
+                    chunk.set(x, y, z, Voxel::AIR);
+                }
+            }
+        }
+    }
+    Shown {
+        chunk: Arc::new(chunk),
+        ..shown.clone()
     }
 }
 
@@ -2454,6 +2494,11 @@ fn dispatch_meshes(
         let level = state.level_mut(plan.level);
         level.meshed.add(level.dirty.cause(&coord));
         level.dirty.remove(&coord);
+        if in_hole {
+            level.bare.insert(coord);
+        } else {
+            level.bare.remove(&coord);
+        }
         let tables = Arc::clone(tables);
         let times = jobs.times.clone();
         let level = plan.level;
@@ -2461,6 +2506,11 @@ fn dispatch_meshes(
         let voxel_m = plan.voxel_m;
         jobs.mesh.spawn((level, coord), move || {
             times.meshed(level, || {
+                let (own, around) = if in_hole {
+                    (bare(&own, &tables), around.map(|n| bare(&n, &tables)))
+                } else {
+                    (own, around)
+                };
                 mesh_coarse(&surface, level, voxel_m, coord, &own, &around, &tables)
             })
         });
@@ -2485,6 +2535,64 @@ mod tests {
     use tesserae_core::{ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample, mesh_chunk};
 
     static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+
+    #[test]
+    fn a_stand_in_draws_its_ground_and_none_of_its_trees() {
+        let loaded = crate::server::mods::runtime::tests::terra_loaded(1.0);
+        let id = |name: &str| {
+            loaded
+                .registry
+                .id_of(tesserae_mods::Kind::Material, name)
+                .unwrap_or_else(|| panic!("{name} is registered")) as MaterialId
+        };
+        let (ground, trunk, leaves) = (
+            id("terra:dirt"),
+            id("flora:oak_log"),
+            id("flora:oak_leaves"),
+        );
+        let mut chunk = Chunk::air();
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                chunk.set(x, 0, z, Voxel::cube(ground));
+            }
+        }
+        for y in 1..6 {
+            chunk.set(8, y, 8, Voxel::cube(trunk));
+        }
+        chunk.set(7, 6, 8, Voxel::cube(leaves));
+        let shown = |chunk: Chunk| Shown {
+            chunk: Arc::new(chunk),
+            overlay: Arc::clone(&DRY),
+            openings: Arc::clone(&CLOSED),
+        };
+        let with_tree = shown(chunk);
+        let stand_in = bare(&with_tree, &loaded.tables);
+        assert_eq!(
+            stand_in.chunk.get(3, 0, 3).material(),
+            ground,
+            "the ground stays"
+        );
+        for (x, y, z) in [(8, 3, 8), (7, 6, 8)] {
+            assert!(
+                stand_in.chunk.get(x, y, z).is_air(),
+                "{x},{y},{z} is cleared"
+            );
+        }
+        let mut treeless = Chunk::air();
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                treeless.set(x, 0, z, Voxel::cube(ground));
+            }
+        }
+        let ground_only = shown(treeless);
+        assert!(
+            Arc::ptr_eq(
+                &bare(&ground_only, &loaded.tables).chunk,
+                &ground_only.chunk
+            ),
+            "a Chunk with no Plant is not copied"
+        );
+    }
 
     /// Past this many ticks a fill is stuck however much wall time is left: a livelock that
     /// never waits on a job would otherwise spin until the ceiling.
