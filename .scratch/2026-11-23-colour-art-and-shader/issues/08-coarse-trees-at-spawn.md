@@ -40,3 +40,9 @@ copy-seed ticket in `2026-11-25-copy-seed`).
       no gap or black shows instead (06 stays fixed).
 
 ## Comments
+
+2026-11-25: the user adds that it happens on every load, also when returning to
+a saved World, not only a new one. Captures at the default spawn 2 s after
+load show level 0 alone near the eye, with no coarse level drawn yet and no
+giant leaves. If 06 is the cause, the coarse trees would come with the coarse
+levels after those first seconds and leave within 10 to 15 s; not yet seen.
