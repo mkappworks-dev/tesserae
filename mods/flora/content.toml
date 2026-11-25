@@ -680,12 +680,12 @@ texture = "art/kelp.png"
 
 [[appearance]]
 material = "oak_log"
-color = [143, 100, 60, 255]
+color = [142, 99, 60, 255]
 texture = "art/wood.png"
 
 [[appearance]]
 material = "oak_leaves"
-color = [74, 108, 51, 255]
+color = [50, 112, 37, 255]
 texture = "art/leaves.png"
 variation = "turned-and-patched"
 

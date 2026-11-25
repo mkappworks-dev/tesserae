@@ -34,7 +34,7 @@ texel range flatten what is left.
 - [x] The step 1 sheet, and the user's pick, recorded here.
 - [x] Leaves and grass read vibrant green, dirt reads as soil, dry Biomes still
       read dry; approved on near, 70 m and 110 m captures.
-- [ ] Generator re-run byte-identical; appearance-colour tests pass.
+- [x] Generator re-run byte-identical; appearance-colour tests pass.
 - [x] Spec's colour targets updated to the approved values.
 
 ## Comments
@@ -110,6 +110,7 @@ Tests written, not run: the sky share's shader defs in
 `render/chunk_material.rs`, and a compile-time check that an underside sees no
 more sky than a side and a side less than a top.
 
-2026-11-25: done. The generator re-run is byte-identical; the appearance-colour
-test is written and waits for the full test run after every ticket is merged,
-so its box stays open until then.
+2026-11-25: done. The generator re-run is byte-identical. The appearance-colour
+test caught `flora:oak_leaves` and `flora:oak_log`, whose textures are
+`leaves.png` and `wood.png` under other names, still at their old colours; set
+by the rule, it and the sky share's shader-defs test pass.
