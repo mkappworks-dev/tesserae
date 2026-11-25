@@ -246,12 +246,12 @@ pub(super) fn receive(
     textures.alpha[FLAME_SLOT] = AlphaMode::Mask(0.5);
     let mut variation = [TileVariation::Fixed; ROWS];
     if let Some(message) = messages.read().last() {
-        for (material, row, varies) in &message.0 {
-            let slot = *material as usize;
-            pixels[slot * row_bytes..(slot + 1) * row_bytes].copy_from_slice(row);
+        for texture in &message.0 {
+            let slot = texture.material as usize;
+            pixels[slot * row_bytes..(slot + 1) * row_bytes].copy_from_slice(&texture.pixels);
             textures.present[slot] = true;
-            textures.alpha[slot] = alpha_of(row);
-            variation[slot] = *varies;
+            textures.alpha[slot] = alpha_of(&texture.pixels);
+            variation[slot] = texture.variation;
         }
     }
     let (faces, words, levels) =
@@ -420,6 +420,7 @@ fn flame() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::content::MaterialTexture;
     use crate::render::texture_atlas::{
         FACE_LAYER_BITS, LOOK_FIXED, LOOK_SHIFT, LOOK_TURNED, LOOK_TURNED_AND_PATCHED,
     };
@@ -438,11 +439,12 @@ mod tests {
             .material(held, rgba, false);
         assert_eq!(fallback.base_color, Color::linear_rgb(0.2, 0.3, 0.4));
         assert!(fallback.base_color_texture.is_none());
-        app.world_mut().write_message(MaterialTextures(vec![(
-            23,
-            vec![255; MATERIAL_TEXTURE_BYTES],
-            TileVariation::Fixed,
-        )]));
+        app.world_mut()
+            .write_message(MaterialTextures(vec![MaterialTexture::new(
+                23,
+                vec![255; MATERIAL_TEXTURE_BYTES],
+                TileVariation::Fixed,
+            )]));
         app.update();
         let first = app.world().resource::<Textures>().texture(held).unwrap();
         let textured = app
@@ -452,11 +454,12 @@ mod tests {
         assert_eq!(textured.base_color, Color::WHITE);
         assert_eq!(textured.base_color_texture, Some(first.clone()));
         assert_eq!(textured.alpha_mode, AlphaMode::Opaque);
-        app.world_mut().write_message(MaterialTextures(vec![(
-            23,
-            vec![120; MATERIAL_TEXTURE_BYTES],
-            TileVariation::Fixed,
-        )]));
+        app.world_mut()
+            .write_message(MaterialTextures(vec![MaterialTexture::new(
+                23,
+                vec![120; MATERIAL_TEXTURE_BYTES],
+                TileVariation::Fixed,
+            )]));
         app.update();
         assert!(
             app.world()
@@ -497,7 +500,11 @@ mod tests {
         let mut cutout = vec![255; MATERIAL_TEXTURE_BYTES];
         cutout[3] = 0;
         app.world_mut()
-            .write_message(MaterialTextures(vec![(23, cutout, TileVariation::Fixed)]));
+            .write_message(MaterialTextures(vec![MaterialTexture::new(
+                23,
+                cutout,
+                TileVariation::Fixed,
+            )]));
         app.update();
         assert_eq!(
             app.world()
@@ -517,9 +524,9 @@ mod tests {
             texel[3] = if i.is_multiple_of(3) { 255 } else { 0 };
         }
         app.world_mut().write_message(MaterialTextures(vec![
-            (23, leaves, TileVariation::Fixed),
-            (40, vec![200; MATERIAL_TEXTURE_BYTES], TileVariation::Fixed),
-            (41, vec![200; MATERIAL_TEXTURE_BYTES], TileVariation::Fixed),
+            MaterialTexture::new(23, leaves, TileVariation::Fixed),
+            MaterialTexture::new(40, vec![200; MATERIAL_TEXTURE_BYTES], TileVariation::Fixed),
+            MaterialTexture::new(41, vec![200; MATERIAL_TEXTURE_BYTES], TileVariation::Fixed),
         ]));
         app.update();
         let textures = app.world().resource::<Textures>();
@@ -589,9 +596,9 @@ mod tests {
         app.init_resource::<Assets<Image>>().add_plugins(plugin);
         let tile = vec![200; MATERIAL_TEXTURE_BYTES];
         app.world_mut().write_message(MaterialTextures(vec![
-            (40, tile.clone(), TileVariation::Fixed),
-            (41, tile.clone(), TileVariation::Turned),
-            (42, tile, TileVariation::TurnedAndPatched),
+            MaterialTexture::new(40, tile.clone(), TileVariation::Fixed),
+            MaterialTexture::new(41, tile.clone(), TileVariation::Turned),
+            MaterialTexture::new(42, tile, TileVariation::TurnedAndPatched),
         ]));
         app.update();
         let words = app.world().resource::<Textures>().face_words;

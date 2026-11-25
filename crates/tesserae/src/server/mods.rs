@@ -25,7 +25,7 @@ use tesserae_mods::{
 
 use crate::content::{
     CatalogueMaterial, CatalogueShape, CatalogueTemplate, CatalogueTool, CharacterModel,
-    ContentCatalogue, MaterialPalette, MaterialTextures,
+    ContentCatalogue, MaterialPalette, MaterialTexture, MaterialTextures,
 };
 use crate::world::WorldSettings;
 
@@ -123,7 +123,7 @@ pub struct LoadedMods {
     pub world_biome_loot: Option<Vec<Option<LootTable>>>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
-    pub textures: Vec<(MaterialId, Vec<u8>, tesserae_mods::TileVariation)>,
+    pub textures: Vec<MaterialTexture>,
     pub remove_times: Vec<(MaterialId, std::time::Duration)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
@@ -686,9 +686,11 @@ pub(crate) async fn declare_all(
                 .id_of(Kind::Material, &format!("{id}:{}", row.material))
             {
                 if let Some(pixels) = row.texture {
-                    loaded
-                        .textures
-                        .push((index as MaterialId, pixels, row.variation));
+                    loaded.textures.push(MaterialTexture::new(
+                        index as MaterialId,
+                        pixels,
+                        row.variation,
+                    ));
                 }
                 let c = row.color;
                 loaded
@@ -2373,12 +2375,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         art_game(&s);
         let loaded = s.load(TrustMode::All).unwrap();
         let rock = loaded.registry.id_of(Kind::Material, "plain:rock").unwrap();
-        let [(id, atlas, _)] = &loaded.textures[..] else {
+        let [texture] = &loaded.textures[..] else {
             panic!("one texture expected");
         };
-        assert_eq!(*id as u32, rock as u32);
-        assert_eq!(atlas.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
-        assert_eq!(atlas[..8], [0, 1, 0, 0, 1, 1, 0, 255]);
+        assert_eq!(texture.material as u32, rock as u32);
+        assert_eq!(texture.pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
+        assert_eq!(texture.pixels[..8], [0, 1, 0, 0, 1, 1, 0, 255]);
         let skin = &loaded.character.as_ref().unwrap().skin;
         assert_eq!(skin.len(), tesserae_mods::SKIN_BYTES);
         assert_eq!(skin[..8], [0, 2, 0, 0, 1, 2, 0, 255]);
@@ -3207,11 +3209,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .iter()
             .filter(|m| m.name.starts_with("terra:"))
         {
-            let (_, pixels, _) = textures
+            let pixels = &textures
                 .0
                 .iter()
-                .find(|(id, ..)| *id == material.id)
-                .unwrap_or_else(|| panic!("{} needs a preview", material.name));
+                .find(|t| t.material == material.id)
+                .unwrap_or_else(|| panic!("{} needs a preview", material.name))
+                .pixels;
             assert_eq!(pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
@@ -3223,11 +3226,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
             }
             assert_eq!(
-                textures
-                    .0
-                    .iter()
-                    .filter(|(_, other, _)| other == pixels)
-                    .count(),
+                textures.0.iter().filter(|t| &t.pixels == pixels).count(),
                 // An open Door or Gate is the same panel turned.
                 if material.name.starts_with("terra:door")
                     || material.name.starts_with("terra:gate")
@@ -3276,8 +3275,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             if !sprite && !measured {
                 continue;
             }
-            let Some((_, pixels, _)) = loaded.textures.iter().find(|(m, ..)| *m as usize == id)
-            else {
+            let Some(texture) = loaded.textures.iter().find(|t| t.material as usize == id) else {
                 continue;
             };
             let (_, colour) = loaded
@@ -3285,7 +3283,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 .iter()
                 .find(|(m, _)| *m as usize == id)
                 .unwrap();
-            let texels = pixels.as_chunks::<4>().0;
+            let texels = texture.pixels.as_chunks::<4>().0;
             let clear = |i: usize| texels[i][3] == 0;
             let edge = |i: usize| {
                 let (x, y) = (i % 16, i / 48);
@@ -3359,8 +3357,8 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let loaded = super::runtime::tests::terra_loaded(1.0);
         let variation = |name: &str| {
             let id = loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
-            let (.., variation) = loaded.textures.iter().find(|(m, ..)| *m == id).unwrap();
-            *variation
+            let texture = loaded.textures.iter().find(|t| t.material == id).unwrap();
+            texture.variation
         };
         for (name, expected) in [
             ("terra:leaves", TurnedAndPatched),

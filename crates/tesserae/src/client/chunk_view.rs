@@ -1178,14 +1178,14 @@ mod tests {
             edit::Holding,
             material_textures::{self, Textures},
         };
-        use crate::content::MaterialTextures;
+        use crate::content::{MaterialTexture, MaterialTextures};
         use tesserae_mods::TileVariation::Fixed;
         let mut app = app();
         app.init_asset::<Image>()
             .add_plugins(material_textures::plugin);
         app.world_mut().write_message(MaterialTextures(vec![
-            (23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
-            (63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
+            MaterialTexture::new(23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
+            MaterialTexture::new(63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
         ]));
         app.update();
         let held = Holding::solid(23, 0);

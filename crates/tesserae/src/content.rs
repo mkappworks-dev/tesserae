@@ -8,7 +8,29 @@ pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 
 /// Shared RGBA texture atlases and how each varies, keyed by registered Material id.
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
-pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>, tesserae_mods::TileVariation)>);
+pub struct MaterialTextures(pub Vec<MaterialTexture>);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterialTexture {
+    pub material: MaterialId,
+    /// RGBA, its top, side and bottom tiles side by side.
+    pub pixels: Vec<u8>,
+    pub variation: tesserae_mods::TileVariation,
+}
+
+impl MaterialTexture {
+    pub fn new(
+        material: MaterialId,
+        pixels: Vec<u8>,
+        variation: tesserae_mods::TileVariation,
+    ) -> Self {
+        Self {
+            material,
+            pixels,
+            variation,
+        }
+    }
+}
 
 /// How the Client draws each Item, declared or implicit, in the Server's item
 /// order.

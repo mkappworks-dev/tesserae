@@ -57,7 +57,7 @@ fn terra_declares_a_food_of_its_own_that_grows_on_its_biomes() {
     );
     assert!(loaded.tables.materials.solid(Voxel::cube(id)));
     assert!(loaded.appearance.iter().any(|(m, _)| *m == id));
-    assert!(loaded.textures.iter().any(|(m, ..)| *m == id));
+    assert!(loaded.textures.iter().any(|t| t.material == id));
 
     let world = loaded.world.unwrap();
     let growing: Vec<&str> = world
@@ -470,14 +470,14 @@ fn terras_textures_are_unchanged() {
     let mut textures: Vec<_> = loaded
         .textures
         .iter()
-        .map(|(id, pixels, _)| {
+        .map(|texture| {
             let name = loaded
                 .registry
                 .names(Kind::Material)
-                .find(|&(at, _)| at == usize::from(*id))
+                .find(|&(at, _)| at == usize::from(texture.material))
                 .map(|(_, name)| name.to_owned())
                 .unwrap();
-            (name, pixels.clone())
+            (name, texture.pixels.clone())
         })
         .collect();
     textures.sort();
