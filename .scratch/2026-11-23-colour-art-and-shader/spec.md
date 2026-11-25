@@ -168,9 +168,11 @@ lands.
   none of them declares what it does today. `flora` and `strata` set the flag
   on their own leaves and rock, not only Terra.
 - Impostors come from the same pure tree draw, so they follow storeys and
-  variants without their own rule. Canopy cover picks one variant per coarse
-  Voxel by the same hash, and reads the new jungle and swamp spacing from the
-  density fields it already uses.
+  variants without their own rule. Canopy cover picks one variant per
+  crown-sized cell, a square a crown across (about 5 m), by the same hash keyed
+  on the cell (Q77): a coarse Voxel cannot know whose crown it shows, and a
+  pick per Voxel would speckle. It reads the new jungle and swamp spacing from
+  the density fields it already uses.
 - These change what Generator version 3 makes. Nothing is released, so v3
   changes in place and its digests are recorded again
   ([ADR-0033](../../docs/adr/0033-generator-version-3-is-the-only-version.md)).
@@ -187,10 +189,12 @@ lands.
 - `timber` and `brickwork` get this spec's art, ready for Terra; making the
   shared building Mods Terra's source of building Materials is the shared
   building materials spec (`feat/shared-building-materials`).
-- Loading terrain: a coarser level keeps drawing a region until every finer
-  Chunk covering it is sent, so no gap shows what lies beneath. Holding coarse
-  Chunks back until their neighbours are sent was tried and rejected: it trades
-  the black for larger empty ground.
+- Loading terrain (Q61): a coarser level keeps drawing a region until every
+  finer Chunk covering it is sent, so no gap shows what lies beneath. Beside
+  it (Q74), a coarse Chunk waits until each neighbour it borders is sent, air,
+  or drawn by the next coarser level: without that, a finer Chunk's side
+  showed dark across the step to a level far off the ground. Holding a Chunk
+  until every neighbour is sent was tried and rejected: it left large voids.
 - The tonemapper is compared (AgX beside TonyMcMapface) but is not expected to
   be the fix. A change re-measures the fog's tonemap darkening constant.
 - No HDR cameras unless captures show the sectional grade is needed: that is an
