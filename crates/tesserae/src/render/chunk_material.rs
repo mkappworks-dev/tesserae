@@ -168,6 +168,9 @@ impl MaterialExtension for ChunkMaterialExtension {
         let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
         #[cfg(not(feature = "profiling"))]
         let switched = false;
+        if casts_the_suns_shadow(descriptor) {
+            defs.push(ShaderDefVal::Bool("CHUNK_SUN_SHADOW".into(), true));
+        }
         if !key.bind_group_data.coverage_test || switched {
             defs.push(ShaderDefVal::Bool("CHUNK_NO_COVERAGE_DISCARD".into(), true));
         }
@@ -182,6 +185,16 @@ impl MaterialExtension for ChunkMaterialExtension {
         }
         Ok(())
     }
+}
+
+/// Bevy draws a directional light's cascades with unclipped depth, natively or
+/// emulated; no other pass does.
+fn casts_the_suns_shadow(descriptor: &RenderPipelineDescriptor) -> bool {
+    descriptor.primitive.unclipped_depth
+        || descriptor
+            .vertex
+            .shader_defs
+            .contains(&ShaderDefVal::from("UNCLIPPED_DEPTH_ORTHO_EMULATION"))
 }
 
 /// What `chunk_vertex.wesl` decodes a layer's words by.

@@ -31,6 +31,8 @@ struct ChunkVertexOutput {
     @location(12) @interpolate(flat) level: u32,
     @if(UNCLIPPED_DEPTH_ORTHO_EMULATION)
     @location(13) unclipped_depth: f32,
+    // The quad's first Voxel, as `voxel_key` packs it.
+    @location(14) @interpolate(flat) voxel: u32,
 }
 
 // The record's fields, as tesserae_core::mesh::layout lays them out.
@@ -51,6 +53,8 @@ struct Expanded {
     position: vec3<f32>,
     normal: vec3<f32>,
     uv: vec2<f32>,
+    // The Voxel behind the quad's first Voxel, in the layer's cells.
+    voxel: vec3<i32>,
     material: u32,
     light: u32,
     level: u32,
@@ -100,10 +104,14 @@ fn expand(at: u32, vertex: u32) -> Expanded {
         out.normal[d] = select(-1.0, 1.0, positive);
         // From the Voxel the quad starts in, so a tiling sampler repeats per Voxel.
         out.uv = vec2<f32>(f32(cu - u0 / SUB * SUB), f32(cv - v0 / SUB * SUB)) * UNIT;
+        out.voxel[d] = i32(floor(f32(plane) * UNIT - out.normal[d] * 0.5));
+        out.voxel[u] = i32(u0 / SUB);
+        out.voxel[v] = i32(v0 / SUB);
     } else {
         let c = lo >> constants::CHUNK_CELL_SHIFT;
         let bits: u32 = constants::CHUNK_CELL_BITS;
         let cell = vec3<u32>(c & CELL_MASK, (c >> bits) & CELL_MASK, (c >> (2u * bits)) & CELL_MASK);
+        out.voxel = vec3<i32>(cell);
         let reversed = ((lo >> constants::CHUNK_REVERSED_SHIFT) & 1u) == 1u;
         let i = select(corner, 3u - corner, reversed);
         let high_u = i == 1u || i == 2u;
@@ -139,6 +147,26 @@ fn vertex_level(in: ChunkVertex) -> u32 {
     return quads[mesh_functions::get_tag(in.instance_index) + constants::CHUNK_HEADER_LEVEL];
 }
 
+// Ten bits of a cell coordinate: the turns repeat every 1024 cells, out of sight.
+const KEY_CELL_MASK: u32 = 0x3ffu;
+
+// A Voxel in world cells as one word: its cells along the face's u and v axes,
+// then along the normal, then the normal's axis. A merged quad keys its first
+// Voxel; `voxel_at` steps from there by the face's UV, which counts whole
+// Voxels, so no fragment needs its world position to find its Voxel.
+fn voxel_key(cell: vec3<i32>, normal: vec3<f32>) -> u32 {
+    let d = select(select(2u, 1u, abs(normal.y) > 0.5), 0u, abs(normal.x) > 0.5);
+    let c = bitcast<vec3<u32>>(cell) & vec3<u32>(KEY_CELL_MASK);
+    return c[(d + 1u) % 3u] | (c[(d + 2u) % 3u] << 10u) | (c[d] << 20u) | (d << 30u);
+}
+
+fn voxel_at(key: u32, uv: vec2<f32>) -> u32 {
+    let step = vec2<u32>(floor(uv));
+    let u = (key + step.x) & KEY_CELL_MASK;
+    let v = ((key >> 10u) + step.y) & KEY_CELL_MASK;
+    return u | (v << 10u) | (key & 0xfff00000u);
+}
+
 // No area and nothing rasterizes: every corner at one point outside the clip volume.
 const NO_AREA: vec4<f32> = vec4<f32>(2.0, 2.0, 0.5, 1.0);
 
@@ -172,6 +200,9 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     out.clip_position.z = min(out.clip_position.z, 1.0);
 }
     out.instance_index = in.instance_index;
+    // The mesh's scale is its level's Voxel in metres, and a Chunk starts on a whole cell.
+    let origin = vec3<i32>(round(world_from_local[3].xyz / length(world_from_local[0].xyz)));
+    out.voxel = voxel_key(quad.voxel + origin, quad.normal);
     out.material = quad.material;
     out.light = quad.light;
     out.level = quad.level;

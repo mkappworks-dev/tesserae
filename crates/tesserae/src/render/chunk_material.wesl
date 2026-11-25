@@ -196,7 +196,7 @@ fn fragment(
     // works as a whole-chunk tint.
     let slot = material_slot(in.material);
     if has_texture(slot) {
-        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal, in.world_position.xyz, in.instance_index);
+        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal, in.voxel);
         if patched(slot, in.world_normal) {
             pbr_input.material.base_color = vec4<f32>(
                 patch_colour(pbr_input.material.base_color.rgb, in.world_position.xyz),
