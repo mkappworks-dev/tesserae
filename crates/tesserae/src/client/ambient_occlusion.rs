@@ -36,11 +36,14 @@ pub(crate) fn occlusion(
     })
 }
 
+type MainOcclusion<'w, 's> =
+    Single<'w, 's, (Entity, Option<&'static ScreenSpaceAmbientOcclusion>), With<MainCamera>>;
+
 fn follow(
     mut commands: Commands,
     preferences: Res<Preferences>,
     switch: Option<Res<Switch>>,
-    main: Option<Single<(Entity, Option<&ScreenSpaceAmbientOcclusion>), With<MainCamera>>>,
+    main: Option<MainOcclusion>,
 ) {
     let Some(main) = main else {
         return;

@@ -590,7 +590,7 @@ mod tests {
         for channel in HAZE.opacity_at(100_000.0) {
             assert!(channel <= HAZE.most && channel > 0.95 * HAZE.most);
         }
-        assert!(HAZE.most < 0.5);
+        const { assert!(HAZE.most < 0.5) };
     }
 
     #[test]
