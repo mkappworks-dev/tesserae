@@ -251,7 +251,7 @@ fn surface_census(
                 || name.starts_with("crops:")
                 || name.starts_with("aquatic:")
                 || is_standalone_wood(name);
-            tracked && !name.ends_with("_leaves")
+            tracked && !name.contains("_leaves")
         })
         .map(|(id, name)| (id as u16, name.to_owned()))
         .collect();
