@@ -4228,13 +4228,32 @@ mod tests {
             .level_mut(1)
             .dirty
             .insert(marked, LodCause::Edit);
-        h.app
-            .world_mut()
-            .resource_mut::<LodJobs>()
-            .mesh
-            .hold
-            .release();
-        let (ready, _) = h.lod_settle();
+        let gate = Arc::clone(&h.lod_jobs().mesh.hold);
+        gate.release();
+        // Closed again once the first meshes are done and before a tick can dispatch the fresh
+        // one, so the fresh mesh lands after the stale one is sent: a mesh still withheld when
+        // its replacement lands is replaced unsent, which timing alone would otherwise decide.
+        let started = std::time::Instant::now();
+        loop {
+            let mut jobs = h.app.world_mut().resource_mut::<LodJobs>();
+            jobs.mesh.poll();
+            if jobs.mesh.finished().count() == shells {
+                break;
+            }
+            assert!(started.elapsed() < SETTLE_CEILING, "meshes never finished");
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        gate.hold();
+        let mut ready = Vec::new();
+        while !h.delivered_at(1).contains(&marked) {
+            assert!(
+                started.elapsed() < SETTLE_CEILING,
+                "the stale mesh was never sent"
+            );
+            ready.extend(h.lod_tick().0);
+        }
+        gate.release();
+        ready.extend(h.lod_settle().0);
 
         let count = |c: ChunkCoord| {
             ready
@@ -4242,12 +4261,7 @@ mod tests {
                 .filter(|m| (m.level, m.coord) == (1, c))
                 .count()
         };
-        // A stale mesh still withheld when the fresh one lands is replaced, never sent.
-        assert!(
-            (1..=2).contains(&count(marked)),
-            "delivered, and again only if sent before the fresh mesh landed: {}",
-            count(marked)
-        );
+        assert_eq!(count(marked), 2, "delivered once, then again");
         assert_eq!(count(ChunkCoord::new(1, 0, 0)), 1);
         assert!(h.delivered_at(1).contains(&marked));
         assert!(h.lod_jobs().mesh.stale() > 0);
