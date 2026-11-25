@@ -61,11 +61,12 @@ const BRANCHING: Branching = Branching {
 
 fn oak_with(fruit: bool, branching: Option<Branching>) -> SurfaceTree {
     SurfaceTree {
-        storeys: tesserae_core::plant::Storeys::NONE,
+        storeys: 0,
+        variants: 0,
         branching,
         crowding_m: None,
         trunk: TRUNK,
-        canopy: tesserae_core::plant::Canopies::one(CANOPY),
+        canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
         canopy_radius_m: 2.5,
         vines: None,
@@ -134,6 +135,11 @@ fn biome(features: &[SurfaceFeature]) -> Biome {
 
 /// Low land, so the scans at the origin hold the ground.
 fn flat(features: &[SurfaceFeature]) -> WorldgenParams {
+    flat_with(features, &tesserae_core::TreeVariety::NONE)
+}
+
+/// [`flat`] whose trees name storeys and canopy variants `variety` holds.
+fn flat_with(features: &[SurfaceFeature], variety: &tesserae_core::TreeVariety) -> WorldgenParams {
     common::lowland(WorldgenParams {
         caves: None,
         smoothing: None,
@@ -141,7 +147,7 @@ fn flat(features: &[SurfaceFeature]) -> WorldgenParams {
             temperature_size_m: 64.0,
             humidity_size_m: 64.0,
         },
-        biomes: BiomeTable::new(&[biome(features)]).unwrap(),
+        biomes: BiomeTable::new_with_variety(&[biome(features)], variety).unwrap(),
         water: None,
         ..tesserae_core::testgen::world_params()
     })
@@ -228,7 +234,7 @@ fn row_of(fruit: bool, branching: Option<Branching>) -> Tree {
         branching,
         crowding_m: None,
         trunk: o.trunk,
-        canopy: o.canopy,
+        canopy: tesserae_core::plant::Canopies::one(o.canopy),
         trunk_height_m: o.trunk_height_m,
         canopy_radius_m: o.canopy_radius_m,
         mean_seconds: 0.0,
@@ -741,6 +747,63 @@ fn a_snapshot_freezes_what_generation_needs_of_each_plant() {
     assert_eq!(features[0]["plant"]["form"]["fruit"]["shape"], "t:apple");
 }
 
+/// Rows that grow the same storeys and variants name one entry of the World's table, a row with
+/// one canopy and its own band names none, and a snapshot reopens to the same table.
+#[test]
+fn tree_rows_share_the_worlds_storeys_and_variants_and_a_snapshot_keeps_them() {
+    use tesserae_core::plant::{Canopies, Storey, Storeys};
+    const DARK: MaterialId = 216;
+    let storey = |weight, trunk_height_m, canopy_radius_m| Storey {
+        weight,
+        trunk_height_m,
+        canopy_radius_m,
+    };
+    let storeys = Storeys::new(&[storey(0.4, (5.0, 6.0), 3.0), storey(0.6, (2.0, 3.0), 2.0)]);
+    let (storeys, canopies) = (storeys.unwrap(), Canopies::new(&[CANOPY, DARK]).unwrap());
+    let mut variety = tesserae_core::TreeVariety::NONE;
+    let mut storeyed = |spacing_m| {
+        let mut f = tree_feature(spacing_m, false);
+        if let Some(SurfacePlant {
+            kind: SurfacePlantKind::Tree(t),
+            ..
+        }) = &mut f.plant
+        {
+            *t = variety.freeze(*t, &canopies, &storeys).unwrap();
+        }
+        f
+    };
+    let features = [storeyed(8.0), storeyed(12.0), tree_feature(16.0, false)];
+    let params = flat_with(&features, &variety);
+    let held = params.biomes.variety();
+    let rows: Vec<_> = params.biomes.as_slice()[0]
+        .surface_features
+        .as_slice()
+        .iter()
+        .map(|f| match f.plant.unwrap().kind {
+            SurfacePlantKind::Tree(t) => {
+                (t.variants, t.storeys, t.canopies(held), *t.storeys(held))
+            }
+            _ => unreachable!("only trees"),
+        })
+        .collect();
+    let plain = (0, 0, Canopies::one(CANOPY), Storeys::NONE);
+    assert_eq!(
+        rows,
+        [(1, 1, canopies, storeys), (1, 1, canopies, storeys), plain]
+    );
+
+    let mut mapping = mapping();
+    mapping.materials.insert(DARK, "t:canopy_dark".into());
+    let saved = Generation::capture(params, &[], &[], &mapping).unwrap();
+    let json = serde_json::to_string(&saved).unwrap();
+    let reopened: Generation = serde_json::from_str(&json).unwrap();
+    assert_eq!(reopened.restore(&mapping, 3).unwrap().biomes, params.biomes);
+    assert!(
+        BiomeTable::new(params.biomes.as_slice()).is_err(),
+        "rows naming lists the World does not hold"
+    );
+}
+
 #[test]
 fn a_snapshot_without_a_fruit_shape_restores_cubes() {
     let saved = r#"{"stages":["t:apple0"],"density":0.1}"#;
@@ -765,7 +828,7 @@ fn mapping_with_leaves() -> Mapping {
 
 fn vines() -> SurfaceVines {
     SurfaceVines {
-        material: VINE,
+        material: std::num::NonZeroU16::new(VINE).unwrap(),
         shape: VINE_SHAPE,
         orientations: VINE_FACE_BITS,
         density: 0.3,
@@ -1724,15 +1787,22 @@ fn canopy_cover_shows_one_variant_a_crown_alike_at_every_voxel_size() {
     let variants = [CANOPY, 216, 217];
     let cover = |size: f32| {
         let mut f = tree_feature(3.0, false);
+        let mut variety = tesserae_core::TreeVariety::NONE;
         if let Some(SurfacePlant {
             kind: SurfacePlantKind::Tree(tree),
             ..
         }) = &mut f.plant
         {
             tree.crowding_m = Some(1.0);
-            tree.canopy = tesserae_core::plant::Canopies::new(&variants).unwrap();
+            *tree = variety
+                .freeze(
+                    *tree,
+                    &tesserae_core::plant::Canopies::new(&variants).unwrap(),
+                    &tesserae_core::plant::Storeys::NONE,
+                )
+                .unwrap();
         }
-        let g = Worldgen::new(SEED, size, flat(&[f]));
+        let g = Worldgen::new(SEED, size, flat_with(&[f], &variety));
         let per_m = (1.0 / size) as i32;
         let columns: Vec<[i32; 2]> = (0..64)
             .flat_map(|x| (0..16).map(move |z| [(x - 32) * per_m, (z * 4 - 32) * per_m]))
@@ -1779,7 +1849,7 @@ fn canopy_cover_shades_a_mixed_forests_sparser_columns_by_the_next_species_share
         }) = &mut f.plant
         {
             tree.crowding_m = Some(1.0);
-            tree.canopy = tesserae_core::plant::Canopies::one(canopy);
+            tree.canopy = canopy;
         }
         f
     };

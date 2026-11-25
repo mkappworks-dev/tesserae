@@ -77,6 +77,30 @@ pub fn storey_band(storeys: &Storeys, own: Band, seed: u64, base: [i32; 3], size
     storeys.pick(own, hash(seed, base, size, STOREY_SALT))
 }
 
+/// Each band `tree` grows, as a row that grows only it, with its share of the row's trees: what
+/// an estimate of the row's crowns averages, since a crown's area goes with its storey's radius
+/// squared and a handful of hashed trees under-draws a rare wide storey.
+pub fn rows_by_band(tree: &Tree) -> Vec<(f32, Tree)> {
+    let storeys = tree.storeys.as_slice();
+    if storeys.is_empty() {
+        return vec![(1.0, tree.clone())];
+    }
+    let total: f32 = storeys.iter().map(|s| s.weight).sum();
+    storeys
+        .iter()
+        .map(|s| {
+            let only = Storeys::new(std::slice::from_ref(s)).expect("one storey");
+            (
+                s.weight / total,
+                Tree {
+                    storeys: only,
+                    ..tree.clone()
+                },
+            )
+        })
+        .collect()
+}
+
 /// The canopy variant the tree whose sapling stands at `base` grows, by hash of seed and position.
 pub fn canopy_of(tree: &Tree, seed: u64, base: [i32; 3], voxel_size: f32) -> MaterialId {
     if tree.canopy.as_slice().len() == 1 {
@@ -573,19 +597,26 @@ pub(super) fn sprout(
 const REFERENCE_BASES: [[i32; 3]; 4] = [[0, 0, 0], [3, 0, 1], [-5, 0, 7], [11, 0, -2]];
 
 /// Leaf and fruit cells of a typical `tree` at `voxel_size`: the mean over `REFERENCE_BASES`
-/// of the Voxels `tree_voxels` makes that are not trunk. A pure function of the row and the size,
-/// so every canopy Voxel of a species agrees on it without knowing its own tree.
+/// of the Voxels `tree_voxels` makes that are not trunk, each storey's weighted by its share. A
+/// pure function of the row and the size, so every canopy Voxel of a species agrees on it without
+/// knowing its own tree.
 pub fn expected_canopy_cells(tree: &Tree, voxel_size: f32) -> u32 {
-    let total: usize = REFERENCE_BASES
+    let mean: f32 = rows_by_band(tree)
         .iter()
-        .map(|&base| {
-            tree_voxels(tree, 0, base, voxel_size)
+        .map(|(share, row)| {
+            let total: usize = REFERENCE_BASES
                 .iter()
-                .filter(|v| v.part != Part::Trunk)
-                .count()
+                .map(|&base| {
+                    tree_voxels(row, 0, base, voxel_size)
+                        .iter()
+                        .filter(|v| v.part != Part::Trunk)
+                        .count()
+                })
+                .sum();
+            share * total as f32 / REFERENCE_BASES.len() as f32
         })
         .sum();
-    ((total as f32 / REFERENCE_BASES.len() as f32).round() as u32).max(1)
+    (mean.round() as u32).max(1)
 }
 
 /// How many fruit a tree with `cells` canopy cells holds at most when it re-bears: the density

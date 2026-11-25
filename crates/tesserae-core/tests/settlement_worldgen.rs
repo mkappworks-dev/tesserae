@@ -676,11 +676,12 @@ fn settlements_no_biome_lists_change_nothing() {
 
 fn oak() -> SurfaceTree {
     SurfaceTree {
-        storeys: tesserae_core::plant::Storeys::NONE,
+        storeys: 0,
+        variants: 0,
         branching: None,
         crowding_m: None,
         trunk: TRUNK,
-        canopy: tesserae_core::plant::Canopies::one(CANOPY),
+        canopy: CANOPY,
         trunk_height_m: (3.0, 5.0),
         canopy_radius_m: 2.5,
         vines: None,

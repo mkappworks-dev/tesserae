@@ -22,7 +22,7 @@ fn field_cells(game: &str, seed: u64, half_m: f32) -> BTreeMap<String, u64> {
             ..*b
         })
         .collect();
-    let biomes = BiomeTable::new(&fieldless)
+    let biomes = BiomeTable::new_with_variety(&fieldless, params.biomes.variety())
         .and_then(|t| t.with_selectors(params.biomes.selectors()))
         .and_then(|t| t.with_strata(params.biomes.strata()))
         .unwrap();

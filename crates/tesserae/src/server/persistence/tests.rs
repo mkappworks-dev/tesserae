@@ -1891,12 +1891,13 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
                 stage_shapes: [None; tesserae_core::MAX_SURFACE_STAGES],
             }),
             feature(SurfacePlantKind::Tree(SurfaceTree {
-                storeys: tesserae_core::plant::Storeys::NONE,
+                storeys: 0,
+                variants: 0,
                 vines: None,
                 branching: None,
                 crowding_m: None,
                 trunk: id("terra:wood"),
-                canopy: tesserae_core::plant::Canopies::one(id("terra:leaves")),
+                canopy: id("terra:leaves"),
                 trunk_height_m: (3.0, 5.0),
                 canopy_radius_m: 2.5,
                 fruit: None,
@@ -1912,7 +1913,8 @@ fn declares_plants() -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
             .surface_features
             .with_crop_fields(&[field])
             .unwrap();
-        world.biomes = tesserae_core::BiomeTable::new(&biomes).unwrap();
+        world.biomes =
+            tesserae_core::BiomeTable::new_with_variety(&biomes, world.biomes.variety()).unwrap();
     }
 }
 
@@ -1993,7 +1995,8 @@ fn declares_ground(ground: Option<[&str; 3]>) -> impl FnOnce(&mut crate::server:
         let world = loaded.world.as_mut().unwrap();
         let mut biomes = world.biomes.as_slice().to_vec();
         biomes[0].ground = ground;
-        world.biomes = tesserae_core::BiomeTable::new(&biomes).unwrap();
+        world.biomes =
+            tesserae_core::BiomeTable::new_with_variety(&biomes, world.biomes.variety()).unwrap();
     }
 }
 
@@ -2547,7 +2550,7 @@ fn declares_slab(material: &'static str) -> impl FnOnce(&mut crate::server::mods
                 chance: 0.5,
             }])
             .unwrap();
-        world.biomes = BiomeTable::new(&biomes).unwrap();
+        world.biomes = BiomeTable::new_with_variety(&biomes, world.biomes.variety()).unwrap();
     }
 }
 
@@ -2628,7 +2631,7 @@ fn declares_hamlet(path: &'static str) -> impl FnOnce(&mut crate::server::mods::
                 near_spawn: false,
             }])
             .unwrap();
-        world.biomes = BiomeTable::new(&biomes).unwrap();
+        world.biomes = BiomeTable::new_with_variety(&biomes, world.biomes.variety()).unwrap();
     }
 }
 

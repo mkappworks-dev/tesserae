@@ -731,8 +731,12 @@ pub struct SurfaceVine {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceTree {
     pub trunk: MaterialId,
-    pub canopy: crate::plant::Canopies,
-    pub storeys: crate::plant::Storeys,
+    /// The one canopy, or the first of its variants.
+    pub canopy: MaterialId,
+    /// Where the World's [`TreeVariety`] holds the row's canopy variants; 0 is `canopy` alone.
+    pub variants: u8,
+    /// Where the World's [`TreeVariety`] holds the row's storeys; 0 is its own band alone.
+    pub storeys: u8,
     pub trunk_height_m: (f32, f32),
     pub canopy_radius_m: f32,
     pub fruit: Option<SurfaceFruit>,
@@ -752,15 +756,29 @@ impl SurfaceTree {
         }
     }
 
+    pub fn canopies(&self, variety: &TreeVariety) -> crate::plant::Canopies {
+        match self.variants {
+            0 => crate::plant::Canopies::one(self.canopy),
+            at => variety.canopies[usize::from(at) - 1],
+        }
+    }
+
+    pub fn storeys<'a>(&self, variety: &'a TreeVariety) -> &'a crate::plant::Storeys {
+        match self.storeys {
+            0 => &crate::plant::Storeys::NONE,
+            at => &variety.storeys[usize::from(at) - 1],
+        }
+    }
+
     /// How far its widest band reaches from its column, in metres.
-    pub fn reach_m(&self) -> f32 {
-        let bands = self.storeys.bands(self.own_band());
+    pub fn reach_m(&self, variety: &TreeVariety) -> f32 {
+        let bands = self.storeys(variety).bands(self.own_band());
         bands.map(|b| b.reach_m()).fold(0.0, f32::max)
     }
 
     /// How far its tallest band stands above its base, in metres, before rounding to Voxels.
-    pub fn rise_m(&self) -> f32 {
-        let bands = self.storeys.bands(self.own_band());
+    pub fn rise_m(&self, variety: &TreeVariety) -> f32 {
+        let bands = self.storeys(variety).bands(self.own_band());
         bands
             .map(|b| {
                 b.trunk_height_m.1
@@ -781,11 +799,122 @@ impl SurfaceTree {
     }
 }
 
+/// Most distinct storey lists, and canopy variant lists, the tree rows of one World declare.
+pub const MAX_TREE_STOREYS: usize = 16;
+pub const MAX_TREE_CANOPIES: usize = 16;
+
+/// Each distinct storeys list and canopy variant list a World's tree rows grow, held once for the
+/// World, as its Templates are, so that a tree row holds an index and a Biome stays small enough
+/// to copy by value. Index 0 is never stored: it is a row's own band, and its one canopy.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct TreeVariety {
+    storeys_len: u8,
+    storeys: [crate::plant::Storeys; MAX_TREE_STOREYS],
+    canopies_len: u8,
+    canopies: [crate::plant::Canopies; MAX_TREE_CANOPIES],
+}
+
+impl Default for TreeVariety {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+impl TreeVariety {
+    pub const NONE: Self = Self {
+        storeys_len: 0,
+        storeys: [crate::plant::Storeys::NONE; MAX_TREE_STOREYS],
+        canopies_len: 0,
+        canopies: [crate::plant::Canopies::one(AIR); MAX_TREE_CANOPIES],
+    };
+
+    /// The index a tree row holds for `storeys`, which are added unless already held.
+    pub fn add_storeys(&mut self, storeys: &crate::plant::Storeys) -> Result<u8, ParamError> {
+        if storeys.as_slice().is_empty() {
+            return Ok(0);
+        }
+        let held = &self.storeys[..usize::from(self.storeys_len)];
+        if let Some(at) = held.iter().position(|s| s == storeys) {
+            return Ok(at as u8 + 1);
+        }
+        if held.len() == MAX_TREE_STOREYS {
+            return Err(ParamError {
+                field: "biomes.surface_features.plant",
+                rule: "a World's trees declare at most 16 distinct lists of storeys",
+            });
+        }
+        self.storeys[held.len()] = *storeys;
+        self.storeys_len += 1;
+        Ok(self.storeys_len)
+    }
+
+    /// The index a tree row whose canopy is `canopies.first()` holds for its variants, which are
+    /// added unless already held.
+    pub fn add_canopies(&mut self, canopies: &crate::plant::Canopies) -> Result<u8, ParamError> {
+        if canopies.as_slice().len() == 1 {
+            return Ok(0);
+        }
+        let held = &self.canopies[..usize::from(self.canopies_len)];
+        if let Some(at) = held.iter().position(|c| c == canopies) {
+            return Ok(at as u8 + 1);
+        }
+        if held.len() == MAX_TREE_CANOPIES {
+            return Err(ParamError {
+                field: "biomes.surface_features.plant",
+                rule: "a World's trees declare at most 16 distinct lists of canopy variants",
+            });
+        }
+        self.canopies[held.len()] = *canopies;
+        self.canopies_len += 1;
+        Ok(self.canopies_len)
+    }
+
+    /// `tree` frozen into this table: its storeys and variants held here, its row naming them.
+    pub fn freeze(
+        &mut self,
+        tree: SurfaceTree,
+        canopies: &crate::plant::Canopies,
+        storeys: &crate::plant::Storeys,
+    ) -> Result<SurfaceTree, ParamError> {
+        Ok(SurfaceTree {
+            canopy: canopies.first(),
+            variants: self.add_canopies(canopies)?,
+            storeys: self.add_storeys(storeys)?,
+            ..tree
+        })
+    }
+
+    /// Why `tree` names a list this table does not hold, or one it cannot grow.
+    fn check(&self, tree: &SurfaceTree) -> Result<(), ParamError> {
+        let bad = |rule| ParamError {
+            field: "biomes.surface_features.plant",
+            rule,
+        };
+        if usize::from(tree.storeys) > usize::from(self.storeys_len)
+            || usize::from(tree.variants) > usize::from(self.canopies_len)
+        {
+            return Err(bad(
+                "a tree names storeys or canopy variants the World does not hold",
+            ));
+        }
+        let canopies = tree.canopies(self);
+        if canopies.first() != tree.canopy || canopies.contains(AIR) {
+            return Err(bad("a tree needs a trunk, canopy, height and radius"));
+        }
+        if tree.storeys(self).check(tree.own_band()).is_err() {
+            return Err(bad("a tree's storeys must be ones the generator can draw"));
+        }
+        Ok(())
+    }
+}
+
 /// The vines worldgen hangs from a tree's outer canopy, frozen with the climber they are made of
 /// so a Game that later changes it cannot reshape a saved World.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SurfaceVines {
-    pub material: MaterialId,
+    /// Never Air, which gives `Option<SurfaceVines>` a niche: without it the tag pads a tree row
+    /// past what a Biome of sixteen fits in.
+    pub material: std::num::NonZeroU16,
     /// The climber's `plane` Shape.
     pub shape: ShapeId,
     /// The Orientation that lays the plane against each horizontal face, in the order of
@@ -817,7 +946,7 @@ pub struct SurfaceFruit {
 
 impl SurfacePlant {
     /// Every Material it generates, first one first.
-    pub fn materials(&self) -> Vec<MaterialId> {
+    pub fn materials(&self, variety: &TreeVariety) -> Vec<MaterialId> {
         match self.kind {
             SurfacePlantKind::Stages { materials, len, .. } => materials[..len as usize].to_vec(),
             SurfacePlantKind::Column {
@@ -832,23 +961,23 @@ impl SurfacePlant {
             }
             SurfacePlantKind::Tree(t) => {
                 let mut all = vec![t.trunk];
-                all.extend_from_slice(t.canopy.as_slice());
+                all.extend_from_slice(t.canopies(variety).as_slice());
                 if let Some(f) = t.fruit {
                     all.extend_from_slice(&f.stages[..f.len as usize]);
                 }
-                all.extend(t.vines.map(|v| v.material));
+                all.extend(t.vines.map(|v| v.material.get()));
                 all
             }
         }
     }
 
     /// How far above its base it can stand, in metres, before rounding to Voxels.
-    pub fn rise_m(&self) -> f32 {
+    pub fn rise_m(&self, variety: &TreeVariety) -> f32 {
         match self.kind {
             SurfacePlantKind::Stages { .. } => 0.0,
             SurfacePlantKind::Column { max_height_m, .. } => max_height_m,
             SurfacePlantKind::Vine(_) => 0.0,
-            SurfacePlantKind::Tree(t) => t.rise_m(),
+            SurfacePlantKind::Tree(t) => t.rise_m(variety),
         }
     }
 
@@ -896,8 +1025,7 @@ impl SurfacePlant {
                         && (0.0..=1.0).contains(&f.density)
                 });
                 let vines = t.vines.is_none_or(|v| {
-                    v.material != AIR
-                        && v.orientations.iter().all(|&o| o < 24)
+                    v.orientations.iter().all(|&o| o < 24)
                         && (0.0..=MAX_VINE_DENSITY).contains(&v.density)
                         && v.length_m > 0.0
                         && v.length_m <= MAX_VINE_LENGTH_M
@@ -912,11 +1040,8 @@ impl SurfacePlant {
                 {
                     return Err(bad("a tree's branching must be one the generator can draw"));
                 }
-                if t.storeys.check(t.own_band()).is_err() {
-                    return Err(bad("a tree's storeys must be ones the generator can draw"));
-                }
                 if t.trunk == AIR
-                    || t.canopy.contains(AIR)
+                    || t.canopy == AIR
                     || !finite_pos(low)
                     || !matches!(
                         low.partial_cmp(&high),
@@ -1311,6 +1436,9 @@ pub struct BiomeTable {
     biomes: [Biome; MAX_BIOMES],
     selectors: [BiomeSelectors; MAX_BIOMES],
     strata: [Strata; MAX_BIOMES],
+    /// Only the lists the Biomes' tree rows name, in the order they first name them, so a table
+    /// built from a save equals the one built from the Game.
+    variety: TreeVariety,
 }
 
 impl Default for BiomeTable {
@@ -1320,6 +1448,7 @@ impl Default for BiomeTable {
             biomes: [Biome::UNUSED; MAX_BIOMES],
             selectors: [BiomeSelectors::default(); MAX_BIOMES],
             strata: [Strata::default(); MAX_BIOMES],
+            variety: TreeVariety::NONE,
         }
     }
 }
@@ -1466,7 +1595,13 @@ impl BiomeSelectors {
 }
 
 impl BiomeTable {
+    /// Biomes whose trees have one canopy and their own band alone.
     pub fn new(biomes: &[Biome]) -> Result<Self, ParamError> {
+        Self::new_with_variety(biomes, &TreeVariety::NONE)
+    }
+
+    /// Biomes whose tree rows name storeys and canopy variants `variety` holds.
+    pub fn new_with_variety(biomes: &[Biome], variety: &TreeVariety) -> Result<Self, ParamError> {
         let refuse = |rule| ParamError {
             field: "biomes",
             rule,
@@ -1500,7 +1635,28 @@ impl BiomeTable {
         let mut table = BiomeTable::default();
         table.biomes[..biomes.len()].copy_from_slice(biomes);
         table.len = biomes.len() as u8;
+        let mut kept = TreeVariety::NONE;
+        for biome in &mut table.biomes[..biomes.len()] {
+            let features = &mut biome.surface_features;
+            for feature in &mut features.features[..usize::from(features.len)] {
+                if let Some(SurfacePlant {
+                    kind: SurfacePlantKind::Tree(tree),
+                    ..
+                }) = &mut feature.plant
+                {
+                    variety.check(tree)?;
+                    let (canopies, storeys) = (tree.canopies(variety), *tree.storeys(variety));
+                    *tree = kept.freeze(*tree, &canopies, &storeys)?;
+                }
+            }
+        }
+        table.variety = kept;
         Ok(table)
+    }
+
+    /// The storeys and canopy variants the Biomes' tree rows name.
+    pub fn variety(&self) -> &TreeVariety {
+        &self.variety
     }
 
     /// This table with `selectors` for its Biomes, in order; fewer than the Biomes leaves the rest

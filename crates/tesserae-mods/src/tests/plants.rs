@@ -884,7 +884,7 @@ mod surface_features {
         assert_eq!(
             (
                 tree.trunk,
-                tree.canopy.first(),
+                tree.canopy,
                 tree.canopy_radius_m,
                 fruit.len,
                 fruit.density
@@ -1118,7 +1118,7 @@ mod surface_features {
         let plane = registry.id_of(NameKind::Shape, "t:plane").unwrap() as u8;
         assert_eq!(
             (
-                frozen.material,
+                frozen.material.get(),
                 frozen.shape,
                 frozen.density,
                 frozen.length_m
@@ -1230,7 +1230,11 @@ mod surface_features {
         else {
             panic!("a tree");
         };
-        assert_eq!((frozen.canopy, frozen.storeys), (tree.canopy, tree.storeys));
+        let variety = biomes.variety();
+        assert_eq!(
+            (frozen.canopies(variety), *frozen.storeys(variety)),
+            (tree.canopy, tree.storeys)
+        );
     }
 
     #[test]
