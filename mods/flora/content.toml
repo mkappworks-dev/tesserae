@@ -1162,11 +1162,11 @@ shape = "flora:cross"
 sapling = "flora:oak_sapling"
 trunk = "flora:oak_log"
 canopy = ["flora:oak_leaves", "flora:oak_leaves_dark", "flora:oak_leaves_light"]
-trunk-height-m = [9.0, 14.0]
+trunk-height-m = [8.0, 14.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
-branching = { limbs = [3, 4], start = 0.6, reach-m = 3.5, rise = 0.3, fork = 0.6, lean-m = 0.0, lobe-radius-m = 1.5 }
+branching = { limbs = [3, 4], start = 0.65, reach-m = 3.5, rise = 0.3, fork = 0.6, lean-m = 0.0, lobe-radius-m = 1.5 }
 
 [plants.needs]
 soil = ["#soil"]
