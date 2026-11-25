@@ -1,6 +1,6 @@
 # 01: Copying a World's seed does not work
 
-Status: needs-info
+Status: ready-for-agent
 
 ## What happens
 
@@ -26,3 +26,11 @@ menus (#73), so `main` has it too.
 - [ ] A failure still says "Could not copy the seed".
 
 ## Comments
+
+2026-11-25: the user reports "Seed copied" shows on every screen with a copy,
+and the paste elsewhere is empty. Cause: `bevy_clipboard` 0.20 writes to an
+in-process buffer unless Bevy's `system_clipboard` feature is on (it pulls in
+`arboard`); `crates/tesserae/Cargo.toml` asks Bevy for `serialize` only, and
+`cargo tree -i arboard` finds nothing. The fix is that feature, on its own
+`fix/` branch from `main`, since #73 shipped it there; check `cargo deny` for
+`arboard`'s dependencies.
