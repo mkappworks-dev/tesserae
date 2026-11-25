@@ -109,11 +109,10 @@ fn build_assets(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SkyMaterial>>,
 ) {
-    let haze = FogSettings::default();
     commands.insert_resource(SkyAssets {
         triangle: meshes.add(covering_triangle()),
         material: materials.add(SkyMaterial {
-            zenith: zenith(haze.sky),
+            zenith: zenith(FogSettings::default().sky),
             toward_sun: Vec4::Y,
         }),
     });

@@ -43,7 +43,7 @@ fn terra_declares_its_building_materials_textured_and_in_the_catalogue() {
     for name in BUILDING {
         let id = material(&loaded, &format!("{game}:{name}"));
         assert!(
-            loaded.textures.iter().any(|(m, ..)| *m == id),
+            loaded.textures.iter().any(|t| t.material == id),
             "{game}:{name} has a texture"
         );
         assert!(

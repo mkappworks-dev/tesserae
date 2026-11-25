@@ -9,11 +9,10 @@ var artwork_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(105)
 var<uniform> face_words: array<vec4<u32>, (constants::CHUNK_PALETTE_SLOTS + 3u) / 4u>;
 
-// A face word's top two bits, as texture_atlas::face_word sets them: zero is
-// untextured, and bit 30 turns the tile per Voxel.
-const LOOK_SHIFT: u32 = 30u;
-const TURNED: u32 = 1u << 30u;
-const TURNED_AND_PATCHED: u32 = 1u;
+// A face word's look, its top bits, as texture_atlas::face_word sets them.
+const LOOK_SHIFT: u32 = constants::CHUNK_LOOK_SHIFT;
+const TURNED: u32 = constants::CHUNK_LOOK_TURN_BIT << constants::CHUNK_LOOK_SHIFT;
+const TURNED_AND_PATCHED: u32 = constants::CHUNK_LOOK_TURNED_AND_PATCHED;
 const LAYER_MASK: u32 = (1u << constants::CHUNK_FACE_LAYER_BITS) - 1u;
 
 // About one tree crown: the lattice of the patches' value noise, in metres.

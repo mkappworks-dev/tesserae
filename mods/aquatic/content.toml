@@ -36,12 +36,12 @@ remove-time-s = 0.05
 
 [[appearance]]
 material = "kelp"
-color = [44, 110, 70, 255]
+color = [43, 108, 68, 255]
 texture = "art/kelp.png"
 
 [[appearance]]
 material = "seagrass"
-color = [72, 150, 84, 255]
+color = [72, 149, 84, 255]
 texture = "art/seagrass.png"
 
 [[appearance]]

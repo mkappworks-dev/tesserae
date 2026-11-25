@@ -3407,6 +3407,17 @@ impl Worldgen {
         )
     }
 
+    /// Where crowns meet, trees stand highest rank first and the first keeps the Voxel. A storeyed
+    /// tree ranks by its storey's tallest trunk, so the taller storey wins; a tree without storeys
+    /// ranks below them all and equal to the rest, so among themselves they keep `plants_on`'s
+    /// fixed order, as before storeys.
+    fn standing_rank(&self, tree: &SurfaceTree, base: [i32; 3]) -> f32 {
+        if tree.storeys_index == 0 {
+            return f32::NEG_INFINITY;
+        }
+        self.tree_band(tree, base).trunk_height_m.1
+    }
+
     /// Every Voxel of the tree standing at `base`, fully grown, with the fruit at hash-drawn
     /// Stages. Grown from the ground's height 0 and shifted up, so the tree is a function of its
     /// column in metres and not of which Voxel the ground rounds to at this Voxel size.
@@ -3550,8 +3561,8 @@ impl Worldgen {
                     if base[1] + rise < origin[1] {
                         continue;
                     }
-                    let tall_m = self.tree_band(&tree, base).trunk_height_m.1;
-                    trees.push((tall_m, tree.trunk, self.tree_cells(&tree, base)));
+                    let rank = self.standing_rank(&tree, base);
+                    trees.push((rank, tree.trunk, self.tree_cells(&tree, base)));
                     hung.extend(self.vine_cells(&tree, base));
                 }
                 SurfacePlantKind::Vine(vine) => {
@@ -3569,8 +3580,7 @@ impl Worldgen {
                 _ => {}
             }
         }
-        // Where crowns meet, the taller storey's Voxel wins; stable, so of two alike the first in
-        // the fixed order wins, as from every Chunk.
+        // Stable, so of two alike the first in the fixed order wins, as from every Chunk.
         trees.sort_by(|a, b| b.0.total_cmp(&a.0));
         // A trunk is never left with a hole where a neighbour's canopy got there first.
         for trunks in [true, false] {
@@ -3637,9 +3647,8 @@ impl Worldgen {
                 _ => None,
             })
             .filter(|(_, base)| base[1] < max[1] && base[1] + rise >= min[1])
-            .map(|(tree, base)| (self.tree_band(&tree, base).trunk_height_m.1, tree, base))
+            .map(|(tree, base)| (self.standing_rank(&tree, base), tree, base))
             .collect();
-        // Level 0's order: the taller storey first.
         trees.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (_, tree, base) in trees {
             let row = self.tree_of(&tree);
@@ -3878,7 +3887,7 @@ impl Worldgen {
         let &(lead, tree, shape) = covers.first()?;
         let sparse = covers
             .iter()
-            .find(|t| (t.1.canopy, t.1.variants) != (tree.canopy, tree.variants))
+            .find(|t| (t.1.canopy, t.1.canopies_index) != (tree.canopy, tree.canopies_index))
             .filter(|t| 2.0 * t.0 >= lead)
             .map_or((tree, shape), |t| (t.1, t.2));
         // One variant per crown-sized cell, so a coarse level's crowns are not a speckle.

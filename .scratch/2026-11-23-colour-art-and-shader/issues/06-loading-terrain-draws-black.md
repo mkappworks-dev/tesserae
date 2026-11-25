@@ -14,8 +14,8 @@ held 0 to 54 Chunks where a settled view holds about 5340.
 Cause (diagnosed): a coarse Chunk was sent before a ground or water neighbour
 at its level, and the dark beds and cave floors beneath showed through the gap.
 Fix (user, Q61): a coarser level keeps drawing a region until every finer Chunk
-covering it is sent. Holding Chunks back until their neighbours are sent was
-rejected: it left larger empty ground mid-load.
+covering it is sent. Holding a Chunk until every neighbour is sent was
+rejected: it left large voids mid-load.
 
 ## Acceptance
 
@@ -55,3 +55,9 @@ three pairs per view: black share 1.9% before, 0.00% (`far`) and 0.08%
 `flight` GPU frame (`--instruments gpu`, two series of three each): median
 4.02 to 4.20 ms before, 3.73 to 3.77 ms after; p99 5.13 to 5.40 ms before,
 4.66 to 4.76 ms after.
+
+2026-11-25: Q74. The hybrid stays and is in the spec's Decisions: beside the
+coarser level drawing its hole (Q61), a coarse Chunk waits until each
+neighbour is sent, air, or drawn by the next coarser level. Only "hold until
+every neighbour is sent" was rejected: it left large voids. `Level::holds`
+and `covered_hole` now share `hole_covered_at`.

@@ -57,7 +57,7 @@ fn terra_declares_a_food_of_its_own_that_grows_on_its_biomes() {
     );
     assert!(loaded.tables.materials.solid(Voxel::cube(id)));
     assert!(loaded.appearance.iter().any(|(m, _)| *m == id));
-    assert!(loaded.textures.iter().any(|(m, ..)| *m == id));
+    assert!(loaded.textures.iter().any(|t| t.material == id));
 
     let world = loaded.world.unwrap();
     let growing: Vec<&str> = world
@@ -465,19 +465,19 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
 /// Pins every texture Terra makes, so code the Games share cannot change what it draws.
 #[test]
 fn terras_textures_are_unchanged() {
-    let (game, expected) = ("terra", 0x30c0_ac63_3be3_4788);
+    let (game, expected) = ("terra", 0x75e5_289c_8838_f3f1);
     let (_install, loaded) = loaded(game, 1.0);
     let mut textures: Vec<_> = loaded
         .textures
         .iter()
-        .map(|(id, pixels, _)| {
+        .map(|texture| {
             let name = loaded
                 .registry
                 .names(Kind::Material)
-                .find(|&(at, _)| at == usize::from(*id))
+                .find(|&(at, _)| at == usize::from(texture.material))
                 .map(|(_, name)| name.to_owned())
                 .unwrap();
-            (name, pixels.clone())
+            (name, texture.pixels.clone())
         })
         .collect();
     textures.sort();

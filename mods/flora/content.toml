@@ -703,22 +703,22 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "oak_sapling"
-color = [79, 118, 41, 255]
+color = [83, 114, 43, 255]
 texture = "art/oak_sapling.png"
 
 [[appearance]]
 material = "tuft"
-color = [119, 153, 83, 255]
+color = [120, 154, 85, 255]
 texture = "art/tuft.png"
 
 [[appearance]]
 material = "poppy"
-color = [165, 114, 43, 255]
+color = [133, 104, 42, 255]
 texture = "art/poppy.png"
 
 [[appearance]]
 material = "daisy"
-color = [183, 189, 158, 255]
+color = [153, 172, 142, 255]
 texture = "art/daisy.png"
 
 [[appearance]]
@@ -739,7 +739,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "birch_sapling"
-color = [116, 148, 52, 255]
+color = [116, 144, 53, 255]
 texture = "art/birch_sapling.png"
 
 [[appearance]]
@@ -755,7 +755,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "pine_sapling"
-color = [59, 91, 56, 255]
+color = [60, 91, 55, 255]
 texture = "art/pine_sapling.png"
 
 [[appearance]]
@@ -771,7 +771,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "palm_sapling"
-color = [91, 135, 53, 255]
+color = [90, 137, 53, 255]
 texture = "art/palm_sapling.png"
 
 [[appearance]]
@@ -787,7 +787,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "acacia_sapling"
-color = [129, 137, 50, 255]
+color = [128, 136, 51, 255]
 texture = "art/acacia_sapling.png"
 
 [[appearance]]
@@ -815,7 +815,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "jungle_sapling"
-color = [70, 128, 49, 255]
+color = [75, 125, 50, 255]
 texture = "art/jungle_sapling.png"
 
 [[appearance]]
@@ -843,7 +843,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "swamp_sapling"
-color = [92, 106, 48, 255]
+color = [93, 105, 48, 255]
 texture = "art/swamp_sapling.png"
 
 [[appearance]]
@@ -859,7 +859,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_leaves_dark"
-color = [71, 98, 46, 255]
+color = [71, 99, 47, 255]
 texture = "art/apple_leaves_dark.png"
 variation = "turned-and-patched"
 
@@ -871,7 +871,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_sapling"
-color = [94, 120, 49, 255]
+color = [96, 117, 50, 255]
 texture = "art/apple_sapling.png"
 
 [[appearance]]
@@ -899,7 +899,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "orange_sapling"
-color = [83, 120, 46, 255]
+color = [86, 117, 48, 255]
 texture = "art/orange_sapling.png"
 
 [[appearance]]
@@ -927,12 +927,12 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "cherry_sapling"
-color = [100, 132, 55, 255]
+color = [102, 129, 56, 255]
 texture = "art/cherry_sapling.png"
 
 [[appearance]]
 material = "apple_unripe"
-color = [109, 155, 62, 255]
+color = [109, 155, 63, 255]
 texture = "art/apple_unripe.png"
 
 [[appearance]]
@@ -942,7 +942,7 @@ texture = "art/apple_ripe.png"
 
 [[appearance]]
 material = "orange_unripe"
-color = [111, 156, 49, 255]
+color = [111, 156, 50, 255]
 texture = "art/orange_unripe.png"
 
 [[appearance]]
@@ -957,7 +957,7 @@ texture = "art/cherry_unripe.png"
 
 [[appearance]]
 material = "cherry_ripe"
-color = [115, 55, 39, 255]
+color = [117, 55, 40, 255]
 texture = "art/cherry_ripe.png"
 
 [[appearance]]
@@ -997,27 +997,27 @@ texture = "art/jungle_wood.png"
 
 [[appearance]]
 material = "dandelion"
-color = [188, 176, 57, 255]
+color = [156, 155, 42, 255]
 texture = "art/dandelion.png"
 
 [[appearance]]
 material = "orchid"
-color = [137, 129, 163, 255]
+color = [104, 112, 130, 255]
 texture = "art/orchid.png"
 
 [[appearance]]
 material = "tall_grass"
-color = [112, 150, 83, 255]
+color = [115, 153, 86, 255]
 texture = "art/tall_grass.png"
 
 [[appearance]]
 material = "dry_grass"
-color = [205, 179, 100, 255]
+color = [206, 180, 101, 255]
 texture = "art/dry_grass.png"
 
 [[appearance]]
 material = "fern"
-color = [91, 132, 78, 255]
+color = [92, 132, 78, 255]
 texture = "art/fern.png"
 
 [[appearance]]
@@ -1032,7 +1032,7 @@ texture = "art/mushroom_brown.png"
 
 [[appearance]]
 material = "cane"
-color = [128, 140, 84, 255]
+color = [126, 139, 83, 255]
 texture = "art/cane.png"
 
 [[appearance]]
@@ -1162,11 +1162,11 @@ shape = "flora:cross"
 sapling = "flora:oak_sapling"
 trunk = "flora:oak_log"
 canopy = ["flora:oak_leaves", "flora:oak_leaves_dark", "flora:oak_leaves_light"]
-trunk-height-m = [9.0, 14.0]
+trunk-height-m = [8.0, 14.0]
 canopy-radius-m = 2.5
 mean-seconds = 90.0
 sapling-yield = [1, 2]
-branching = { limbs = [3, 4], start = 0.6, reach-m = 3.5, rise = 0.3, fork = 0.6, lean-m = 0.0, lobe-radius-m = 1.5 }
+branching = { limbs = [3, 4], start = 0.65, reach-m = 3.5, rise = 0.3, fork = 0.6, lean-m = 0.0, lobe-radius-m = 1.5 }
 
 [plants.needs]
 soil = ["#soil"]

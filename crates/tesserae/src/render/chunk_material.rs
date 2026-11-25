@@ -147,7 +147,7 @@ impl MaterialExtension for ChunkMaterialExtension {
         read_no_vertex_attribute(&mut descriptor.vertex);
 
         // Reach the shader as `constants::*`, so neither the uniform's length,
-        // the light scale nor the quad layout can drift from the Rust side.
+        // the light scale, the face words nor the quad layout can drift from the Rust side.
         let mut defs = vec![
             ShaderDefVal::UInt("CHUNK_PALETTE_LEN".into(), PALETTE_LEN as u32),
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
@@ -157,11 +157,8 @@ impl MaterialExtension for ChunkMaterialExtension {
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,
             ),
-            ShaderDefVal::UInt(
-                "CHUNK_FACE_LAYER_BITS".into(),
-                super::texture_atlas::FACE_LAYER_BITS,
-            ),
         ];
+        defs.extend(super::texture_atlas::face_word_shader_defs());
         defs.extend(quad_layout_defs());
         defs.extend(super::fog::haze_shader_defs());
         #[cfg(feature = "profiling")]

@@ -25,7 +25,7 @@ metres.
 
 | Plant          | Trunk m    | Canopy radius m | Notes                       |
 | -------------- | ---------- | --------------- | --------------------------- |
-| `flora:oak`    | 9 to 14    | 2.5             |                             |
+| `flora:oak`    | 8 to 14    | 2.5             |                             |
 | `flora:birch`  | 5 to 7.5   | 1.5             | Tall, thin, pale trunk      |
 | `flora:pine`   | 7 to 10    | 1.2             | Narrow; see below           |
 | `flora:palm`   | 6 to 9     | 1.8             | Coconuts; sand or soil      |

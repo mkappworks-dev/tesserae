@@ -119,9 +119,8 @@ const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 const BLOCK_LIGHT_STRENGTH: f32 = 3992.0;
 
 // The ambient dome a face no sky light reaches still gets, as a share of `SKY_AMBIENT` in
-// chunk_view.rs: about 96 of it, what light level 5 had under the old 900, so a sealed cave's
-// walls read as shapes and not a void, while a torch is still what lights it. Level 1's was too
-// faint to show rock at all. The sun gets none.
+// chunk_view.rs: about 96 of it, so a sealed cave's walls read as shapes and not a void, while a
+// torch is still what lights it. The sun gets none.
 const UNLIT_AMBIENT: f32 = 0.0642;
 
 // The share of screen-space occlusion the sun's light takes as well as the sky's.

@@ -835,9 +835,9 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
         RenderLayers::layer(NEAR_LAYER),
     ));
 
-    // The sky dome's radiance, no longer a flat fill: the chunk shader gates it
-    // per face by the flood-fill's sky channel, so a face that cannot see the
-    // sky does not receive it. The sun's own occlusion is the shadow map plus
+    // The sky dome's radiance: the chunk shader gates it per face by the
+    // flood-fill's sky channel, so a face that cannot see the sky does not
+    // receive it. The sun's own occlusion is the shadow map plus
     // the same sky channel; see `render/chunk_material.wesl`.
     ambient.brightness = SKY_AMBIENT;
 }
@@ -846,9 +846,9 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
 /// flat shoulder, so only less light brings it under about 85% value on screen.
 const SUN_LUX: f32 = 3600.0;
 
-/// Raised as the sun was lowered, so a floor lit by the sky alone, such as under
-/// a canopy, reads instead of going black. `UNLIT_AMBIENT` in
-/// `chunk_material.wesl` is scaled down by as much, so a cave stays as it was.
+/// Beside [`SUN_LUX`], enough that a floor lit by the sky alone, such as under a
+/// canopy, reads instead of going black. `UNLIT_AMBIENT` in
+/// `chunk_material.wesl` is a share of it, which keeps a cave as dim.
 const SKY_AMBIENT: f32 = 1500.0;
 
 /// How far the view tips down. Framing is a Client decision; where the Eye
@@ -1178,14 +1178,14 @@ mod tests {
             edit::Holding,
             material_textures::{self, Textures},
         };
-        use crate::content::MaterialTextures;
+        use crate::content::{MaterialTexture, MaterialTextures};
         use tesserae_mods::TileVariation::Fixed;
         let mut app = app();
         app.init_asset::<Image>()
             .add_plugins(material_textures::plugin);
         app.world_mut().write_message(MaterialTextures(vec![
-            (23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
-            (63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
+            MaterialTexture::new(23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
+            MaterialTexture::new(63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
         ]));
         app.update();
         let held = Holding::solid(23, 0);

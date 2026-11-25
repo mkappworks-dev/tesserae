@@ -734,9 +734,9 @@ pub struct SurfaceTree {
     /// The one canopy, or the first of its variants.
     pub canopy: MaterialId,
     /// Where the World's [`TreeVariety`] holds the row's canopy variants; 0 is `canopy` alone.
-    pub variants: u8,
+    pub canopies_index: u8,
     /// Where the World's [`TreeVariety`] holds the row's storeys; 0 is its own band alone.
-    pub storeys: u8,
+    pub storeys_index: u8,
     pub trunk_height_m: (f32, f32),
     pub canopy_radius_m: f32,
     pub fruit: Option<SurfaceFruit>,
@@ -757,14 +757,14 @@ impl SurfaceTree {
     }
 
     pub fn canopies(&self, variety: &TreeVariety) -> crate::plant::Canopies {
-        match self.variants {
+        match self.canopies_index {
             0 => crate::plant::Canopies::one(self.canopy),
             at => variety.canopies[usize::from(at) - 1],
         }
     }
 
     pub fn storeys<'a>(&self, variety: &'a TreeVariety) -> &'a crate::plant::Storeys {
-        match self.storeys {
+        match self.storeys_index {
             0 => &crate::plant::Storeys::NONE,
             at => &variety.storeys[usize::from(at) - 1],
         }
@@ -878,8 +878,8 @@ impl TreeVariety {
     ) -> Result<SurfaceTree, ParamError> {
         Ok(SurfaceTree {
             canopy: canopies.first(),
-            variants: self.add_canopies(canopies)?,
-            storeys: self.add_storeys(storeys)?,
+            canopies_index: self.add_canopies(canopies)?,
+            storeys_index: self.add_storeys(storeys)?,
             ..tree
         })
     }
@@ -890,8 +890,8 @@ impl TreeVariety {
             field: "biomes.surface_features.plant",
             rule,
         };
-        if usize::from(tree.storeys) > usize::from(self.storeys_len)
-            || usize::from(tree.variants) > usize::from(self.canopies_len)
+        if usize::from(tree.storeys_index) > usize::from(self.storeys_len)
+            || usize::from(tree.canopies_index) > usize::from(self.canopies_len)
         {
             return Err(bad(
                 "a tree names storeys or canopy variants the World does not hold",

@@ -61,8 +61,8 @@ const BRANCHING: Branching = Branching {
 
 fn oak_with(fruit: bool, branching: Option<Branching>) -> SurfaceTree {
     SurfaceTree {
-        storeys: 0,
-        variants: 0,
+        storeys_index: 0,
+        canopies_index: 0,
         branching,
         crowding_m: None,
         trunk: TRUNK,
@@ -780,9 +780,12 @@ fn tree_rows_share_the_worlds_storeys_and_variants_and_a_snapshot_keeps_them() {
         .as_slice()
         .iter()
         .map(|f| match f.plant.unwrap().kind {
-            SurfacePlantKind::Tree(t) => {
-                (t.variants, t.storeys, t.canopies(held), *t.storeys(held))
-            }
+            SurfacePlantKind::Tree(t) => (
+                t.canopies_index,
+                t.storeys_index,
+                t.canopies(held),
+                *t.storeys(held),
+            ),
             _ => unreachable!("only trees"),
         })
         .collect();
