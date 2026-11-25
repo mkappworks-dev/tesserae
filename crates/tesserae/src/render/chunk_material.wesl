@@ -203,6 +203,7 @@ fn fragment(
     // bevy_pbr bounces the occlusion off StandardMaterial's white base_color, before the Material's
     // colour is multiplied in, which lifts it to almost nothing; bounce it off the real albedo.
     @if(SCREEN_SPACE_AMBIENT_OCCLUSION) {
+    if in.level == 0u {
         let ssao_at = vec2<i32>(in.clip_position.xy - view.viewport.xy);
         let ssao = textureLoad(screen_space_ambient_occlusion_texture, ssao_at, 0i).r;
         // Faded by sky light, which already darkens what cannot see the sky: a shaded floor is
@@ -212,6 +213,11 @@ fn fragment(
         // A look choice, not physics: sunlit faces are lit almost wholly by the sun, so occlusion
         // on the ambient term alone would leave a canopy's creases as flat as before.
         pbr_input.directional_shadow_factor *= mix(1.0, ssao, SUN_OCCLUSION);
+    } else {
+        // Only level 0 is in the prepass AO reads: bevy_pbr read an empty texel for this face.
+        pbr_input.diffuse_occlusion = vec3<f32>(1.0);
+        pbr_input.specular_occlusion = 1.0;
+    }
     }
 
     // Sky light is how much of the sky dome and the sun this face can see, so it
