@@ -215,6 +215,9 @@ lands.
   follow-up.
 - Trunks wider than one Voxel for the tallest storey: new trunk, limb and
   felling rules, a follow-up.
+- Raising the 32 m plant height cap so jungle's top storey can stand at 30 to
+  36 m (it stands at 25 to 27 m): it changes how far tree generation reaches
+  and caches, a follow-up.
 - A day and night cycle, a moving sun, the moon and clouds: the day and night
   cycle spec (`feat/day-night-cycle`), which builds on this sky.
 - Bloom, HDR grading, volumetric light, waving foliage and water reflections:
