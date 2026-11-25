@@ -24,11 +24,11 @@ before the next:
 - [x] Every period-bound pattern in Terra tiles across a Voxel edge (test).
 - [x] Terra's appearance colours equal their tile's linear mean (test).
 - [x] Terra's existing texture tests pass.
-- [ ] Each step approved on near, mid (70 and 110 m) and far captures, against
+- [x] Each step approved on near, mid (70 and 110 m) and far captures, against
       the baseline.
-- [ ] No sunlit sand or snow top above about 85% value on `dry-ground` and
+- [x] No sunlit sand or snow top above about 85% value on `dry-ground` and
       `cold-ground`.
-- [ ] Wheat keeps its shape at distance; approved on a crop field capture.
+- [x] Wheat keeps its shape at distance; approved on a crop field capture.
 
 ## Comments
 
