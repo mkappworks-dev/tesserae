@@ -123,7 +123,7 @@ pub struct LoadedMods {
     pub world_biome_loot: Option<Vec<Option<LootTable>>>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
-    pub textures: Vec<(MaterialId, Vec<u8>)>,
+    pub textures: Vec<(MaterialId, Vec<u8>, tesserae_mods::TileVariation)>,
     pub remove_times: Vec<(MaterialId, std::time::Duration)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
@@ -686,7 +686,9 @@ pub(crate) async fn declare_all(
                 .id_of(Kind::Material, &format!("{id}:{}", row.material))
             {
                 if let Some(pixels) = row.texture {
-                    loaded.textures.push((index as MaterialId, pixels));
+                    loaded
+                        .textures
+                        .push((index as MaterialId, pixels, row.variation));
                 }
                 let c = row.color;
                 loaded
@@ -2371,7 +2373,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         art_game(&s);
         let loaded = s.load(TrustMode::All).unwrap();
         let rock = loaded.registry.id_of(Kind::Material, "plain:rock").unwrap();
-        let [(id, atlas)] = &loaded.textures[..] else {
+        let [(id, atlas, _)] = &loaded.textures[..] else {
             panic!("one texture expected");
         };
         assert_eq!(*id as u32, rock as u32);
@@ -3205,10 +3207,10 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .iter()
             .filter(|m| m.name.starts_with("terra:"))
         {
-            let (_, pixels) = textures
+            let (_, pixels, _) = textures
                 .0
                 .iter()
-                .find(|(id, _)| *id == material.id)
+                .find(|(id, ..)| *id == material.id)
                 .unwrap_or_else(|| panic!("{} needs a preview", material.name));
             assert_eq!(pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
@@ -3224,7 +3226,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 textures
                     .0
                     .iter()
-                    .filter(|(_, other)| other == pixels)
+                    .filter(|(_, other, _)| other == pixels)
                     .count(),
                 // An open Door or Gate is the same panel turned.
                 if material.name.starts_with("terra:door")
@@ -3266,7 +3268,8 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             if !name.starts_with("terra:") {
                 continue;
             }
-            let Some((_, pixels)) = loaded.textures.iter().find(|(m, _)| *m as usize == id) else {
+            let Some((_, pixels, _)) = loaded.textures.iter().find(|(m, ..)| *m as usize == id)
+            else {
                 continue;
             };
             let (_, colour) = loaded
@@ -3296,6 +3299,33 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             checked += 1;
         }
         assert!(checked >= 40, "only {checked} Terra Materials checked");
+    }
+
+    #[test]
+    fn terra_and_the_mods_it_ships_vary_natural_tiles_and_keep_built_ones() {
+        use tesserae_mods::TileVariation::{Fixed, Turned, TurnedAndPatched};
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let variation = |name: &str| {
+            let id = loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+            let (.., variation) = loaded.textures.iter().find(|(m, ..)| *m == id).unwrap();
+            *variation
+        };
+        for (name, expected) in [
+            ("terra:leaves", TurnedAndPatched),
+            ("terra:grass", TurnedAndPatched),
+            ("terra:stone", Turned),
+            ("terra:dirt", Turned),
+            ("terra:sand", Turned),
+            ("terra:wood", Fixed),
+            ("terra:brick", Fixed),
+            ("flora:jungle_leaves", TurnedAndPatched),
+            ("flora:oak_log", Fixed),
+            ("strata:stone", Turned),
+            ("strata:sand", Turned),
+            ("strata:turf", Fixed),
+        ] {
+            assert_eq!(variation(name), expected, "{name}");
+        }
     }
 
     #[test]

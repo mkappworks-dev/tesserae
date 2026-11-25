@@ -177,11 +177,12 @@ fn content_full(shaped: bool, branching: Option<Branching>, staged: bool) -> Con
             "t:sapling",
             sapling,
             Kind::Tree(Tree {
+                storeys: tesserae_core::plant::Storeys::NONE,
                 vines: None,
                 branching,
                 crowding_m: None,
                 trunk,
-                canopy,
+                canopy: tesserae_core::plant::Canopies::one(canopy),
                 trunk_height_m: if branching.is_some() {
                     (4.0, 5.0)
                 } else {

@@ -15,10 +15,14 @@ import bevy_pbr::render::{
     },
     mesh_view_bindings as view_bindings,
 };
+@if(SCREEN_SPACE_AMBIENT_OCCLUSION)
+import bevy_pbr::render::mesh_view_bindings::{screen_space_ambient_occlusion_texture, view};
+@if(SCREEN_SPACE_AMBIENT_OCCLUSION)
+import bevy_pbr::ssao::utils::ssao_multibounce;
 import super::{
     leaf_hole::leaf_hole,
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
-    material_texture::{material_slot, has_texture, sample_texture, uv_gradient},
+    material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
 };
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
@@ -120,6 +124,9 @@ const BLOCK_LIGHT_STRENGTH: f32 = 3992.0;
 // faint to show rock at all. The sun gets none.
 const UNLIT_AMBIENT: f32 = 0.0642;
 
+// The share of screen-space occlusion the sun's light takes as well as the sky's.
+const SUN_OCCLUSION: f32 = 0.5;
+
 // Flat, like the Material index: every vertex of a greedy quad carries the same
 // level because light is part of the merge key, so interpolating would only
 // blur the seam between two quads that deliberately did not merge.
@@ -189,7 +196,13 @@ fn fragment(
     // works as a whole-chunk tint.
     let slot = material_slot(in.material);
     if has_texture(slot) {
-        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal);
+        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal, in.world_position.xyz, in.instance_index);
+        if patched(slot, in.world_normal) {
+            pbr_input.material.base_color = vec4<f32>(
+                patch_colour(pbr_input.material.base_color.rgb, in.world_position.xyz),
+                pbr_input.material.base_color.a,
+            );
+        }
     } else {
         pbr_input.material.base_color *= palette[slot];
     }
@@ -199,6 +212,28 @@ fn fragment(
             mix(pbr_input.material.base_color.rgb, level_tint(in.level), TINT_STRENGTH),
             pbr_input.material.base_color.a,
         );
+    }
+
+    let sky = light_level(in.light, 4u);
+
+    // bevy_pbr bounces the occlusion off StandardMaterial's white base_color, before the Material's
+    // colour is multiplied in, which lifts it to almost nothing; bounce it off the real albedo.
+    @if(SCREEN_SPACE_AMBIENT_OCCLUSION) {
+    if in.level == 0u {
+        let ssao_at = vec2<i32>(in.clip_position.xy - view.viewport.xy);
+        let ssao = textureLoad(screen_space_ambient_occlusion_texture, ssao_at, 0i).r;
+        // Faded by sky light, which already darkens what cannot see the sky: a shaded floor is
+        // not occluded twice.
+        let bounced = ssao_multibounce(ssao, pbr_input.material.base_color.rgb);
+        pbr_input.diffuse_occlusion = mix(vec3<f32>(1.0), bounced, sky);
+        // A look choice, not physics: sunlit faces are lit almost wholly by the sun, so occlusion
+        // on the ambient term alone would leave a canopy's creases as flat as before.
+        pbr_input.directional_shadow_factor *= mix(1.0, ssao, SUN_OCCLUSION);
+    } else {
+        // Only level 0 is in the prepass AO reads: bevy_pbr read an empty texel for this face.
+        pbr_input.diffuse_occlusion = vec3<f32>(1.0);
+        pbr_input.specular_occlusion = 1.0;
+    }
     }
 
     // Sky light is how much of the sky dome and the sun this face can see, so it
@@ -212,7 +247,6 @@ fn fragment(
     // directional_shadow_factor alone would leave the ambient dome lighting a
     // cave past its faint floor. pbr_types.wesl's own doc on that field says "use this for custom
     // shadow maps", which is exactly what a sky-light flood-fill is.
-    let sky = light_level(in.light, 4u);
     pbr_input.diffuse_occlusion *= vec3<f32>(max(sky, UNLIT_AMBIENT));
     pbr_input.directional_shadow_factor *= sky;
 

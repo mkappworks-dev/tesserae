@@ -216,6 +216,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
             .map(|a| content::Appearance {
                 material: a.material,
                 texture: None,
+                variation: content::TileVariation::Fixed,
                 color: types::Srgba {
                     r: a.color.r,
                     g: a.color.g,

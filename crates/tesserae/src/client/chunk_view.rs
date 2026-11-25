@@ -1179,12 +1179,13 @@ mod tests {
             material_textures::{self, Textures},
         };
         use crate::content::MaterialTextures;
+        use tesserae_mods::TileVariation::Fixed;
         let mut app = app();
         app.init_asset::<Image>()
             .add_plugins(material_textures::plugin);
         app.world_mut().write_message(MaterialTextures(vec![
-            (23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
-            (63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
+            (23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
+            (63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
         ]));
         app.update();
         let held = Holding::solid(23, 0);
@@ -1200,9 +1201,9 @@ mod tests {
             let extension = &materials.get(handle).unwrap().extension;
             assert_eq!(extension.texture.as_ref(), Some(&faces));
             // Slot order: each slot's three identical faces share one layer.
-            assert_eq!(word(extension, 23), face_word([0; 3]));
-            assert_eq!(word(extension, 63), face_word([1; 3]));
-            assert_eq!(word(extension, FLAME_SLOT), face_word([2; 3]));
+            assert_eq!(word(extension, 23), face_word([0; 3], Fixed));
+            assert_eq!(word(extension, 63), face_word([1; 3], Fixed));
+            assert_eq!(word(extension, FLAME_SLOT), face_word([2; 3], Fixed));
             assert_eq!(word(extension, 24), 0);
         }
         let item = app
@@ -1222,7 +1223,7 @@ mod tests {
         for handle in terrain.all() {
             let extension = &materials.get(handle).unwrap().extension;
             assert_eq!(word(extension, 23), 0);
-            assert_eq!(word(extension, FLAME_SLOT), face_word([0; 3]));
+            assert_eq!(word(extension, FLAME_SLOT), face_word([0; 3], Fixed));
         }
     }
 

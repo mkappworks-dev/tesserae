@@ -37,6 +37,9 @@ pub(crate) struct Preferences {
     /// Percent of the window the World is drawn at on each axis, one of
     /// [`super::render_scale::SCALES`].
     pub render_scale: u32,
+    /// Screen-space AO: off by default, since it does not fit the frame budget. Absent from a
+    /// profile saved before it, which reads as off.
+    pub ambient_occlusion: bool,
     pub pad: PadPreferences,
     pub touch: TouchPreferences,
     /// The last view, restored in every World: a preference of the user's,
@@ -134,6 +137,7 @@ impl Default for Preferences {
             fps_cap: None,
             anti_aliasing: default(),
             render_scale: 100,
+            ambient_occlusion: false,
             pad: PadPreferences::default(),
             touch: TouchPreferences::default(),
             view: default(),

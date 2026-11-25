@@ -68,6 +68,7 @@ boxes = [{ min = [0, 4, 7], max = [6, 14, 9] }]
 [[appearance]]
 material = "rock"
 color = [80, 90, 100, 255]
+variation = "turned-and-patched"
 
 [[appearance]]
 material = "water"

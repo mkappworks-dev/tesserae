@@ -33,7 +33,9 @@ pub(super) enum Plant {
         #[serde(default)]
         sapling_yields: Vec<Yield>,
         trunk: String,
-        canopy: String,
+        canopy: OneOrMany,
+        #[serde(default)]
+        storeys: Vec<Storey>,
         trunk_height_m: [f32; 2],
         canopy_radius_m: f32,
         mean_seconds: f32,
@@ -154,6 +156,22 @@ pub(super) struct Branching {
     lobe_radius_m: f32,
 }
 
+/// A canopy Material, or a list of variants.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(super) enum OneOrMany {
+    One(String),
+    Many(Vec<String>),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Storey {
+    weight: f32,
+    trunk_height_m: [f32; 2],
+    canopy_radius_m: Option<f32>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct Vines {
@@ -252,6 +270,7 @@ impl From<Plant> for content::PlantDef {
                 sapling_yields,
                 trunk,
                 canopy,
+                storeys,
                 trunk_height_m: [low, high],
                 canopy_radius_m,
                 mean_seconds,
@@ -271,7 +290,18 @@ impl From<Plant> for content::PlantDef {
                     sapling,
                     sapling_yields: yields(sapling_yields),
                     trunk,
-                    canopy,
+                    canopy: match canopy {
+                        OneOrMany::One(one) => vec![one],
+                        OneOrMany::Many(many) => many,
+                    },
+                    storeys: storeys
+                        .into_iter()
+                        .map(|s| content::StoreyDef {
+                            weight: s.weight,
+                            trunk_height_m: (s.trunk_height_m[0], s.trunk_height_m[1]),
+                            canopy_radius_m: s.canopy_radius_m,
+                        })
+                        .collect(),
                     trunk_height_m: (low, high),
                     canopy_radius_m,
                     mean_seconds,

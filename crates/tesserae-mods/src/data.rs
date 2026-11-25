@@ -147,6 +147,17 @@ struct Appearance {
     material: String,
     color: [u8; 4],
     texture: Option<String>,
+    #[serde(default)]
+    variation: Variation,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+enum Variation {
+    #[default]
+    Fixed,
+    Turned,
+    TurnedAndPatched,
 }
 
 #[derive(Deserialize)]
@@ -316,6 +327,11 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                             artwork(format!("appearance[{row}].texture"), &path, 3 * edge, edge)
                         })
                         .transpose()?,
+                    variation: match a.variation {
+                        Variation::Fixed => content::TileVariation::Fixed,
+                        Variation::Turned => content::TileVariation::Turned,
+                        Variation::TurnedAndPatched => content::TileVariation::TurnedAndPatched,
+                    },
                 })
             })
             .collect::<Result<_, ModError>>()?,

@@ -28,6 +28,7 @@ use bevy::{
     },
 };
 use std::collections::HashMap;
+use tesserae_mods::TileVariation;
 
 const GHOST_OPACITY: f32 = 0.75;
 
@@ -243,15 +244,18 @@ pub(super) fn receive(
     pixels[FLAME_SLOT * row_bytes..(FLAME_SLOT + 1) * row_bytes].copy_from_slice(&flame());
     textures.present[FLAME_SLOT] = true;
     textures.alpha[FLAME_SLOT] = AlphaMode::Mask(0.5);
+    let mut variation = [TileVariation::Fixed; ROWS];
     if let Some(message) = messages.read().last() {
-        for (material, row) in &message.0 {
+        for (material, row, varies) in &message.0 {
             let slot = *material as usize;
             pixels[slot * row_bytes..(slot + 1) * row_bytes].copy_from_slice(row);
             textures.present[slot] = true;
             textures.alpha[slot] = alpha_of(row);
+            variation[slot] = *varies;
         }
     }
-    let (faces, words, levels) = face_array(&pixels, &textures.present, &textures.alpha);
+    let (faces, words, levels) =
+        face_array(&pixels, &textures.present, &textures.alpha, &variation);
     info!(
         "Material faces: {} layers",
         faces.texture_descriptor.size.depth_or_array_layers
@@ -278,6 +282,7 @@ fn face_array(
     atlas: &[u8],
     present: &[bool; ROWS],
     alpha: &[AlphaMode; ROWS],
+    variation: &[TileVariation; ROWS],
 ) -> (Image, [u32; ROWS], Vec<Vec<u8>>) {
     let mut levels = vec![Vec::new(); LEVELS as usize];
     let mut layers: HashMap<(Vec<u8>, Option<u32>), u32> = HashMap::new();
@@ -308,7 +313,7 @@ fn face_array(
                     next
                 });
         }
-        words[slot] = face_word(face_layers);
+        words[slot] = face_word(face_layers, variation[slot]);
     }
     // Up to every slot's every face, past WebGPU's default limit of 256 layers;
     // Bevy requests the adapter's own limits, and Metal allows 2048.
@@ -434,6 +439,7 @@ mod tests {
         app.world_mut().write_message(MaterialTextures(vec![(
             23,
             vec![255; MATERIAL_TEXTURE_BYTES],
+            TileVariation::Fixed,
         )]));
         app.update();
         let first = app.world().resource::<Textures>().texture(held).unwrap();
@@ -447,6 +453,7 @@ mod tests {
         app.world_mut().write_message(MaterialTextures(vec![(
             23,
             vec![120; MATERIAL_TEXTURE_BYTES],
+            TileVariation::Fixed,
         )]));
         app.update();
         assert!(
@@ -488,7 +495,7 @@ mod tests {
         let mut cutout = vec![255; MATERIAL_TEXTURE_BYTES];
         cutout[3] = 0;
         app.world_mut()
-            .write_message(MaterialTextures(vec![(23, cutout)]));
+            .write_message(MaterialTextures(vec![(23, cutout, TileVariation::Fixed)]));
         app.update();
         assert_eq!(
             app.world()
@@ -508,9 +515,9 @@ mod tests {
             texel[3] = if i.is_multiple_of(3) { 255 } else { 0 };
         }
         app.world_mut().write_message(MaterialTextures(vec![
-            (23, leaves),
-            (40, vec![200; MATERIAL_TEXTURE_BYTES]),
-            (41, vec![200; MATERIAL_TEXTURE_BYTES]),
+            (23, leaves, TileVariation::Fixed),
+            (40, vec![200; MATERIAL_TEXTURE_BYTES], TileVariation::Fixed),
+            (41, vec![200; MATERIAL_TEXTURE_BYTES], TileVariation::Fixed),
         ]));
         app.update();
         let textures = app.world().resource::<Textures>();
@@ -572,6 +579,27 @@ mod tests {
         let two = layer(23, 1) as usize * 2 * 2 * 4;
         let side = &levels[3][two..two + 16];
         assert!(side.chunks(4).any(|t| t[3] > 127), "{side:?}");
+    }
+
+    #[test]
+    fn a_material_without_variation_keeps_the_face_word_it_drew_by_before() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>().add_plugins(plugin);
+        let tile = vec![200; MATERIAL_TEXTURE_BYTES];
+        app.world_mut().write_message(MaterialTextures(vec![
+            (40, tile.clone(), TileVariation::Fixed),
+            (41, tile.clone(), TileVariation::Turned),
+            (42, tile, TileVariation::TurnedAndPatched),
+        ]));
+        app.update();
+        let words = app.world().resource::<Textures>().face_words;
+        let layers = words[40] & ((1 << 30) - 1);
+        assert_eq!(words[40], 1 << 31 | layers, "textured, and nothing else");
+        for slot in [41, 42] {
+            assert_eq!(words[slot] & ((1 << 30) - 1), layers, "slot {slot}");
+        }
+        let distinct: std::collections::HashSet<u32> = words[40..43].iter().copied().collect();
+        assert_eq!(distinct.len(), 3, "{words:x?}");
     }
 
     #[test]

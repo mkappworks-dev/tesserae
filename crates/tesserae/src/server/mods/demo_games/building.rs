@@ -43,7 +43,7 @@ fn terra_declares_its_building_materials_textured_and_in_the_catalogue() {
     for name in BUILDING {
         let id = material(&loaded, &format!("{game}:{name}"));
         assert!(
-            loaded.textures.iter().any(|(m, _)| *m == id),
+            loaded.textures.iter().any(|(m, ..)| *m == id),
             "{game}:{name} has a texture"
         );
         assert!(
@@ -75,7 +75,10 @@ fn laid(loaded: &LoadedMods) -> HashSet<MaterialId> {
                 SurfacePlantKind::Column { material, .. } => {
                     laid.insert(material);
                 }
-                SurfacePlantKind::Tree(tree) => laid.extend([tree.trunk, tree.canopy]),
+                SurfacePlantKind::Tree(tree) => {
+                    laid.insert(tree.trunk);
+                    laid.extend(tree.canopy.as_slice());
+                }
                 SurfacePlantKind::Vine(vine) => {
                     laid.insert(vine.material);
                     laid.extend(&vine.fruit[..usize::from(vine.len)]);

@@ -41,6 +41,7 @@ fn tree() -> SurfaceFeature {
         plant: Some(SurfacePlant {
             shape: 0,
             kind: SurfacePlantKind::Tree(SurfaceTree {
+                storeys: tesserae_core::plant::Storeys::NONE,
                 branching: Some(Branching {
                     limbs: CountRange { min: 3, max: 4 },
                     start: 0.3,
@@ -52,7 +53,7 @@ fn tree() -> SurfaceFeature {
                     lobe_radius_m: 1.2,
                 }),
                 trunk: TRUNK,
-                canopy: CANOPY,
+                canopy: tesserae_core::plant::Canopies::one(CANOPY),
                 trunk_height_m: (4.0, 7.0),
                 canopy_radius_m: 2.5,
                 vines: None,

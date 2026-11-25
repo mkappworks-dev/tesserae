@@ -27,6 +27,7 @@ const settingsDefaults = {
   sync: "Display synced",
   aa: "SMAA",
   renderScale: "100%",
+  ambientOcclusion: false,
   fps: "No limit",
   // Proposed in step 22 (.scratch/2026-11-21-phase-22-lod-features/spec.md).
   distancePreset: "Medium",
@@ -694,6 +695,13 @@ function settingsBody() {
           "select",
           ["67%", "75%", "85%", "100%"],
           "Lower values reduce rendering work. Menus stay sharp.",
+        ) +
+        row(
+          "Ambient occlusion",
+          "ambientOcclusion",
+          "toggle",
+          undefined,
+          "Shade where blocks meet. Costs GPU time; not drawn with MSAA.",
         ) +
         group("Map and compass") +
         row(
