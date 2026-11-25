@@ -1,6 +1,6 @@
 # Colour, art and light
 
-Status: done
+Status: ready-for-agent
 
 Source: branch `fix/colour-art-and-shader`, on `main` at `0b03c594`, after
 [Texture shimmer](../2026-11-23-texture-shimmer/spec.md) merged (#74). That
