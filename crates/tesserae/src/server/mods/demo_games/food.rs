@@ -465,7 +465,7 @@ fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
 /// Pins every texture Terra makes, so code the Games share cannot change what it draws.
 #[test]
 fn terras_textures_are_unchanged() {
-    let (game, expected) = ("terra", 0x30c0_ac63_3be3_4788);
+    let (game, expected) = ("terra", 0x75e5_289c_8838_f3f1);
     let (_install, loaded) = loaded(game, 1.0);
     let mut textures: Vec<_> = loaded
         .textures

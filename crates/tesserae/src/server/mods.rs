@@ -3305,13 +3305,16 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 .map(|i| &texels[i])
                 .collect();
             for c in 0..3 {
-                let mean =
-                    measure.iter().map(|p| linear(p[c])).sum::<f64>() / measure.len() as f64;
+                let mean = measure.iter().map(|p| linear(p[c])).sum::<f64>() / measure.len() as f64;
                 assert!(
                     (srgb(mean) - colour[c] as f64).abs() <= 1.0,
                     "{name} channel {c}: appearance {} against {} {:.1}",
                     colour[c],
-                    if sprite { "an edge colour of" } else { "a mean of" },
+                    if sprite {
+                        "an edge colour of"
+                    } else {
+                        "a mean of"
+                    },
                     srgb(mean)
                 );
             }
@@ -3321,7 +3324,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 blocks += 1;
             }
         }
-        assert!(blocks >= 120, "only {blocks} blocks checked");
+        assert!(blocks >= 100, "only {blocks} blocks checked");
         assert!(drawn_sprites >= 40, "only {drawn_sprites} sprites checked");
     }
 

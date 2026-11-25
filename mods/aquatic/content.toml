@@ -41,7 +41,7 @@ texture = "art/kelp.png"
 
 [[appearance]]
 material = "seagrass"
-color = [72, 150, 84, 255]
+color = [72, 149, 84, 255]
 texture = "art/seagrass.png"
 
 [[appearance]]

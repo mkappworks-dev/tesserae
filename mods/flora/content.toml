@@ -755,7 +755,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "pine_sapling"
-color = [59, 91, 56, 255]
+color = [60, 91, 55, 255]
 texture = "art/pine_sapling.png"
 
 [[appearance]]
@@ -787,7 +787,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "acacia_sapling"
-color = [129, 137, 50, 255]
+color = [128, 136, 51, 255]
 texture = "art/acacia_sapling.png"
 
 [[appearance]]
@@ -843,7 +843,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "swamp_sapling"
-color = [92, 106, 48, 255]
+color = [93, 105, 48, 255]
 texture = "art/swamp_sapling.png"
 
 [[appearance]]
@@ -859,7 +859,7 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_leaves_dark"
-color = [71, 98, 46, 255]
+color = [71, 99, 47, 255]
 texture = "art/apple_leaves_dark.png"
 variation = "turned-and-patched"
 
@@ -932,7 +932,7 @@ texture = "art/cherry_sapling.png"
 
 [[appearance]]
 material = "apple_unripe"
-color = [109, 155, 62, 255]
+color = [109, 155, 63, 255]
 texture = "art/apple_unripe.png"
 
 [[appearance]]
@@ -942,7 +942,7 @@ texture = "art/apple_ripe.png"
 
 [[appearance]]
 material = "orange_unripe"
-color = [111, 156, 49, 255]
+color = [111, 156, 50, 255]
 texture = "art/orange_unripe.png"
 
 [[appearance]]
@@ -1012,12 +1012,12 @@ texture = "art/tall_grass.png"
 
 [[appearance]]
 material = "dry_grass"
-color = [205, 179, 100, 255]
+color = [206, 180, 101, 255]
 texture = "art/dry_grass.png"
 
 [[appearance]]
 material = "fern"
-color = [91, 132, 78, 255]
+color = [92, 132, 78, 255]
 texture = "art/fern.png"
 
 [[appearance]]

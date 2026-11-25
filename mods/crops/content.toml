@@ -240,7 +240,7 @@ texture = "art/wheat_green.png"
 
 [[appearance]]
 material = "wheat_ripe"
-color = [188, 181, 69, 255]
+color = [189, 181, 70, 255]
 texture = "art/wheat_ripe.png"
 
 [[appearance]]
@@ -260,7 +260,7 @@ texture = "art/carrot_green.png"
 
 [[appearance]]
 material = "carrot_ripe"
-color = [128, 157, 62, 255]
+color = [128, 157, 63, 255]
 texture = "art/carrot_ripe.png"
 
 [[appearance]]
@@ -290,12 +290,12 @@ texture = "art/berry_sprout.png"
 
 [[appearance]]
 material = "berry_bush"
-color = [50, 107, 42, 255]
+color = [49, 107, 42, 255]
 texture = "art/berry_bush.png"
 
 [[appearance]]
 material = "berry_ripe"
-color = [96, 95, 45, 255]
+color = [97, 95, 45, 255]
 texture = "art/berry_ripe.png"
 
 [[appearance]]
@@ -345,7 +345,7 @@ texture = "art/pumpkin_unripe.png"
 
 [[appearance]]
 material = "pumpkin_ripe"
-color = [219, 115, 29, 255]
+color = [219, 115, 30, 255]
 texture = "art/pumpkin_ripe.png"
 
 [[items]]
