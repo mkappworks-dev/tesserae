@@ -246,7 +246,8 @@ fn fragment(
     // directional_shadow_factor alone would leave the ambient dome lighting a
     // cave past its faint floor. pbr_types.wesl's own doc on that field says "use this for custom
     // shadow maps", which is exactly what a sky-light flood-fill is.
-    pbr_input.diffuse_occlusion *= vec3<f32>(max(sky, UNLIT_AMBIENT));
+    // The dome share scales the sky only, so a cave's faint floor stays as it was.
+    pbr_input.diffuse_occlusion *= vec3<f32>(max(sky * in.sky_view, UNLIT_AMBIENT));
     pbr_input.directional_shadow_factor *= sky;
 
     // Block light is a local source, so it is emissive: tinted by the Voxel's

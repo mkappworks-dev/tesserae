@@ -33,6 +33,8 @@ struct ChunkVertexOutput {
     @location(13) unclipped_depth: f32,
     // The quad's first Voxel, as `voxel_key` packs it.
     @location(14) @interpolate(flat) voxel: u32,
+    // The share of the sky dome the quad faces, by `sky_view`.
+    @location(15) @interpolate(flat) sky_view: f32,
 }
 
 // The record's fields, as tesserae_core::mesh::layout lays them out.
@@ -58,6 +60,7 @@ struct Expanded {
     material: u32,
     light: u32,
     level: u32,
+    cross: bool,
 }
 
 fn span(hi: u32, k: u32) -> u32 {
@@ -81,6 +84,7 @@ fn expand(at: u32, vertex: u32) -> Expanded {
     var out: Expanded;
     out.position = vec3<f32>(0.0);
     out.normal = vec3<f32>(0.0);
+    out.cross = false;
     let kind = lo & KIND_MASK;
     if kind < constants::CHUNK_FACES {
         let positive = (kind & 1u) == 1u;
@@ -123,6 +127,7 @@ fn expand(at: u32, vertex: u32) -> Expanded {
             let x = select(!high_u, high_u, rising);
             out.position = vec3<f32>(cell + vec3<u32>(u32(x), u32(high_v), u32(high_u)));
             out.normal.z = side;
+            out.cross = true;
         } else {
             let d = (lo >> constants::CHUNK_AXIS_SHIFT) & AXIS_MASK;
             let u = (d + 1u) % 3u;
@@ -173,6 +178,18 @@ fn voxel_at(key: u32, uv: vec2<f32>) -> u32 {
     return u | (v << KEY_V_SHIFT) | (key & KEY_PLANE_MASK);
 }
 
+// `render::chunk_material::SKY_VIEW`: a top face sees the whole sky, a wall about half of it and
+// the ground, an underside little. A cross is exempt: its normal is one of its two planes', not the
+// plant's, and a grass tuft or a flower read as lit whichever way it stands.
+fn sky_view(normal: vec3<f32>, cross: bool) -> f32 {
+    if cross {
+        return 1.0;
+    }
+    let side = bitcast<f32>(constants::CHUNK_SKY_VIEW_SIDE);
+    let bottom = bitcast<f32>(constants::CHUNK_SKY_VIEW_BOTTOM);
+    return select(mix(side, bottom, -normal.y), mix(side, 1.0, normal.y), normal.y >= 0.0);
+}
+
 // No area and nothing rasterizes: every corner at one point outside the clip volume.
 const NO_AREA: vec4<f32> = vec4<f32>(2.0, 2.0, 0.5, 1.0);
 
@@ -212,5 +229,6 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     out.material = quad.material;
     out.light = quad.light;
     out.level = quad.level;
+    out.sky_view = sky_view(quad.normal, quad.cross);
     return out;
 }

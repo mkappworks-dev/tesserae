@@ -148,7 +148,9 @@ distance, so it does not scale with Voxel size the way everything physical does.
 
 **Sky light** — the light a Voxel receives from the sky. At full strength it
 falls straight down undimmed, so open ground is lit the same however tall the
-air column above it is.
+air column above it is. A face takes a share of it by which way it faces, as a
+wall sees less of the sky than a top: all of it on a top, less on a side, least
+on an underside.
 
 **Block light** — the light a Voxel receives from Materials that emit. Dims by
 one level per Voxel in every direction, downwards included.
