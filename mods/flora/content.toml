@@ -659,18 +659,18 @@ contact-damage-per-s = 1.0
 
 [[appearance]]
 material = "wood"
-color = [143, 100, 60, 255]
+color = [142, 99, 60, 255]
 texture = "art/wood.png"
 
 [[appearance]]
 material = "leaves"
-color = [74, 108, 51, 255]
+color = [50, 112, 37, 255]
 texture = "art/leaves.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "grass"
-color = [111, 145, 75, 255]
+color = [99, 157, 72, 255]
 texture = "art/grass.png"
 
 [[appearance]]
@@ -691,13 +691,13 @@ variation = "turned-and-patched"
 
 [[appearance]]
 material = "oak_leaves_dark"
-color = [72, 99, 47, 255]
+color = [50, 103, 34, 255]
 texture = "art/oak_leaves_dark.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "oak_leaves_light"
-color = [76, 116, 55, 255]
+color = [49, 121, 41, 255]
 texture = "art/oak_leaves_light.png"
 variation = "turned-and-patched"
 
@@ -708,7 +708,7 @@ texture = "art/oak_sapling.png"
 
 [[appearance]]
 material = "tuft"
-color = [120, 154, 85, 255]
+color = [109, 167, 81, 255]
 texture = "art/tuft.png"
 
 [[appearance]]
@@ -723,7 +723,7 @@ texture = "art/daisy.png"
 
 [[appearance]]
 material = "frond"
-color = [71, 108, 74, 255]
+color = [59, 116, 77, 255]
 texture = "art/frond.png"
 
 [[appearance]]
@@ -760,7 +760,7 @@ texture = "art/pine_sapling.png"
 
 [[appearance]]
 material = "palm_log"
-color = [175, 144, 98, 255]
+color = [174, 143, 97, 255]
 texture = "art/palm_log.png"
 
 [[appearance]]
@@ -792,24 +792,24 @@ texture = "art/acacia_sapling.png"
 
 [[appearance]]
 material = "jungle_log"
-color = [130, 106, 68, 255]
+color = [130, 106, 67, 255]
 texture = "art/jungle_log.png"
 
 [[appearance]]
 material = "jungle_leaves"
-color = [71, 117, 58, 255]
+color = [33, 121, 45, 255]
 texture = "art/jungle_leaves.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "jungle_leaves_dark"
-color = [69, 107, 53, 255]
+color = [30, 112, 36, 255]
 texture = "art/jungle_leaves_dark.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "jungle_leaves_light"
-color = [72, 126, 63, 255]
+color = [36, 131, 55, 255]
 texture = "art/jungle_leaves_light.png"
 variation = "turned-and-patched"
 
@@ -820,7 +820,7 @@ texture = "art/jungle_sapling.png"
 
 [[appearance]]
 material = "swamp_log"
-color = [104, 93, 68, 255]
+color = [104, 92, 68, 255]
 texture = "art/swamp_log.png"
 
 [[appearance]]
@@ -848,24 +848,24 @@ texture = "art/swamp_sapling.png"
 
 [[appearance]]
 material = "apple_log"
-color = [152, 106, 64, 255]
+color = [151, 106, 63, 255]
 texture = "art/apple_log.png"
 
 [[appearance]]
 material = "apple_leaves"
-color = [74, 107, 51, 255]
+color = [49, 112, 36, 255]
 texture = "art/apple_leaves.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_leaves_dark"
-color = [71, 99, 47, 255]
+color = [49, 103, 33, 255]
 texture = "art/apple_leaves_dark.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "apple_leaves_light"
-color = [76, 116, 55, 255]
+color = [47, 121, 40, 255]
 texture = "art/apple_leaves_light.png"
 variation = "turned-and-patched"
 
@@ -876,24 +876,24 @@ texture = "art/apple_sapling.png"
 
 [[appearance]]
 material = "orange_log"
-color = [148, 107, 68, 255]
+color = [148, 107, 67, 255]
 texture = "art/orange_log.png"
 
 [[appearance]]
 material = "orange_leaves"
-color = [67, 101, 51, 255]
+color = [43, 105, 39, 255]
 texture = "art/orange_leaves.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "orange_leaves_dark"
-color = [65, 93, 47, 255]
+color = [43, 97, 36, 255]
 texture = "art/orange_leaves_dark.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "orange_leaves_light"
-color = [69, 109, 55, 255]
+color = [42, 114, 43, 255]
 texture = "art/orange_leaves_light.png"
 variation = "turned-and-patched"
 
@@ -909,19 +909,19 @@ texture = "art/cherry_log.png"
 
 [[appearance]]
 material = "cherry_leaves"
-color = [93, 121, 62, 255]
+color = [72, 126, 47, 255]
 texture = "art/cherry_leaves.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "cherry_leaves_dark"
-color = [89, 111, 57, 255]
+color = [71, 116, 43, 255]
 texture = "art/cherry_leaves_dark.png"
 variation = "turned-and-patched"
 
 [[appearance]]
 material = "cherry_leaves_light"
-color = [96, 131, 67, 255]
+color = [72, 136, 51, 255]
 texture = "art/cherry_leaves_light.png"
 variation = "turned-and-patched"
 
@@ -982,7 +982,7 @@ texture = "art/pine_wood.png"
 
 [[appearance]]
 material = "palm_wood"
-color = [175, 144, 98, 255]
+color = [174, 143, 97, 255]
 texture = "art/palm_wood.png"
 
 [[appearance]]
@@ -992,7 +992,7 @@ texture = "art/acacia_wood.png"
 
 [[appearance]]
 material = "jungle_wood"
-color = [130, 106, 68, 255]
+color = [130, 106, 67, 255]
 texture = "art/jungle_wood.png"
 
 [[appearance]]
@@ -1007,7 +1007,7 @@ texture = "art/orchid.png"
 
 [[appearance]]
 material = "tall_grass"
-color = [115, 153, 86, 255]
+color = [103, 166, 84, 255]
 texture = "art/tall_grass.png"
 
 [[appearance]]
@@ -1017,7 +1017,7 @@ texture = "art/dry_grass.png"
 
 [[appearance]]
 material = "fern"
-color = [92, 132, 78, 255]
+color = [78, 143, 79, 255]
 texture = "art/fern.png"
 
 [[appearance]]
@@ -1037,7 +1037,7 @@ texture = "art/cane.png"
 
 [[appearance]]
 material = "vine"
-color = [84, 115, 61, 255]
+color = [72, 125, 58, 255]
 texture = "art/vine.png"
 
 [[appearance]]

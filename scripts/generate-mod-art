@@ -428,16 +428,20 @@ def end_grain(end):
 
 
 def log(end, bark, crack, salt, moss=None):
-    """A trunk: rings on the cut ends; on the sides, furrows on a 4-texel period that step sideways
-    every 4 rows, and moss as 2x2 clumps over `moss`'s count of the 256 texels."""
+    """A trunk: rings on the cut ends; on the sides, furrows on a 4-texel period that shift sideways
+    by a random step every 4 rows, short dark scars in 1x2 runs, and moss in 1x2 flecks over about
+    half `moss`'s count of the 256 texels. A regular step reads as the same stamp on every block of a
+    trunk."""
     ends = end_grain(end)
 
     def texel(face, x, y):
         if face != 1:
             return ends(face, x, y)
-        if moss and cells(x, y, 2, salt + 1) < moss[1]:
+        if moss and noise(x, y // 2 % (EDGE // 2), salt + 1) < moss[1] // 2:
             return shade(moss[0], spread(x, y, 1, 2, salt + 2, 14))
-        if (x + y // 4) % 4 == 0:
+        if noise(x, y // 2 % (EDGE // 2), salt + 9) > 240:
+            return shade(crack, div(noise(x, y, salt + 10) - 128, 18) + 4)
+        if (x + noise(0, y // 4 % (EDGE // 4), salt + 7)) % 4 == 0:
             return shade(crack, div(noise(x, y, salt) - 128, 18) + 10)
         column = div(cells(x, 0, 1, salt + 5) - 128, 14)
         return shade(bark, column + spread(x, y, 1, 2, salt + 6, 12, 4))
@@ -893,10 +897,11 @@ def from_lch(lightness, chroma, hue):
     return tuple(srgb(row[0] * xyz[0] + row[1] * xyz[1] + row[2] * xyz[2]) for row in RGB)
 
 
-def toward_acacia(rgb):
-    """The colour spec's green target: grass's C* 57 to 38, 5% darker, hue 6 degrees yellower."""
+def green_target(rgb):
+    """The colour spec's green target for grass and ground cover: grass's C* 57 to about 48, its
+    lightness and hue kept."""
     lightness, chroma, hue = lch(rgb)
-    return from_lch(lightness * 0.95, chroma * 0.667, hue - 6.0)
+    return from_lch(lightness, chroma * 0.85, hue)
 
 
 def grown(paint, green=False):
@@ -919,7 +924,7 @@ def grown(paint, green=False):
         c = faces[face][y][x]
         if not c[3]:
             return None
-        return toward_acacia(c[:3]) if green else c[:3]
+        return green_target(c[:3]) if green else c[:3]
 
     return drawn(texel)
 
@@ -1122,12 +1127,12 @@ CHERRY_LOG = log((150, 104, 84), (126, 82, 68), (70, 40, 32), 2276)
 ORANGE_LOG = log((150, 108, 66), (145, 105, 67), (108, 68, 30), 2299)
 APPLE_LOG = log((150, 104, 60), (157, 111, 67), (120, 74, 30), 2322)
 
-OAK_LEAVES = foliage((38, 62, 30), (77, 113, 51), (92, 128, 65), 1000, 72)
-JUNGLE_LEAVES = foliage((38, 68, 35), (76, 125, 60), (88, 141, 74), 1017, 69)
+OAK_LEAVES = foliage((20, 65, 23), (49, 118, 35), (66, 133, 49), 1000, 72)
+JUNGLE_LEAVES = foliage((14, 71, 29), (34, 130, 45), (46, 146, 60), 1017, 69)
 SWAMP_LEAVES = foliage((40, 52, 31), (82, 98, 52), (98, 114, 68), 1034, 70)
-APPLE_LEAVES = foliage((38, 62, 30), (76, 112, 50), (91, 127, 64), 1085, 47)
-ORANGE_LEAVES = foliage((35, 59, 31), (69, 105, 50), (84, 121, 65), 1068, 55)
-CHERRY_LEAVES = foliage((49, 72, 37), (96, 126, 62), (110, 140, 77), 1051, 55)
+APPLE_LEAVES = foliage((20, 65, 23), (48, 117, 34), (64, 132, 48), 1085, 47)
+ORANGE_LEAVES = foliage((18, 61, 26), (41, 109, 37), (58, 126, 52), 1068, 55)
+CHERRY_LEAVES = foliage((33, 75, 29), (73, 131, 44), (88, 145, 61), 1051, 55)
 
 TEXTURES = {
     "strata": {
