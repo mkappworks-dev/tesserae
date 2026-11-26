@@ -37,6 +37,7 @@ pub fn river() -> BiomeDef {
             fog: (146, 176, 196),
         }),
         cave_scale: Some(0.0),
+        cloud_cover: None,
         crop_fields: Vec::new(),
         structures: Vec::new(),
         settlements: Vec::new(),

@@ -39,6 +39,7 @@ fn biome(features: SurfaceFeatures) -> Biome {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: features,
     }
 }

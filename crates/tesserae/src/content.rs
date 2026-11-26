@@ -346,6 +346,9 @@ pub struct SkyFogTarget {
     pub fog: [f32; 3],
     /// A Cave Biome's air, which the hour never tints, rather than the Biomes' pair.
     pub cave: bool,
+    /// The Biomes' cloud cover scale over the Eye's column, blended at borders like the pair; the
+    /// surface Biomes' even underground, since the clouds are above the column.
+    pub cloud_scale: f32,
 }
 
 /// The Game's `sky`, sent once at session start; `None` holds the World at noon.

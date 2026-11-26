@@ -1,4 +1,4 @@
-use crate::tesserae::mods::content::{CurveLight, CurveTint, DayKey, SkyParams};
+use crate::tesserae::mods::content::{CloudLayer, CurveLight, CurveTint, DayKey, SkyParams};
 
 type Rgb = (f32, f32, f32);
 
@@ -98,5 +98,13 @@ pub(crate) fn sky() -> SkyParams {
             blue_hour(18.5),
             night(19.5),
         ]),
+        clouds: Some(CloudLayer {
+            // Above the terrain band's top: Sea level 24 m, 192 m of landforms and 12 m of overhang.
+            altitude_m: 300.0,
+            thickness_m: 30.0,
+            cover: 0.4,
+            wind_direction_deg: 70.0,
+            wind_speed_m_per_s: 3.0,
+        }),
     }
 }

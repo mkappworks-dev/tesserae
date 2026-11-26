@@ -187,6 +187,7 @@ fn biome(name: &str, temperature: f32, surface_features: crate::SurfaceFeatures)
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features,
     }
 }

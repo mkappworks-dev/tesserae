@@ -10,10 +10,10 @@ use tesserae_core::survival::MAX_SURVIVAL_VALUE;
 use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeSettlement, BiomeStructure, BiomeTable, Burn,
     CombustionDef, FluidDef, GroundParams, Heat, MAX_BIOME_SETTLEMENTS, MAX_BIOME_STRUCTURES,
-    MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable, ParamError, Phase, Reactant,
-    ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant,
-    SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables, TreeVariety, Voxel,
-    VoxelUse, WaterParams, WorldgenParams,
+    MAX_BIOMES, MAX_CAVE_SCALE, MAX_CLOUD_SCALE, MAX_ORES, MaterialId, Ore, OreTable, ParamError,
+    Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures, SurfaceFruit,
+    SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables, TreeVariety,
+    Voxel, VoxelUse, WaterParams, WorldgenParams,
 };
 
 use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
@@ -400,6 +400,11 @@ pub fn apply(
         .unwrap_or_default();
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
+    // Here and not in `SkyParams::validate`: only the Game's own terrain says where its band ends.
+    if let (Some(sky), Some(params)) = (&sky, &world) {
+        sky.validate_cloud_base(params.terrain_band_m().1)
+            .map_err(|source| ModError::Sky { id: id(), source })?;
+    }
     if let Some(params) = world {
         // `validate` reads only the lake's level; its fluid waits for `resolve`.
         let water = lake.as_ref().map(|l| WaterParams {
@@ -1091,6 +1096,15 @@ pub fn resolve_biomes(
                     rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CAVE_SCALE}")),
                 }));
             }
+            if let Some(scale) = def.cloud_cover
+                && !(0.0..=MAX_CLOUD_SCALE).contains(&scale)
+            {
+                static RULE: OnceLock<String> = OnceLock::new();
+                return Err(bad(ParamError {
+                    field: "biomes.cloud_cover",
+                    rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CLOUD_SCALE}")),
+                }));
+            }
             if def.surface_features.len() > tesserae_core::MAX_SURFACE_FEATURES {
                 return Err(ModError::TooManyFeatures {
                     id: b.mod_id.clone(),
@@ -1204,6 +1218,7 @@ pub fn resolve_biomes(
                     fog: c.fog.into(),
                 }),
                 cave_scale: def.cave_scale,
+                cloud_cover: def.cloud_cover,
                 surface_features: SurfaceFeatures::new(&features)
                     .and_then(|table| table.with_crop_fields(&crop_fields))
                     .and_then(|table| table.with_structures(&structures))

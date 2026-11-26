@@ -344,6 +344,15 @@ strength is at least the cave floor, 0.0642. `none` is the engine's default
 curve, so a Game that declared a `sky` before looks as it did. A Declaration
 built against the earlier 0.3 text needs a rebuild.
 
+`sky-params` then gained `clouds` last, an optional `cloud-layer` record: the
+base's `altitude-m`, above the top of the Game's terrain band (Sea level plus
+the landforms' height and overhang); `thickness-m`, from 1 to 200; `cover`, from
+0 to 1; and the wind, `wind-direction-deg` (where the clouds drift toward,
+clockwise from north, -Z) and `wind-speed-m-per-s`, from 0 to 50. `none` draws
+no clouds. `biome-def` gained `cloud-cover` after `cave-scale`, an optional
+multiplier from 0 to 4 on the Game's cover over that Biome; `none` is 1. A
+Declaration built against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

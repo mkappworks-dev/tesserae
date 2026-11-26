@@ -56,12 +56,12 @@ pub use climate::{
     Biome, BiomeId, BiomeName, BiomeSelectors, BiomeSettlement, BiomeStructure, BiomeTable,
     CLUMP_SCALE_M, Climate, ClimateParams, Clump, CropField, FIELD_PLOT_M, FIELD_SCALE_M,
     FIELD_SPACING_M, Field, FieldCrop, MAX_BIOME_NAME_BYTES, MAX_BIOME_SETTLEMENTS,
-    MAX_BIOME_STRUCTURES, MAX_BIOMES, MAX_CAVE_SCALE, MAX_CROP_FIELDS, MAX_FIELD_CROPS,
-    MAX_FIELD_STRAYS, MAX_RELIEF_SCALE, MAX_STRATA, MAX_STRATUM_DEPTH_M, MAX_STRUCTURE_SPACING_M,
-    MAX_SURFACE_FEATURES, MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES, MAX_VINE_DENSITY,
-    MAX_VINE_LENGTH_M, SURFACE_FEATURE_SPACING_M, Site, SkyFog, SkyFogBlend, Strata, Stratum,
-    SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind, SurfaceTree,
-    SurfaceVine, SurfaceVines, TreeVariety, VINE_FACES,
+    MAX_BIOME_STRUCTURES, MAX_BIOMES, MAX_CAVE_SCALE, MAX_CLOUD_SCALE, MAX_CROP_FIELDS,
+    MAX_FIELD_CROPS, MAX_FIELD_STRAYS, MAX_RELIEF_SCALE, MAX_STRATA, MAX_STRATUM_DEPTH_M,
+    MAX_STRUCTURE_SPACING_M, MAX_SURFACE_FEATURES, MAX_SURFACE_FRUIT_STAGES, MAX_SURFACE_STAGES,
+    MAX_VINE_DENSITY, MAX_VINE_LENGTH_M, SURFACE_FEATURE_SPACING_M, Site, SkyFog, SkyFogBlend,
+    Strata, Stratum, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant, SurfacePlantKind,
+    SurfaceTree, SurfaceVine, SurfaceVines, TreeVariety, VINE_FACES,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};

@@ -269,6 +269,26 @@ interface content {
         /// between them and across midnight. `none` is the engine's default
         /// curve.
         day-curve: option<list<day-key>>,
+        /// The Cloud layer. `none` draws no clouds.
+        clouds: option<cloud-layer>,
+    }
+
+    /// A slab of cloud that drifts across the sky, lit by the sun and the
+    /// moon. In metres, so the same at every Voxel size.
+    record cloud-layer {
+        /// The slab's base, above the top of the Game's terrain band: Sea
+        /// level plus the landforms' height and overhang.
+        altitude-m: f32,
+        /// From 1 to 200.
+        thickness-m: f32,
+        /// How much of the sky is cloud, from 0 to 1; a Biome's
+        /// `cloud-cover` scales it.
+        cover: f32,
+        /// Where the clouds drift toward, in degrees clockwise from north
+        /// (-Z): 90 drifts east (+X).
+        wind-direction-deg: f32,
+        /// From 0 to 50.
+        wind-speed-m-per-s: f32,
     }
 
     /// How the sky looks at one hour. Colours are linear, each channel from 0
@@ -888,6 +908,11 @@ interface content {
         /// `none` and 1 leave the caves as they are, 0 switches them off. It
         /// blends smoothly across the Biome's border, unlike `ground`.
         cave-scale: option<f32>,
+
+        /// A multiplier on the Game's cloud cover over this Biome, from 0 to 4;
+        /// the cover shown is at most 1. `none` is 1. It blends across the
+        /// Biome's border like `sky-fog`.
+        cloud-cover: option<f32>,
 
         /// At most 16 Materials or Plants the engine stands one Voxel above this
         /// Biome's surface Material, where the column's top is a full Voxel of it

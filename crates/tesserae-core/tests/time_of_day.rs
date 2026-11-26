@@ -7,6 +7,7 @@ const TERRA: SkyParams = SkyParams {
     day_share: 0.7,
     tilt_deg: 25.0,
     day_curve: None,
+    clouds: None,
 };
 
 /// 1200 s of 1/64 s steps.

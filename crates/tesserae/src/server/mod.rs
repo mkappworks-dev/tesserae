@@ -473,6 +473,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            cloud_cover: None,
             surface_features: SurfaceFeatures::new(&[SurfaceFeature::cube(
                 tesserae_core::testgen::fixtures().lantern,
                 4.0,

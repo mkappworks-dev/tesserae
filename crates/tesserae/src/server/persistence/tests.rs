@@ -1801,6 +1801,7 @@ fn declares_biomes(names: [&str; 2]) -> impl FnOnce(&mut crate::server::mods::Lo
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            cloud_cover: None,
             surface_features: Default::default(),
         };
         loaded.world = Some(WorldgenParams {

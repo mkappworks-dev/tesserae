@@ -3,6 +3,7 @@
 //! the Server owns the World's clock (ADR-0002).
 
 use bevy::prelude::*;
+use tesserae_core::flow::STEP_S;
 use tesserae_core::sky::{self, SkyParams, TimeOfDay};
 
 use crate::content::{TimeOfDaySync, WorldSky};
@@ -16,7 +17,7 @@ const NOON: f32 = 12.0;
 
 const MINUTES_PER_DAY: u32 = 24 * 60;
 
-pub(super) fn plugin(app: &mut App) {
+pub(crate) fn plugin(app: &mut App) {
     app.init_session_state::<ClientTimeOfDay>()
         .add_session_message::<WorldSky>()
         .add_session_message::<TimeOfDaySync>()
@@ -84,6 +85,11 @@ impl ClientTimeOfDay {
     /// Fractional logical steps since day 0's midnight.
     pub fn steps(&self) -> f64 {
         self.follow.steps().max(0.0)
+    }
+
+    /// Since day 0's midnight, between steps too, so the clouds drift smoothly.
+    pub fn seconds(&self) -> f64 {
+        self.steps() * STEP_S
     }
 
     /// To the whole step.
@@ -172,6 +178,7 @@ mod tests {
         day_share: 0.7,
         tilt_deg: 25.0,
         day_curve: None,
+        clouds: None,
     };
 
     const RATE: f32 = 64.0;

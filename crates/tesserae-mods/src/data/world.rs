@@ -108,6 +108,29 @@ pub(super) struct Sky {
     day_share: f32,
     tilt_deg: f32,
     day_curve: Option<Vec<DayKey>>,
+    clouds: Option<Clouds>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Clouds {
+    altitude_m: f32,
+    thickness_m: f32,
+    cover: f32,
+    wind_direction_deg: f32,
+    wind_speed_m_per_s: f32,
+}
+
+impl From<Clouds> for content::CloudLayer {
+    fn from(c: Clouds) -> Self {
+        Self {
+            altitude_m: c.altitude_m,
+            thickness_m: c.thickness_m,
+            cover: c.cover,
+            wind_direction_deg: c.wind_direction_deg,
+            wind_speed_m_per_s: c.wind_speed_m_per_s,
+        }
+    }
 }
 
 impl From<Sky> for content::SkyParams {
@@ -120,6 +143,7 @@ impl From<Sky> for content::SkyParams {
             day_curve: s
                 .day_curve
                 .map(|keys| keys.into_iter().map(Into::into).collect()),
+            clouds: s.clouds.map(Into::into),
         }
     }
 }

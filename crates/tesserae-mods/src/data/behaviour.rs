@@ -311,6 +311,8 @@ pub(super) struct Biome {
 
     cave_scale: Option<f32>,
 
+    cloud_cover: Option<f32>,
+
     selectors: Option<Selectors>,
 
     strata: Option<Vec<Stratum>>,
@@ -435,6 +437,8 @@ impl From<Biome> for content::BiomeDef {
             sky_fog: b.sky_fog.map(Into::into),
 
             cave_scale: b.cave_scale,
+
+            cloud_cover: b.cloud_cover,
 
             selectors: b.selectors.map(|s| content::BiomeSelectors {
                 altitude: s.altitude.map(Into::into),

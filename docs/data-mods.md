@@ -119,6 +119,16 @@ linear light; a Cave Biome's air is never tinted. The sun's and moon's light
 fade to nothing at the horizon whatever the curve says. Omitted, the engine's
 default curve is used.
 
+`[world.sky.clouds]` is the Cloud layer: a slab of cloud whose base is at
+`altitude-m`, which must be above the top of the Game's terrain band (Sea level
+plus 192 m of landforms and 12 m of overhang), `thickness-m` thick, from 1 to
+200; `cover`, how much of the sky is cloud, from 0 to 1; and the wind,
+`wind-direction-deg`, where the clouds drift toward in degrees clockwise from
+north (-Z), and `wind-speed-m-per-s`, from 0 to 50. The clouds are lit by the
+sun or the moon, fade into the distance like the terrain and hide the stars; the
+drift is the same for every Player at the same Time of day. Omitted, there are
+no clouds.
+
 An ore is a blob of `vein-size-m` metres at most, in a cube of that edge; a
 `rarity` fraction of the cubes hold one. It replaces rock only, never soil, the
 surface, water or air, inside its depth band and its Biomes. Caves carve the ore
@@ -140,6 +150,11 @@ switches caves off in that Biome. Omitted, the Biome keeps the World's caves.
 Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
 where a cave field meets a solid one. It does nothing in a World without
 `[world.caves]`, and caves still only turn solid into air.
+
+A Biome row may also add `cloud-cover`, a multiplier from 0 to 4 on the Game's
+`[world.sky.clouds]` cover over that Biome, so a dry Biome can have fewer clouds
+and a swamp more; the cover shown is at most 1. Omitted, it is 1. The Server
+blends it across Biome borders as it blends `sky-fog`, and the Client eases it.
 
 A Biome row may also add `surface-features`, at most 16
 `{ material, spacing-m }` or `{ plant, shape, spacing-m }` entries: exactly one

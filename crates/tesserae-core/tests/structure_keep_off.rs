@@ -102,6 +102,7 @@ fn params(features: SurfaceFeatures, structures: bool) -> WorldgenParams {
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            cloud_cover: None,
             surface_features,
         }])
         .unwrap(),

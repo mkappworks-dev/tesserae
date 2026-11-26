@@ -21,6 +21,7 @@ fn params(strata: &[Stratum]) -> WorldgenParams {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: SurfaceFeatures::NONE,
     };
     WorldgenParams {

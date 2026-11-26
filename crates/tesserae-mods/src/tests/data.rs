@@ -232,6 +232,13 @@ fn component() -> Declaration {
                         stars: 0.0,
                     },
                 ]),
+                clouds: Some(content::CloudLayer {
+                    altitude_m: 260.0,
+                    thickness_m: 30.0,
+                    cover: 0.4,
+                    wind_direction_deg: 90.0,
+                    wind_speed_m_per_s: 4.0,
+                }),
             }),
             sea_level_m: 20.0,
             relief_m: 12.0,
@@ -370,6 +377,7 @@ fn component() -> Declaration {
                     fog: (196, 178, 142),
                 }),
                 cave_scale: Some(0.0),
+                cloud_cover: Some(0.5),
                 surface_features: Vec::new(),
                 crop_fields: Vec::new(),
                 structures: Vec::new(),
@@ -390,6 +398,7 @@ fn component() -> Declaration {
                 }),
                 sky_fog: None,
                 cave_scale: Some(1.5),
+                cloud_cover: None,
                 surface_features: vec![content::SurfaceFeature {
                     material: Some("full:wood".into()),
                     plant: None,
@@ -733,6 +742,7 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
         ("[world.movement]", "[world.walking]", "walking"),
         ("[world.climate]", "[world.weather]", "weather"),
         ("stars = 0.2", "stars = 0.2\nglow = 1.0", "glow"),
+        ("cover = 0.4", "cover = 0.4\nrain = 1", "rain"),
         (
             "temperature-size-m = 400.0",
             "temperature-size-m = 400.0\nwind = 1",
@@ -845,6 +855,27 @@ fn shared_validation_bounds_apply_to_data() {
         ("safe-fall-m = 4.5", "safe-fall-m = 1001", "safe-fall-m"),
         ("stars = 0.2", "stars = 1.5", "sky.day_curve[0].stars"),
         ("hour = 12.0", "hour = 5.0", "sky.day_curve[1].hour"),
+        (
+            "altitude-m = 260.0",
+            "altitude-m = 200.0",
+            "sky.clouds.altitude_m",
+        ),
+        (
+            "thickness-m = 30.0",
+            "thickness-m = 0.5",
+            "sky.clouds.thickness_m",
+        ),
+        ("cover = 0.4", "cover = 1.2", "sky.clouds.cover"),
+        (
+            "wind-speed-m-per-s = 4.0",
+            "wind-speed-m-per-s = 60.0",
+            "sky.clouds.wind_speed_m_per_s",
+        ),
+        (
+            "cloud-cover = 0.5",
+            "cloud-cover = 5.0",
+            "biomes.cloud_cover",
+        ),
     ] {
         refused(replace, with, field);
     }

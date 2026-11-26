@@ -49,6 +49,7 @@ fn biome(
         ground,
         sky_fog: None,
         cave_scale,
+        cloud_cover: None,
         surface_features: Default::default(),
     }
 }

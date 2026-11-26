@@ -1069,6 +1069,7 @@ mod tests {
         day_share: 0.7,
         tilt_deg: 25.0,
         day_curve: None,
+        clouds: None,
     };
 
     /// The Server's sky and Time of day, and the Player in the meadow.

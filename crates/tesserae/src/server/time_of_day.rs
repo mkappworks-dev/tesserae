@@ -141,6 +141,7 @@ mod tests {
         day_share: 0.7,
         tilt_deg: 25.0,
         day_curve: None,
+        clouds: None,
     };
 
     fn opened(pin: Option<&str>) -> WorldClock {

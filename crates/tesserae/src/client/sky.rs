@@ -25,7 +25,7 @@ const MAX_STEP_S: f32 = 0.1;
 /// forever.
 const SETTLED: f32 = 0.5 / 255.0;
 
-pub(super) fn plugin(app: &mut App) {
+pub(crate) fn plugin(app: &mut App) {
     app.init_session_state::<Goal>()
         .init_session_state::<EasedAir>()
         .init_session_state::<SkyNow>()
@@ -54,6 +54,7 @@ impl Default for EasedAir {
             sky: haze.sky,
             fog: haze.color,
             underground: 0.0,
+            cloud_scale: 1.0,
         })
     }
 }
@@ -67,6 +68,7 @@ impl Default for SkyNow {
         Self(sky_state(&SkyInputs {
             hour: 12.0,
             moon_phase: 0,
+            seconds: 0.0,
             sky: None,
             air: EasedAir::default().0,
         }))
@@ -97,6 +99,7 @@ fn ease(
         sky: goal.sky,
         fog: goal.fog,
         underground: if goal.cave { 1.0 } else { 0.0 },
+        cloud_scale: goal.cloud_scale,
     };
     if eased.0 == want {
         return;
@@ -108,11 +111,13 @@ fn ease(
         sky: step(now.sky, want.sky, k),
         fog: step(now.fog, want.fog, k),
         underground: now.underground + (want.underground - now.underground) * k,
+        cloud_scale: now.cloud_scale + (want.cloud_scale - now.cloud_scale) * k,
     };
     // All or nothing arrives, so the pair is never apart even for a frame.
     let arrived = within(next.sky, want.sky)
         && within(next.fog, want.fog)
-        && (next.underground - want.underground).abs() < SETTLED;
+        && (next.underground - want.underground).abs() < SETTLED
+        && (next.cloud_scale - want.cloud_scale).abs() < SETTLED;
     eased.0 = if arrived { want } else { next };
 }
 
@@ -128,6 +133,7 @@ fn present(
     let state = sky_state(&SkyInputs {
         hour: clock.hour(),
         moon_phase: clock.moon_phase(),
+        seconds: clock.seconds(),
         sky: clock.sky(),
         air: eased.0,
     });
@@ -194,6 +200,7 @@ mod tests {
         sky: [0.69, 0.63, 0.5],
         fog: [0.77, 0.7, 0.56],
         cave: false,
+        cloud_scale: 0.4,
     };
 
     fn app() -> App {
@@ -268,6 +275,32 @@ mod tests {
     }
 
     #[test]
+    fn the_cloud_scale_eases_with_the_pair_and_arrives_with_it() {
+        let mut app = app();
+        let start = app.world().resource::<EasedAir>().0;
+        assert_eq!(start.cloud_scale, 1.0, "no Biome scales the clouds yet");
+        send(&mut app, DRY);
+        for frame in 0..400 {
+            app.update();
+            let now = app.world().resource::<EasedAir>().0;
+            if now.sky == DRY.sky {
+                assert_eq!(now.cloud_scale, DRY.cloud_scale, "frame {frame}");
+                continue;
+            }
+            let sky = (now.sky[0] - start.sky[0]) / (DRY.sky[0] - start.sky[0]);
+            let clouds = (now.cloud_scale - start.cloud_scale) / (DRY.cloud_scale - 1.0);
+            assert!((sky - clouds).abs() < 1e-3, "frame {frame}");
+        }
+        for _ in 0..1500 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().resource::<EasedAir>().0.cloud_scale,
+            DRY.cloud_scale
+        );
+    }
+
+    #[test]
     fn a_long_frame_cannot_snap_the_air() {
         let mut app = app();
         let start = settings(&app);
@@ -293,6 +326,7 @@ mod tests {
             sky: [0.4, 0.55, 0.78],
             fog: [0.47, 0.63, 0.86],
             cave: false,
+            cloud_scale: 1.0,
         };
         send(&mut app, cold);
         app.update();
@@ -350,6 +384,7 @@ mod tests {
             day_share: 0.7,
             tilt_deg: 25.0,
             day_curve: None,
+            clouds: None,
         };
 
         /// Holds the Client's clock at `when` ("18:30", "4 00:00") under Terra's sky.
@@ -373,11 +408,13 @@ mod tests {
             sky_state(&SkyInputs {
                 hour: clock.hour(),
                 moon_phase: clock.moon_phase(),
+                seconds: clock.seconds(),
                 sky: clock.sky(),
                 air: Air {
                     sky: target.sky,
                     fog: target.fog,
                     underground: if target.cave { 1.0 } else { 0.0 },
+                    cloud_scale: target.cloud_scale,
                 },
             })
         }
@@ -434,8 +471,8 @@ mod tests {
             settle(&mut app);
             let eased = app.world().resource::<EasedAir>().0;
             assert_eq!(
-                (eased.sky, eased.fog, eased.underground),
-                (DRY.sky, DRY.fog, 0.0),
+                (eased.sky, eased.fog, eased.underground, eased.cloud_scale),
+                (DRY.sky, DRY.fog, 0.0, DRY.cloud_scale),
                 "the ease holds the Biome's own colours"
             );
             let once = settings(&app);
@@ -456,6 +493,7 @@ mod tests {
                 sky: [0.04, 0.08, 0.24],
                 fog: [0.08, 0.16, 0.47],
                 cave: true,
+                cloud_scale: 1.0,
             };
             for when in ["12:00", "00:00", "4 00:00"] {
                 let mut app = app();

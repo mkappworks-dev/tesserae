@@ -223,6 +223,8 @@ pub struct Air {
     /// 1 in a Cave Biome's air, which the hour never tints; between while the Client eases from
     /// one to the other.
     pub underground: f32,
+    /// The Eye's Biome's cloud cover scale, from 0 to 4: 1 shows the Game's cover as declared.
+    pub cloud_scale: f32,
 }
 
 /// What the Sky state is computed from.
@@ -232,6 +234,8 @@ pub struct SkyInputs<'a> {
     pub hour: f32,
     /// 0 is full and 4 new.
     pub moon_phase: u8,
+    /// Since day 0's midnight, which the wind's drift is measured from.
+    pub seconds: f64,
     /// `None` is today's noon whatever the hour.
     pub sky: Option<&'a SkyParams>,
     pub air: Air,
@@ -267,6 +271,11 @@ pub struct SkyState {
     /// 1 at full moon, 0 at new.
     pub moon_fullness: f32,
     pub daylight: f32,
+    /// The Game's cover times the Eye's Biome's scale, at most 1; 0 with no Cloud layer.
+    pub cloud_cover: f32,
+    /// How far the wind has carried the clouds, (x, z) in metres, wrapped to
+    /// [`super::CLOUD_PERIOD_M`].
+    pub cloud_drift_m: [f32; 2],
 }
 
 /// [`sky_state_on`] the Game's Day curve, or the engine's default if it declares none.
@@ -315,6 +324,12 @@ pub fn sky_state_on(curve: &[DayKey], inputs: &SkyInputs) -> SkyState {
         )
     };
     let open = 1.0 - inputs.air.underground.clamp(0.0, 1.0);
+    let (cloud_cover, cloud_drift_m) = sky.clouds.map_or((0.0, [0.0; 2]), |clouds| {
+        (
+            (clouds.cover * inputs.air.cloud_scale.max(0.0)).min(1.0),
+            clouds.drift_m(inputs.seconds),
+        )
+    });
     SkyState {
         toward_sun,
         toward_moon,
@@ -330,6 +345,8 @@ pub fn sky_state_on(curve: &[DayKey], inputs: &SkyInputs) -> SkyState {
         moon_phase: inputs.moon_phase,
         moon_fullness: fullness,
         daylight: daylight(sun_deg),
+        cloud_cover,
+        cloud_drift_m,
     }
 }
 
@@ -358,6 +375,8 @@ fn noon(air: Air) -> SkyState {
         moon_phase: 0,
         moon_fullness: 1.0,
         daylight: 1.0,
+        cloud_cover: 0.0,
+        cloud_drift_m: [0.0; 2],
     }
 }
 

@@ -1519,6 +1519,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: Vec::new(),
         crop_fields: Vec::new(),
         structures: Vec::new(),
@@ -1873,6 +1874,62 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
             ModError::Params { id, what, source } => {
                 assert_eq!((id.as_str(), what), ("m", "biome"), "{scale}");
                 assert_eq!(source.field, "biomes.cave_scale", "{scale}");
+            }
+            other => panic!("{scale}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_biomes_cloud_cover_resolves_and_a_bad_one_names_the_mod_that_declared_it() {
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[(
+            "a",
+            with_biomes(
+                &[],
+                vec![
+                    content::BiomeDef {
+                        soundscape: None,
+                        selectors: None,
+                        strata: None,
+                        cloud_cover: Some(0.25),
+                        ..biome("dry", 0.8, 0.1)
+                    },
+                    biome("plain", 0.5, 0.5),
+                ],
+                vec![],
+            ),
+        )],
+    )
+    .unwrap();
+    let scales: Vec<_> = biomes.as_slice().iter().map(|b| b.cloud_cover).collect();
+    assert_eq!(scales, [Some(0.25), None]);
+
+    for scale in [-0.5, 4.5, f32::NAN] {
+        let mut load = Load::new();
+        let bad = load
+            .apply(
+                "m",
+                with_biomes(
+                    &[],
+                    vec![content::BiomeDef {
+                        soundscape: None,
+                        selectors: None,
+                        strata: None,
+                        cloud_cover: Some(scale),
+                        ..biome("odd", 0.5, 0.5)
+                    }],
+                    vec![],
+                ),
+            )
+            .unwrap()
+            .behaviour;
+        match resolve_biomes(&[bad], &load.tables, &load.registry, None).unwrap_err() {
+            ModError::Params { id, what, source } => {
+                assert_eq!((id.as_str(), what), ("m", "biome"), "{scale}");
+                assert_eq!(source.field, "biomes.cloud_cover", "{scale}");
             }
             other => panic!("{scale}: {other:?}"),
         }
@@ -2546,6 +2603,7 @@ fn sky() -> content::SkyParams {
         day_share: 0.7,
         tilt_deg: 25.0,
         day_curve: None,
+        clouds: None,
     }
 }
 
@@ -2569,6 +2627,7 @@ fn a_games_sky_is_kept_and_a_world_without_one_has_none() {
             day_share: 0.7,
             tilt_deg: 25.0,
             day_curve: None,
+            clouds: None,
         })
     );
     assert_eq!(declare_sky(None, true).unwrap().sky, None);
@@ -2678,5 +2737,157 @@ fn a_bad_day_curve_is_a_load_error_naming_the_key_and_field() {
             }
             other => panic!("{field}: {other:?}"),
         }
+    }
+}
+
+fn clouds() -> content::CloudLayer {
+    content::CloudLayer {
+        altitude_m: 300.0,
+        thickness_m: 30.0,
+        cover: 0.4,
+        wind_direction_deg: 70.0,
+        wind_speed_m_per_s: 3.0,
+    }
+}
+
+/// The top of the engine's own terrain band, which `declare_sky` declares under.
+fn terrain_top_m() -> f32 {
+    let (world, _) = crate::convert::world_params(crate::convert::engine_world_params());
+    world.terrain_band_m().1
+}
+
+#[test]
+fn a_games_cloud_layer_is_kept_and_a_sky_without_one_has_no_clouds() {
+    let applied = declare_sky(
+        Some(content::SkyParams {
+            clouds: Some(clouds()),
+            ..sky()
+        }),
+        true,
+    )
+    .unwrap();
+    assert_eq!(
+        applied.sky.unwrap().clouds,
+        Some(tesserae_core::sky::CloudLayer {
+            altitude_m: 300.0,
+            thickness_m: 30.0,
+            cover: 0.4,
+            wind_direction_deg: 70.0,
+            wind_speed_m_per_s: 3.0,
+        })
+    );
+    let without = declare_sky(Some(sky()), true).unwrap().sky.unwrap();
+    assert_eq!(without.clouds, None);
+}
+
+#[test]
+fn a_bad_cloud_layer_is_a_load_error_naming_the_field() {
+    let top = terrain_top_m();
+    let cases: [(content::CloudLayer, &str); 10] = [
+        (
+            content::CloudLayer {
+                altitude_m: top,
+                ..clouds()
+            },
+            "sky.clouds.altitude_m",
+        ),
+        (
+            content::CloudLayer {
+                altitude_m: top - 50.0,
+                ..clouds()
+            },
+            "sky.clouds.altitude_m",
+        ),
+        (
+            content::CloudLayer {
+                altitude_m: f32::NAN,
+                ..clouds()
+            },
+            "sky.clouds.altitude_m",
+        ),
+        (
+            content::CloudLayer {
+                thickness_m: 0.5,
+                ..clouds()
+            },
+            "sky.clouds.thickness_m",
+        ),
+        (
+            content::CloudLayer {
+                thickness_m: 201.0,
+                ..clouds()
+            },
+            "sky.clouds.thickness_m",
+        ),
+        (
+            content::CloudLayer {
+                cover: -0.1,
+                ..clouds()
+            },
+            "sky.clouds.cover",
+        ),
+        (
+            content::CloudLayer {
+                cover: 1.1,
+                ..clouds()
+            },
+            "sky.clouds.cover",
+        ),
+        (
+            content::CloudLayer {
+                wind_speed_m_per_s: 51.0,
+                ..clouds()
+            },
+            "sky.clouds.wind_speed_m_per_s",
+        ),
+        (
+            content::CloudLayer {
+                wind_speed_m_per_s: -1.0,
+                ..clouds()
+            },
+            "sky.clouds.wind_speed_m_per_s",
+        ),
+        (
+            content::CloudLayer {
+                wind_direction_deg: f32::INFINITY,
+                ..clouds()
+            },
+            "sky.clouds.wind_direction_deg",
+        ),
+    ];
+    for (layer, field) in cases {
+        let s = content::SkyParams {
+            clouds: Some(layer),
+            ..sky()
+        };
+        match declare_sky(Some(s), true).unwrap_err() {
+            ModError::Sky { id, source } => {
+                assert_eq!((id.as_str(), source.field().as_str()), ("game", field));
+            }
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+    let edges = [
+        content::CloudLayer {
+            altitude_m: top + 1.0,
+            thickness_m: 1.0,
+            cover: 0.0,
+            wind_direction_deg: -90.0,
+            wind_speed_m_per_s: 0.0,
+        },
+        content::CloudLayer {
+            altitude_m: top + 1.0,
+            thickness_m: 200.0,
+            cover: 1.0,
+            wind_direction_deg: 400.0,
+            wind_speed_m_per_s: 50.0,
+        },
+    ];
+    for layer in edges {
+        let s = content::SkyParams {
+            clouds: Some(layer),
+            ..sky()
+        };
+        assert!(declare_sky(Some(s), true).is_ok(), "{layer:?}");
     }
 }

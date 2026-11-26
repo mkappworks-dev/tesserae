@@ -314,16 +314,19 @@ mod tests {
             day_share: 0.7,
             tilt_deg: 25.0,
             day_curve: None,
+            clouds: None,
         };
         let haze = FogSettings::default();
         let night = sky_state(&SkyInputs {
             hour: 22.0,
             moon_phase: 0,
+            seconds: 0.0,
             sky: Some(&terra),
             air: Air {
                 sky: haze.sky,
                 fog: haze.color,
                 underground: 0.0,
+                cloud_scale: 1.0,
             },
         });
         assert_eq!(night.light_source, LightSource::Moon);
@@ -356,16 +359,19 @@ mod tests {
             day_share: 0.7,
             tilt_deg: 25.0,
             day_curve: None,
+            clouds: None,
         };
         let haze = FogSettings::default();
         sky_state(&SkyInputs {
             hour,
             moon_phase,
+            seconds: 0.0,
             sky: Some(&terra),
             air: Air {
                 sky: haze.sky,
                 fog: haze.color,
                 underground: 0.0,
+                cloud_scale: 1.0,
             },
         })
     }

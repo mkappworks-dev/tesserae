@@ -744,6 +744,9 @@ pub struct SavedBiome {
     /// Absent is the World's own caves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cave_scale: Option<f32>,
+    /// Absent is the Game's own cloud cover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_cover: Option<f32>,
     /// Absent is bare ground, as every Biome was before it could declare features.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub surface_features: Vec<SavedSurfaceFeature>,
@@ -1408,6 +1411,7 @@ fn saved_biome(
         ground: b.ground.map(|g| ground_names(g, mapping)).transpose()?,
         sky_fog: b.sky_fog,
         cave_scale: b.cave_scale,
+        cloud_cover: b.cloud_cover,
         surface_features: b
             .surface_features
             .as_slice()
@@ -1699,6 +1703,7 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
                     .transpose()?,
                 sky_fog: b.sky_fog,
                 cave_scale: b.cave_scale,
+                cloud_cover: b.cloud_cover,
                 surface_features: restored_features(b, &mut variety, mapping)?,
             })
         })

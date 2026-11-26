@@ -122,7 +122,7 @@ pub(crate) fn follow_settings(
 /// has no coarse levels (`lod_distance_m <= view_distance_m`).
 ///
 /// A non-positive or NaN result is floored to [`MIN_REACH_M`].
-fn reach_m(view_distance_m: f32, lod_distance_m: f32) -> f32 {
+pub(crate) fn reach_m(view_distance_m: f32, lod_distance_m: f32) -> f32 {
     // `f32::max` returns the other operand for a NaN, so a NaN distance
     // falls through to the floor instead of poisoning the density.
     view_distance_m.max(lod_distance_m).max(MIN_REACH_M)

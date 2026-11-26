@@ -1,6 +1,8 @@
+use tesserae_core::flow::STEP_S;
 use tesserae_core::sky::{
-    Air, CAVE_FLOOR, DEFAULT_DAY_CURVE, DayKey, Light, LightSource, SkyInputs, SkyParams, SkyState,
-    TimeOfDay, Tint, day_curve_at, linear_to_srgb, sky_state, sky_state_on, srgb_to_linear,
+    Air, CAVE_FLOOR, CLOUD_PERIOD_M, Clock, CloudLayer, DEFAULT_DAY_CURVE, DayKey, Light,
+    LightSource, SkyInputs, SkyParams, SkyState, TimeOfDay, Tint, cloud_noise_origin_m,
+    day_curve_at, linear_to_srgb, sky_state, sky_state_on, srgb_to_linear,
 };
 
 const TERRA: SkyParams = SkyParams {
@@ -9,12 +11,14 @@ const TERRA: SkyParams = SkyParams {
     day_share: 0.7,
     tilt_deg: 25.0,
     day_curve: None,
+    clouds: None,
 };
 
 const DRY: Air = Air {
     sky: [0.69, 0.63, 0.5],
     fog: [0.77, 0.7, 0.56],
     underground: 0.0,
+    cloud_scale: 1.0,
 };
 
 const FULL: u8 = 0;
@@ -24,6 +28,7 @@ fn at(hour: f32, moon_phase: u8, sky: Option<&SkyParams>, air: Air) -> SkyInputs
     SkyInputs {
         hour,
         moon_phase,
+        seconds: 0.0,
         sky,
         air,
     }
@@ -184,6 +189,7 @@ fn a_cave_biomes_air_is_never_tinted() {
         sky: [0.04, 0.08, 0.24],
         fog: [0.08, 0.16, 0.47],
         underground: 1.0,
+        cloud_scale: 1.0,
     };
     for hour in [0.0, 6.0, 12.0, 18.5, 21.0] {
         for phase in [FULL, NEW] {
@@ -498,4 +504,191 @@ fn each_day_curve_rule_names_its_field() {
     assert_eq!(declaring(edges).validate(), Ok(()));
     let sixteen = (0..16).map(|h| key(h as f32)).collect();
     assert_eq!(declaring(sixteen).validate(), Ok(()));
+}
+
+const CLOUDS: CloudLayer = CloudLayer {
+    altitude_m: 300.0,
+    thickness_m: 30.0,
+    cover: 0.4,
+    wind_direction_deg: 90.0,
+    wind_speed_m_per_s: 3.0,
+};
+
+fn clouded() -> SkyParams {
+    SkyParams {
+        clouds: Some(CLOUDS),
+        ..TERRA
+    }
+}
+
+fn clouds_at(sky: &SkyParams, seconds: f64, cloud_scale: f32) -> SkyState {
+    sky_state(&SkyInputs {
+        seconds,
+        ..at(12.0, FULL, Some(sky), Air { cloud_scale, ..DRY })
+    })
+}
+
+#[test]
+fn no_cloud_layer_draws_no_clouds() {
+    for seconds in [0.0, 600.0, 1e7] {
+        let state = clouds_at(&TERRA, seconds, 4.0);
+        assert_eq!((state.cloud_cover, state.cloud_drift_m), (0.0, [0.0; 2]));
+    }
+    let none = sky_state(&at(12.0, FULL, None, DRY));
+    assert_eq!((none.cloud_cover, none.cloud_drift_m), (0.0, [0.0; 2]));
+}
+
+#[test]
+fn the_cover_is_the_games_times_the_biomes_scale_and_at_most_one() {
+    let sky = clouded();
+    assert_eq!(clouds_at(&sky, 0.0, 1.0).cloud_cover, 0.4);
+    assert!(close(clouds_at(&sky, 0.0, 0.5).cloud_cover, 0.2, 1e-6));
+    assert_eq!(clouds_at(&sky, 0.0, 0.0).cloud_cover, 0.0);
+    assert_eq!(clouds_at(&sky, 0.0, 4.0).cloud_cover, 1.0);
+}
+
+#[test]
+fn the_wind_carries_the_clouds_toward_its_direction() {
+    let east = clouds_at(&clouded(), 10.0, 1.0).cloud_drift_m;
+    assert!(
+        close(east[0], 30.0, 1e-3) && close(east[1], 0.0, 1e-3),
+        "{east:?}"
+    );
+    let north = SkyParams {
+        clouds: Some(CloudLayer {
+            wind_direction_deg: 0.0,
+            ..CLOUDS
+        }),
+        ..TERRA
+    };
+    let drift = clouds_at(&north, 10.0, 1.0).cloud_drift_m;
+    // North is -Z, wrapped into the period.
+    assert!(close(drift[0], 0.0, 1e-3), "{drift:?}");
+    assert!(
+        close(drift[1], (CLOUD_PERIOD_M - 30.0) as f32, 1e-2),
+        "{drift:?}"
+    );
+}
+
+#[test]
+fn the_drift_is_wrapped_to_the_noise_period_and_keeps_its_precision_however_long_the_world_runs() {
+    let sky = clouded();
+    let years = 3.0e8;
+    let now = clouds_at(&sky, years, 1.0).cloud_drift_m;
+    let later = clouds_at(&sky, years + 1.0, 1.0).cloud_drift_m;
+    for i in 0..2 {
+        assert!((0.0..CLOUD_PERIOD_M as f32).contains(&now[i]), "{now:?}");
+    }
+    let moved = (later[0] - now[0]).rem_euclid(CLOUD_PERIOD_M as f32);
+    assert!(
+        close(moved, 3.0, 0.01),
+        "one second of a 3 m/s wind: {moved}"
+    );
+}
+
+#[test]
+fn the_same_time_of_day_gives_the_same_clouds_after_a_reopen() {
+    let sky = clouded();
+    let mut clock = Clock::open(Some(sky.clone()), None);
+    for _ in 0..12_345 {
+        clock.step();
+    }
+    let seconds = |clock: &Clock| clock.time().steps() as f64 * STEP_S;
+    let before = clouds_at(&sky, seconds(&clock), 1.0);
+    let reopened = Clock::open(Some(sky.clone()), clock.saved());
+    let after = clouds_at(&sky, seconds(&reopened), 1.0);
+    assert_eq!(after.cloud_drift_m, before.cloud_drift_m);
+    assert_eq!(after.cloud_cover, before.cloud_cover);
+}
+
+#[test]
+fn the_cloud_field_in_metres_is_the_same_at_any_voxel_size() {
+    let drift = clouds_at(&clouded(), 4321.0, 1.0).cloud_drift_m;
+    // One Eye, as Voxel indices at 1 m and at 0.25 m.
+    let at_size = |voxel_m: f32, index: [i32; 2]| index.map(|i| i as f32 * voxel_m);
+    let coarse = cloud_noise_origin_m(at_size(1.0, [1_000, -250_000]), drift);
+    let fine = cloud_noise_origin_m(at_size(0.25, [4_000, -1_000_000]), drift);
+    assert_eq!(coarse, fine);
+    for i in 0..2 {
+        assert!(
+            (0.0..CLOUD_PERIOD_M as f32).contains(&coarse[i]),
+            "{coarse:?}"
+        );
+    }
+}
+
+#[test]
+fn each_cloud_rule_names_its_field_and_the_edges_pass() {
+    let with = |edit: fn(&mut CloudLayer)| {
+        let mut layer = CLOUDS;
+        edit(&mut layer);
+        SkyParams {
+            clouds: Some(layer),
+            ..TERRA
+        }
+    };
+    let cases: [(fn(&mut CloudLayer), &str); 8] = [
+        (|c| c.altitude_m = f32::NAN, "sky.clouds.altitude_m"),
+        (|c| c.thickness_m = 0.9, "sky.clouds.thickness_m"),
+        (|c| c.thickness_m = 200.5, "sky.clouds.thickness_m"),
+        (|c| c.cover = -0.01, "sky.clouds.cover"),
+        (|c| c.cover = 1.01, "sky.clouds.cover"),
+        (
+            |c| c.wind_direction_deg = f32::NAN,
+            "sky.clouds.wind_direction_deg",
+        ),
+        (
+            |c| c.wind_speed_m_per_s = 50.5,
+            "sky.clouds.wind_speed_m_per_s",
+        ),
+        (
+            |c| c.wind_speed_m_per_s = -0.5,
+            "sky.clouds.wind_speed_m_per_s",
+        ),
+    ];
+    for (edit, field) in cases {
+        assert_eq!(with(edit).validate().unwrap_err().field(), field);
+    }
+    let edges: [fn(&mut CloudLayer); 4] = [
+        |c| c.thickness_m = 1.0,
+        |c| c.thickness_m = 200.0,
+        |c| {
+            c.cover = 0.0;
+            c.wind_speed_m_per_s = 0.0;
+        },
+        |c| {
+            c.cover = 1.0;
+            c.wind_speed_m_per_s = 50.0;
+        },
+    ];
+    for edit in edges {
+        assert_eq!(with(edit).validate(), Ok(()));
+    }
+}
+
+#[test]
+fn the_cloud_base_must_stand_above_the_terrain_bands_top() {
+    // Terra's band: Sea level 24 m, 192 m of landforms and 12 m of overhang.
+    let params = tesserae_core::WorldgenParams {
+        sea_level_m: 24.0,
+        ..tesserae_core::WorldgenParams::default()
+    };
+    let top = params.terrain_band_m().1;
+    assert_eq!(top, 228.0);
+    let at_base = |altitude_m| SkyParams {
+        clouds: Some(CloudLayer {
+            altitude_m,
+            ..CLOUDS
+        }),
+        ..TERRA
+    };
+    assert_eq!(at_base(300.0).validate_cloud_base(top), Ok(()));
+    for low in [228.0, 100.0] {
+        assert_eq!(
+            at_base(low).validate_cloud_base(top).unwrap_err().field(),
+            "sky.clouds.altitude_m",
+            "{low}"
+        );
+    }
+    assert_eq!(TERRA.validate_cloud_base(top), Ok(()), "no clouds, no base");
 }

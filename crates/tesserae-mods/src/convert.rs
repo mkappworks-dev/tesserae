@@ -167,6 +167,13 @@ pub(crate) fn sky_params(s: &content::SkyParams) -> tesserae_core::sky::SkyParam
             .day_curve
             .as_ref()
             .map(|keys| keys.iter().map(day_key).collect()),
+        clouds: s.clouds.map(|c| tesserae_core::sky::CloudLayer {
+            altitude_m: c.altitude_m,
+            thickness_m: c.thickness_m,
+            cover: c.cover,
+            wind_direction_deg: c.wind_direction_deg,
+            wind_speed_m_per_s: c.wind_speed_m_per_s,
+        }),
     }
 }
 

@@ -304,6 +304,7 @@ fn mixed_forest() -> WorldgenParams {
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            cloud_cover: None,
             surface_features: SurfaceFeatures::new(&[feature(short), feature(tall)]).unwrap(),
         }])
         .unwrap(),
@@ -331,6 +332,7 @@ fn forest_of(tree: SurfaceTree, variety: &TreeVariety) -> WorldgenParams {
                 ground: None,
                 sky_fog: None,
                 cave_scale: None,
+                cloud_cover: None,
                 surface_features: SurfaceFeatures::new(&[tree]).unwrap(),
             }],
             variety,

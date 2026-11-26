@@ -208,7 +208,7 @@ fn fragment(in: SkyOutput) -> @location(0) vec4<f32> {
     let glow = risen * (GLOW_WIDE * pow(toward, GLOW_WIDE_POWER) + GLOW_TIGHT * pow(toward, GLOW_TIGHT_POWER));
     colour = mix(colour + seen(GLOW_COLOUR * glow), seen(SUN_COLOUR), disc);
 
-    // Clouds (ticket 07) need nothing here: they draw over the sky in the blended pass.
+    // The Cloud layer draws over all of this in the blended pass; see clouds.rs.
     let haze = 1.0 - exp(-max(direction.y, 0.0) * MOON_HAZE);
     if haze <= 0.0 {
         return vec4<f32>(colour, 1.0);
