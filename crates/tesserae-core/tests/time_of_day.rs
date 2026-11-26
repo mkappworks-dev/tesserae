@@ -1,4 +1,6 @@
-use tesserae_core::sky::{Clock, Pin, SkyParams, TimeOfDay, daylight, sun_elevation_deg};
+use tesserae_core::sky::{
+    Clock, MINUTES_PER_DAY, Pin, SkyParams, TimeOfDay, daylight, sun_elevation_deg,
+};
 
 /// Terra's: a 20-minute day, the sun up 0.7 of it, a World starting at 07:00, the path 25° south.
 const TERRA: SkyParams = SkyParams {
@@ -311,4 +313,74 @@ fn each_sky_rule_names_its_field() {
         .is_ok()
     );
     assert!(tilt(0.0).validate().is_ok() && tilt(60.0).validate().is_ok());
+}
+
+fn clock_at(day: u64, hour: f32) -> Clock {
+    Clock::open(Some(TERRA), Some(TimeOfDay::on_day(day, hour, &TERRA)))
+}
+
+#[test]
+fn setting_an_hour_still_ahead_lands_today_and_one_past_lands_tomorrow() {
+    let mut clock = clock_at(3, 19.7);
+    assert!(clock.set_forward(22 * 60));
+    assert_eq!(clock.time(), TimeOfDay::on_day(3, 22.0, &TERRA));
+    assert!(clock.set_forward(6 * 60));
+    assert_eq!(clock.time(), TimeOfDay::on_day(4, 6.0, &TERRA));
+    assert!(clock.set_forward(0));
+    assert_eq!(clock.time(), TimeOfDay::on_day(5, 0.0, &TERRA));
+}
+
+#[test]
+fn setting_the_hour_it_reads_now_moves_a_whole_day_on() {
+    let mut clock = clock_at(1, 12.0);
+    let before = clock.time();
+    assert!(clock.set_forward(12 * 60));
+    assert_eq!(clock.time().steps(), before.steps() + TERRA_DAY);
+}
+
+#[test]
+fn the_moon_phase_follows_the_day_a_set_time_lands_on() {
+    // Night 3 is the evening of day 3; past noon of day 4 it is night 4, the new moon.
+    let mut clock = clock_at(3, 20.0);
+    assert_eq!(clock.moon_phase(), 3);
+    assert!(clock.set_forward(18 * 60));
+    assert_eq!(clock.time().day(&TERRA), 4);
+    assert_eq!(clock.moon_phase(), 4);
+}
+
+#[test]
+fn every_minute_set_reads_back_as_that_minute_under_any_day_share() {
+    for s in [0.1, 0.5, 0.7, 0.9] {
+        let sky = share(s);
+        let from = TimeOfDay::on_day(2, 23.99, &sky);
+        for minute in 0..MINUTES_PER_DAY {
+            let at = from.next_at(minute, &sky);
+            assert_eq!(at.minute(&sky), minute, "{s} {minute}");
+            assert_eq!(at.day(&sky), 3, "{s} {minute}");
+        }
+    }
+}
+
+#[test]
+fn with_the_cycle_off_a_set_time_holds() {
+    let mut clock = clock_at(0, 7.0);
+    clock.set_cycle(false);
+    assert!(clock.set_forward(18 * 60));
+    let set = clock.time();
+    for _ in 0..1000 {
+        clock.step();
+    }
+    assert_eq!(clock.time(), set);
+    assert!(close(clock.hour(), 18.0));
+}
+
+#[test]
+fn a_clock_with_no_sky_or_a_minute_past_the_day_is_not_set() {
+    let mut none = Clock::open(None, None);
+    assert!(!none.set_forward(6 * 60));
+    assert_eq!(none.hour(), 12.0);
+    let mut clock = clock_at(0, 7.0);
+    let before = clock.time();
+    assert!(!clock.set_forward(MINUTES_PER_DAY));
+    assert_eq!(clock.time(), before);
 }

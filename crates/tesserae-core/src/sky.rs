@@ -46,6 +46,8 @@ const TWILIGHT_DEG: f32 = 10.0;
 /// Phase 0 is full and half of this is new.
 pub const MOON_PHASES: i64 = 8;
 
+pub const MINUTES_PER_DAY: u16 = 24 * 60;
+
 /// What a Game declares of its day.
 #[derive(Clone, PartialEq, Debug)]
 pub struct SkyParams {
@@ -359,6 +361,28 @@ impl TimeOfDay {
         let night = if self.hour(sky) >= NOON { day } else { day - 1 };
         night.rem_euclid(MOON_PHASES) as u8
     }
+
+    /// The minute of the day the clock reads, from 00:00, as the Menu shows it.
+    pub fn minute(self, sky: &SkyParams) -> u16 {
+        (self.hour(sky) * 60.0).floor() as u16 % MINUTES_PER_DAY
+    }
+
+    /// The first time after this one that reads `minute`: today while it is still ahead, else
+    /// tomorrow, so the day count never runs back. `minute` is below [`MINUTES_PER_DAY`].
+    pub fn next_at(self, minute: u16, sky: &SkyParams) -> Self {
+        let hour = f32::from(minute) / 60.0;
+        let today = self.day(sky);
+        let mut at = Self::on_day(today, hour, sky);
+        if at.0 <= self.0 {
+            at = Self::on_day(today + 1, hour, sky);
+        }
+        // A step rounded to the nearest can read a hair under the minute, which the Menu floors.
+        let day = at.day(sky);
+        while at.minute(sky) < minute && Self(at.0 + 1).day(sky) == day {
+            at.0 += 1;
+        }
+        at
+    }
 }
 
 /// The sun's angle along its path is uniform in hours; the path leans `tilt_deg` toward the
@@ -449,6 +473,19 @@ impl Clock {
 
     pub fn cycle(&self) -> bool {
         self.cycle
+    }
+
+    /// Moves on to the next time the clock reads `minute` of the day ([`TimeOfDay::next_at`]); with
+    /// the Daylight cycle off it then holds there. `false`, unmoved, with no sky or no such minute.
+    pub fn set_forward(&mut self, minute: u16) -> bool {
+        let Some(sky) = &self.sky else {
+            return false;
+        };
+        if minute >= MINUTES_PER_DAY {
+            return false;
+        }
+        self.time = self.time.next_at(minute, sky);
+        true
     }
 
     /// Stops the clock at `time` whatever the Daylight cycle, for a capture.

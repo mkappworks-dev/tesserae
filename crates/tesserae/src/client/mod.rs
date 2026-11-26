@@ -77,6 +77,7 @@ mod structure;
 mod structure_menu;
 mod theme;
 mod tile_preview;
+mod time_dialog;
 pub(crate) mod time_of_day;
 mod tool;
 mod tool_panel;
@@ -133,7 +134,12 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
-    app.add_plugins((hand_anim::plugin, hand_fx::plugin, place_settle::plugin));
+    app.add_plugins((
+        hand_anim::plugin,
+        hand_fx::plugin,
+        place_settle::plugin,
+        time_dialog::plugin,
+    ));
     app.add_plugins((menu_blur::plugin, held_item::plugin, viewmodel::plugin));
     // In-game screens on the frame need it whether or not the launcher ran.
     frame::plugin(app);

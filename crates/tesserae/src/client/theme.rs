@@ -439,6 +439,85 @@ pub(super) const STATUS_LABEL_TRACKING: f32 = 2.6;
 pub(super) const TEXT_STATUS_TIME: f32 = 19.0;
 pub(super) const TEXT_STATUS_GAME: f32 = 15.0;
 
+/// Creative's Time of day dialog: its hour tiles, the Custom row and its ◀ ▶ and field.
+pub(super) const TIME_TILE: Color = Color::srgb_u8(0x16, 0x17, 0x1a);
+pub(super) const TIME_TILE_EDGE: Color = Color::srgb_u8(0x3a, 0x3c, 0x41);
+pub(super) const TIME_TILE_ON: Color = Color::srgb_u8(0xee, 0xf3, 0xe4);
+pub(super) const TIME_TILE_SOFT: Color = Color::srgb_u8(0xb9, 0xba, 0xbe);
+pub(super) const TIME_STEP: Color = Color::srgb_u8(0x22, 0x23, 0x27);
+pub(super) const TIME_FIELD: Color = Color::srgb_u8(0x0d, 0x0e, 0x10);
+pub(super) const TIME_STAR: Color = Color::srgb_u8(0xdf, 0xe6, 0xf2);
+pub(super) const TIME_GLOW_ALPHA: f32 = 0.25;
+
+/// A Time of day tile's scene, on the prototype's 160 by 80 canvas: its sky from top to bottom,
+/// the sun or moon at `body` (x, y, radius), and the far and near hills.
+pub(super) struct TimeScene {
+    pub sky: [Color; 3],
+    pub body: [f32; 3],
+    pub body_ink: Color,
+    /// The sun's; the moon has none.
+    pub glow: bool,
+    pub hill: Color,
+    pub near: Color,
+    pub stars: bool,
+}
+
+/// Sunrise, Noon, Sunset and Midnight, coloured from Terra's Day curve.
+pub(super) const TIME_SCENES: [TimeScene; 4] = [
+    TimeScene {
+        sky: [
+            Color::srgb_u8(0x7d, 0x8f, 0xb3),
+            Color::srgb_u8(0xe9, 0xb4, 0x8c),
+            Color::srgb_u8(0xf6, 0xd7, 0xa0),
+        ],
+        body: [30.0, 44.0, 9.0],
+        body_ink: Color::srgb_u8(0xff, 0xf1, 0xc9),
+        glow: true,
+        hill: Color::srgb_u8(0x4d, 0x5a, 0x4a),
+        near: Color::srgb_u8(0x3a, 0x45, 0x38),
+        stars: false,
+    },
+    TimeScene {
+        sky: [
+            Color::srgb_u8(0x4f, 0x86, 0xcf),
+            Color::srgb_u8(0x8f, 0xb6, 0xe6),
+            Color::srgb_u8(0xcf, 0xe1, 0xf2),
+        ],
+        body: [80.0, 16.0, 8.0],
+        body_ink: Color::srgb_u8(0xff, 0xfb, 0xe8),
+        glow: true,
+        hill: Color::srgb_u8(0x5f, 0x8f, 0x4e),
+        near: Color::srgb_u8(0x4a, 0x7a, 0x3d),
+        stars: false,
+    },
+    TimeScene {
+        sky: [
+            Color::srgb_u8(0x4f, 0x5b, 0x86),
+            Color::srgb_u8(0xd4, 0x87, 0x6a),
+            Color::srgb_u8(0xf2, 0xb0, 0x6e),
+        ],
+        body: [130.0, 44.0, 9.0],
+        body_ink: Color::srgb_u8(0xff, 0xd9, 0xa0),
+        glow: true,
+        hill: Color::srgb_u8(0x4f, 0x4a, 0x48),
+        near: Color::srgb_u8(0x3a, 0x35, 0x36),
+        stars: false,
+    },
+    TimeScene {
+        sky: [
+            Color::srgb_u8(0x07, 0x0b, 0x18),
+            Color::srgb_u8(0x10, 0x1a, 0x33),
+            Color::srgb_u8(0x1d, 0x2a, 0x48),
+        ],
+        body: [112.0, 18.0, 6.0],
+        body_ink: Color::srgb_u8(0xe9, 0xee, 0xf6),
+        glow: false,
+        hill: Color::srgb_u8(0x14, 0x1a, 0x22),
+        near: Color::srgb_u8(0x0d, 0x11, 0x17),
+        stars: true,
+    },
+];
+
 // Pass D: the Inventory, the Catalogue and the quick Layout panel.
 pub(super) const ITEM_SURFACE: Color = Color::srgb_u8(0x0b, 0x0b, 0x0d);
 const ITEM_ROW_RULE: Color = Color::srgb_u8(0x34, 0x34, 0x3c);

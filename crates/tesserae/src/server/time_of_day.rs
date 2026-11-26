@@ -5,7 +5,10 @@ use bevy::prelude::*;
 use tesserae_core::flow::Step;
 use tesserae_core::sky::{Clock, Pin};
 
+use super::death::PlayerIntents;
 use super::fluids::{FluidSim, simulate};
+use super::game_mode::PlayerMode;
+use super::player::Player;
 use crate::content::{TimeOfDaySync, WorldSky};
 use crate::session::SessionApp;
 
@@ -16,12 +19,21 @@ const RESEND_S: f64 = 5.0;
 /// A time further than this from where the last message's time and rate put it was set, not run.
 const SET_TOLERANCE_S: f64 = 1.0;
 
+/// A Client's request to move the clock on to the next time it reads this minute of the day, from
+/// 00:00. The Server grants it only to a Player in Creative in a World with a `sky`.
+#[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SetTimeOfDay {
+    pub minute: u16,
+}
+
 #[derive(Resource)]
 pub struct WorldClock {
     clock: Clock,
     /// The logical step the clock last caught up with; `None` until the first, so a restored
     /// simulation's step count is never mistaken for time passed.
     seen: Option<Step>,
+    /// Counts the times the clock was set, so a set clock is unsaved until a commit holds it.
+    revision: u64,
 }
 
 impl Default for WorldClock {
@@ -43,7 +55,11 @@ impl WorldClock {
                 (Some(_), None) => {}
             }
         }
-        Self { clock, seen: None }
+        Self {
+            clock,
+            seen: None,
+            revision: 0,
+        }
     }
 
     /// Under `dev` and `profiling`, held where `TESSERAE_TIME_OF_DAY` asks.
@@ -58,15 +74,25 @@ impl WorldClock {
     pub fn clock(&self) -> &Clock {
         &self.clock
     }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<WorldClock>()
         .add_session_message::<WorldSky>()
         .add_session_message::<TimeOfDaySync>()
+        .add_player_intent::<SetTimeOfDay>()
         .add_session_systems(
             FixedPreUpdate,
-            advance.after(simulate).before(super::persistence::drive),
+            (
+                set.run_if(super::persistence::playing),
+                advance.after(simulate),
+            )
+                .chain()
+                .before(super::persistence::drive),
         )
         .add_session_systems(Update, publish);
 }
@@ -78,6 +104,20 @@ fn advance(sim: Option<Res<FluidSim>>, mut clock: ResMut<WorldClock>) {
     if let Some(seen) = clock.seen.replace(now) {
         for _ in seen..now {
             clock.clock.step();
+        }
+    }
+}
+
+/// Refused silently: the Client offers the request only where it is granted.
+fn set(
+    mut requests: MessageReader<SetTimeOfDay>,
+    players: Query<&PlayerMode, With<Player>>,
+    mut clock: ResMut<WorldClock>,
+) {
+    let creative = players.single().is_ok_and(|mode| !mode.survival());
+    for request in requests.read() {
+        if creative && clock.clock.set_forward(request.minute) {
+            clock.revision += 1;
         }
     }
 }
@@ -292,5 +332,88 @@ mod tests {
         }
         // Over a second behind the rate sent, at 8 frames a second.
         assert_eq!(at, Some(9));
+    }
+
+    fn player(app: &mut App, mode: super::super::game_mode::GameMode) {
+        app.world_mut()
+            .spawn((Player::at(Vec3::ZERO), PlayerMode(mode)));
+    }
+
+    fn ask(app: &mut App, hour: u16, minute: u16) -> Vec<TimeOfDaySync> {
+        app.world_mut().write_message(SetTimeOfDay {
+            minute: hour * 60 + minute,
+        });
+        tick(app)
+    }
+
+    #[test]
+    fn creative_moves_the_clock_on_to_the_hour_today_or_else_tomorrow_and_sends_it_at_once() {
+        use super::super::game_mode::GameMode;
+        let mut app = app(opened(None));
+        player(&mut app, GameMode::Creative);
+        tick(&mut app);
+        let sunset = TimeOfDay::on_day(0, 18.0, &SKY);
+        assert_eq!(
+            ask(&mut app, 18, 0),
+            [TimeOfDaySync {
+                time: sunset,
+                steps_per_s: 64.0,
+            }]
+        );
+        assert_eq!(clock(&mut app).clock().moon_phase(), 0);
+        assert_eq!(clock(&mut app).revision(), 1);
+        let sunrise = TimeOfDay::on_day(1, 6.0, &SKY);
+        assert_eq!(ask(&mut app, 6, 0)[0].time, sunrise, "already past today");
+        assert_eq!(clock(&mut app).clock().moon_phase(), 0);
+        assert_eq!(
+            ask(&mut app, 14, 30)[0].time,
+            TimeOfDay::on_day(1, 14.5, &SKY)
+        );
+        assert_eq!(
+            clock(&mut app).clock().moon_phase(),
+            1,
+            "the next day's night"
+        );
+        assert_eq!(clock(&mut app).revision(), 3);
+    }
+
+    #[test]
+    fn a_survival_player_or_a_world_with_no_sky_is_refused() {
+        use super::super::game_mode::GameMode;
+        let mut app = app(opened(None));
+        player(&mut app, GameMode::Survival);
+        tick(&mut app);
+        let before = clock(&mut app).clock().time();
+        assert!(ask(&mut app, 18, 0).is_empty());
+        assert_eq!(clock(&mut app).clock().time(), before);
+        assert_eq!(clock(&mut app).revision(), 0);
+
+        let mut app = app_with_no_sky();
+        player(&mut app, GameMode::Creative);
+        tick(&mut app);
+        assert!(ask(&mut app, 18, 0).is_empty());
+        assert_eq!(clock(&mut app).clock().hour(), 12.0);
+        assert_eq!(clock(&mut app).revision(), 0);
+    }
+
+    fn app_with_no_sky() -> App {
+        app(WorldClock::default())
+    }
+
+    #[test]
+    fn with_the_cycle_off_the_clock_holds_at_the_hour_set() {
+        use super::super::game_mode::GameMode;
+        let mut app = app(opened(None));
+        player(&mut app, GameMode::Creative);
+        clock(&mut app).clock.set_cycle(false);
+        tick(&mut app);
+        let set = ask(&mut app, 21, 15);
+        assert_eq!(set[0].steps_per_s, 0.0);
+        for _ in 0..40 {
+            run(&mut app);
+        }
+        let held = clock(&mut app).clock().clone();
+        assert_eq!(held.time(), TimeOfDay::on_day(0, 21.25, &SKY));
+        assert_eq!(held.time().minute(&SKY), 21 * 60 + 15);
     }
 }

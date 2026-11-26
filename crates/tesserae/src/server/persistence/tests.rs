@@ -2755,6 +2755,47 @@ fn a_world_created_with_the_daylight_cycle_off_opens_at_the_start_hour_and_stays
 }
 
 #[test]
+fn a_time_set_in_creative_is_unsaved_until_a_save_holds_it_and_survives_a_reopen() {
+    use crate::server::time_of_day::SetTimeOfDay;
+    let worlds = Directory::new();
+    let created = library::Sidecar {
+        daylight_cycle: false,
+        ..details("Dusk", 7, 1.0)
+    };
+    let path = library::create(&worlds.0, &created).unwrap();
+    let mut rig = reopen(&path);
+    rig.settled_save();
+    assert!(!rig.app.world().resource::<SaveStatus>().dirty);
+    rig.app
+        .world_mut()
+        .write_message(SetTimeOfDay { minute: 18 * 60 });
+    rig.tick();
+    let set = clock(&rig);
+    let sky = set.sky().unwrap().clone();
+    assert_eq!(set.time(), TimeOfDay::on_day(0, 18.0, &sky));
+    assert!(
+        rig.app.world().resource::<SaveStatus>().dirty,
+        "a held clock set is a change"
+    );
+    for _ in 0..200 {
+        rig.tick();
+    }
+    assert_eq!(
+        clock(&rig).time(),
+        set.time(),
+        "the cycle is off, so it holds"
+    );
+    rig.settled_save();
+    assert!(!rig.app.world().resource::<SaveStatus>().dirty);
+    drop(rig);
+    let commit = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(commit.time_of_day, Some(set.time().steps()));
+    let reopened = clock(&reopen(&path));
+    assert_eq!(reopened.time(), set.time());
+    assert!(!reopened.runs());
+}
+
+#[test]
 fn the_daylight_cycle_from_edit_world_applies_at_the_next_open_and_survives_a_reopen() {
     let worlds = Directory::new();
     let path = with_biomes(&worlds, "Cycle", None);

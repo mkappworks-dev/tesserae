@@ -272,6 +272,7 @@ struct Completed {
     entities: u64,
     containers: u64,
     map: u64,
+    clock: u64,
     details_completed: bool,
     #[cfg(feature = "profiling")]
     write_ms: f64,
@@ -312,6 +313,8 @@ pub struct Persistence {
     initial_containers: Vec<save::containers::SavedContainer>,
     initial_looted: Vec<[i32; 3]>,
     saved_map: u64,
+    /// The [`WorldClock::revision`] last committed: a set clock is a change even while it holds.
+    saved_clock: u64,
     initial_map: Option<save::map::SavedMap>,
     /// The encoding of the Map at the revision it was made, reused while the Map has not moved.
     map_section: Option<(u64, save::map::SavedMap)>,
@@ -560,6 +563,7 @@ impl Persistence {
             initial_containers,
             initial_looted,
             saved_map: 0,
+            saved_clock: 0,
             initial_map,
             map_section: None,
             map_tiles: Default::default(),
@@ -764,6 +768,7 @@ pub(super) fn drive(
     let map = held_player
         .get::<super::map::PlayerMap>()
         .expect("required by Player");
+    let clock_revision = clock.as_ref().map_or(0, |c| c.revision());
     let now = time.elapsed_secs_f64();
     p.elapsed += (now - p.last_clock).max(0.0);
     p.last_clock = now;
@@ -791,6 +796,7 @@ pub(super) fn drive(
                 p.saved_entities = done.entities;
                 p.saved_containers = done.containers;
                 p.saved_map = done.map;
+                p.saved_clock = done.clock;
                 if done.details_completed
                     && let Some((_, d)) = p.details.as_mut()
                 {
@@ -807,6 +813,7 @@ pub(super) fn drive(
                     && p.saved_entities == entities.revision()
                     && p.saved_containers == containers.revision()
                     && p.saved_map == map.revision()
+                    && p.saved_clock == clock_revision
                 {
                     leave.now();
                 } else if status.quitting {
@@ -833,7 +840,8 @@ pub(super) fn drive(
         || p.saved_simulation != sim.revision
         || p.saved_entities != entities.revision()
         || p.saved_containers != containers.revision()
-        || p.saved_map != map.revision();
+        || p.saved_map != map.revision()
+        || p.saved_clock != clock_revision;
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
         if status.dirty && !status.quitting {
@@ -1024,6 +1032,7 @@ pub(super) fn drive(
             entities: entities_revision,
             containers: containers_revision,
             map: map_revision,
+            clock: clock_revision,
             #[cfg(feature = "profiling")]
             write_ms: write_started.elapsed().as_secs_f64() * 1e3,
         }

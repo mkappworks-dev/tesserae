@@ -123,6 +123,11 @@ impl ClientTimeOfDay {
         sky::daylight(sky::sun_elevation_deg(self.hour(), tilt))
     }
 
+    /// Whether the clock moves: `false` with the Daylight cycle off or no sky.
+    pub fn runs(&self) -> bool {
+        self.follow.rate > 0.0
+    }
+
     /// 0 is full and 4 new.
     pub fn moon_phase(&self) -> u8 {
         self.sky

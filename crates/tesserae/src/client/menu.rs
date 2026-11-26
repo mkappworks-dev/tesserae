@@ -25,7 +25,9 @@ use crate::session::SessionApp;
 pub(super) struct Menu {
     pub(super) open: bool,
     /// World details, shown over the Menu.
-    details: bool,
+    pub(super) details: bool,
+    /// Creative's Time of day dialog, shown over the Menu.
+    pub(super) time: bool,
 }
 
 impl Menu {
@@ -34,6 +36,7 @@ impl Menu {
         Menu {
             open: true,
             details,
+            time: false,
         }
     }
 }
@@ -94,6 +97,8 @@ pub(super) enum Choice {
     Resume,
     Inventory,
     Map,
+    /// Creative's Time of day; `time_dialog` opens it.
+    TimeOfDay,
     Settings,
     Details,
     CloseDetails,
@@ -105,7 +110,7 @@ pub(super) enum Choice {
 }
 
 #[derive(Component)]
-struct MenuRoot;
+pub(super) struct MenuRoot;
 
 /// "Day 3, 19:42" under "You are here".
 #[derive(Component)]
@@ -176,6 +181,8 @@ pub(super) fn toggle(
             actions.consume_cancel();
             if menu.details {
                 menu.details = false;
+            } else if menu.time {
+                menu.time = false;
             } else {
                 resume(&mut menu, &mut cursor.into_inner());
             }
@@ -239,10 +246,11 @@ fn choose(
                 window.open = true;
             }
         }
-        Choice::Settings | Choice::SaveQuit => {}
+        Choice::Settings | Choice::SaveQuit | Choice::TimeOfDay => {}
         Choice::Details => menu.details = true,
         Choice::CloseDetails => menu.details = false,
         Choice::Back if menu.details => menu.details = false,
+        Choice::Back if menu.time => menu.time = false,
         Choice::Back => {
             if let Ok(mut cursor) = cursor.single_mut() {
                 resume(&mut menu, &mut cursor);
@@ -312,8 +320,9 @@ pub(super) fn place(facts: Option<&WorldFacts>) -> String {
     .to_uppercase()
 }
 
-/// Whether World details show, and whether the background is solid.
-type Shown = (bool, bool, bool);
+/// Whether World details show, whether the background is solid and its contrast stronger, and
+/// whether the World has a sky.
+type Shown = (bool, bool, bool, bool);
 
 type Optional<'w> = (
     Option<Res<'w, super::game_mode::Mode>>,
@@ -364,8 +373,13 @@ fn render(
 ) {
     let solid = preferences.as_ref().is_some_and(|p| p.solid_background);
     let stronger = preferences.is_some_and(|p| p.stronger_contrast);
-    let wanted =
-        (menu.open && !settings.is_some_and(|s| s.open)).then_some((menu.details, solid, stronger));
+    let sky = clock.as_ref().is_some_and(|c| c.sky().is_some());
+    let wanted = (menu.open && !settings.is_some_and(|s| s.open)).then_some((
+        menu.details,
+        solid,
+        stronger,
+        sky,
+    ));
     if *shown == wanted
         && !facts.is_changed()
         && !here.is_changed()
@@ -379,7 +393,7 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some((details, solid, _)) = wanted else {
+    let Some((details, solid, _, sky)) = wanted else {
         return;
     };
     let facts = facts.0.as_ref();
@@ -390,7 +404,7 @@ fn render(
             super::frame::Frame,
             // On the root, not the list, so the prompt bar's Q is inside it and fires.
             TabGroup {
-                modal: !details,
+                modal: !details && !menu.time,
                 ..default()
             },
             GlobalZIndex(8),
@@ -430,7 +444,7 @@ fn render(
                     pause,
                     facts,
                     own,
-                    (details, allowed.is_none_or(|a| a.0)),
+                    (details || menu.time, allowed.is_none_or(|a| a.0), sky),
                     (&bindings, &labels),
                 );
                 let biome = cave
@@ -483,7 +497,7 @@ fn list(
     pause: &mut ChildSpawnerCommands,
     facts: Option<&WorldFacts>,
     own: Option<GameMode>,
-    (details, map_allowed): (bool, bool),
+    (over, map_allowed, sky): (bool, bool, bool),
     (bindings, labels): (&super::actions::Bindings, &super::actions::Labels),
 ) {
     let shadow = TextShadow {
@@ -540,7 +554,7 @@ fn list(
                         item
                     };
                     let resume = keyed(list, "Resume", Choice::Resume, Action::ReleaseCursor);
-                    if !details {
+                    if !over {
                         list.commands()
                             .entity(resume)
                             .insert(super::frame::Autofocus);
@@ -548,6 +562,9 @@ fn list(
                     keyed(list, "Inventory", Choice::Inventory, Action::Inventory);
                     if map_allowed {
                         keyed(list, "Map", Choice::Map, Action::Map);
+                    }
+                    if sky && own == Some(GameMode::Creative) {
+                        super::frame::list_item(list, "Time of day", None, Choice::TimeOfDay);
                     }
                     super::frame::list_item(list, "Settings", None, Choice::Settings);
                     super::frame::list_item(list, "World details", None, Choice::Details);
@@ -913,6 +930,7 @@ mod tests {
                 super::super::save::plugin,
                 super::super::inventory_window::plugin,
                 crate::server::inventory::plugin,
+                super::super::time_dialog::plugin,
             ));
         super::super::frame::testing::support(&mut app);
         app.world_mut().spawn((
@@ -1403,5 +1421,240 @@ mod tests {
         assert!(!app.world().resource::<Menu>().details);
         assert_eq!(focused(&app), Some(find(&mut app, Choice::Resume)));
         std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    mod time_of_day {
+        use super::super::super::time_dialog::{CustomField, Pick, TimeControl};
+        use super::*;
+        use crate::server::time_of_day::SetTimeOfDay;
+        use bevy::text::{EditableText, TextEdit};
+
+        fn has(app: &mut App, choice: Choice) -> bool {
+            app.world_mut()
+                .query::<&Choice>()
+                .iter(app.world())
+                .any(|c| *c == choice)
+        }
+
+        fn control(app: &mut App, control: TimeControl) -> Entity {
+            app.world_mut()
+                .query::<(Entity, &TimeControl)>()
+                .iter(app.world())
+                .find_map(|(e, c)| (*c == control).then_some(e))
+                .unwrap_or_else(|| panic!("no {control:?} on screen"))
+        }
+
+        fn press_control(app: &mut App, which: TimeControl) {
+            let entity = control(app, which);
+            app.world_mut().trigger(Activate { entity });
+            app.update();
+        }
+
+        fn requests(app: &mut App) -> Vec<SetTimeOfDay> {
+            app.world_mut()
+                .resource_mut::<Messages<SetTimeOfDay>>()
+                .drain()
+                .collect()
+        }
+
+        fn field(app: &mut App) -> Entity {
+            app.world_mut()
+                .query_filtered::<Entity, With<CustomField>>()
+                .single(app.world())
+                .unwrap()
+        }
+
+        /// What the field shows once its queued edits land; a test has no text editing to land
+        /// them.
+        fn field_text(app: &mut App) -> String {
+            let field = field(app);
+            let text = app.world().get::<EditableText>(field).unwrap();
+            match text.pending_edits.last() {
+                Some(TextEdit::Insert(typed)) => typed.to_string(),
+                _ => text.value().to_string(),
+            }
+        }
+
+        fn type_in(app: &mut App, typed: &str) {
+            let field = field(app);
+            app.world_mut()
+                .resource_mut::<InputFocus>()
+                .set(field, bevy::input_focus::FocusCause::Pressed);
+            *app.world_mut().get_mut::<EditableText>(field).unwrap() = EditableText::new(typed);
+            app.update();
+        }
+
+        /// The Menu open on a Creative Player at Day 3, 19:42 with the clock held.
+        fn opened() -> App {
+            let mut app = app();
+            river_bend(&mut app);
+            at(&mut app, Some(SKY), 2, 19.7);
+            press(&mut app, KeyCode::Tab);
+            app
+        }
+
+        fn open_dialog(app: &mut App) {
+            choose(app, Choice::TimeOfDay);
+            app.update();
+        }
+
+        #[test]
+        fn the_item_shows_only_in_creative_in_a_world_with_a_sky() {
+            let mut app = app();
+            river_bend(&mut app);
+            at(&mut app, None, 0, 0.0);
+            press(&mut app, KeyCode::Tab);
+            assert!(has(&mut app, Choice::Map));
+            assert!(!has(&mut app, Choice::TimeOfDay), "no sky");
+            at(&mut app, Some(SKY), 0, 7.0);
+            assert!(has(&mut app, Choice::TimeOfDay));
+            let item = find(&mut app, Choice::TimeOfDay);
+            assert_eq!(says(&mut app, item), ["Time of day"]);
+            let list = app.world().get::<ChildOf>(item).unwrap().parent();
+            let order: Vec<Entity> = app.world().get::<Children>(list).unwrap().to_vec();
+            let at = |e| order.iter().position(|&c| c == e).unwrap();
+            assert_eq!(at(item), at(find(&mut app, Choice::Map)) + 1, "after Map");
+            app.world_mut()
+                .write_message(crate::server::game_mode::GameModeChanged(
+                    GameMode::Survival,
+                ));
+            app.update();
+            app.update();
+            assert!(!has(&mut app, Choice::TimeOfDay), "Survival");
+        }
+
+        #[test]
+        fn the_dialog_opens_on_noon_with_where_each_hour_lands_and_the_held_note() {
+            let mut app = opened();
+            open_dialog(&mut app);
+            assert_eq!(
+                focused(&app),
+                Some(control(&mut app, TimeControl::Hour(Pick::Noon)))
+            );
+            let shown = texts(&mut app);
+            for line in [
+                "Time of day",
+                "Sunrise",
+                "Day 4, 06:00",
+                "Noon",
+                "Day 4, 12:00",
+                "Sunset",
+                "Day 4, 18:00",
+                "Midnight",
+                "Day 4, 00:00",
+                "Custom",
+                "Today, 19:45",
+                "The Daylight cycle is off, so the sky holds at the hour you pick.",
+            ] {
+                assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+            }
+            assert_eq!(field_text(&mut app), "19:45", "the next quarter hour");
+            press(&mut app, KeyCode::Escape);
+            assert!(open(&app), "Escape closes the dialog only");
+            assert!(!app.world().resource::<Menu>().time);
+            assert_eq!(focused(&app), Some(find(&mut app, Choice::TimeOfDay)));
+            assert!(requests(&mut app).is_empty());
+        }
+
+        #[test]
+        fn a_running_clock_says_the_day_count_carries_on() {
+            let mut app = opened();
+            app.world_mut()
+                .write_message(crate::content::TimeOfDaySync {
+                    time: tesserae_core::sky::TimeOfDay::on_day(0, 10.0, &SKY),
+                    steps_per_s: 64.0,
+                });
+            app.update();
+            open_dialog(&mut app);
+            let shown = texts(&mut app);
+            let note = "The clock moves on to the hour you pick, and the day count carries on \
+                        from there.";
+            assert!(shown.iter().any(|t| t == note), "{shown:?}");
+            assert!(shown.iter().any(|t| t == "Today, 12:00"), "{shown:?}");
+        }
+
+        #[test]
+        fn a_tile_and_set_time_ask_for_its_hour_and_the_menu_shows_the_time_sent_back() {
+            let mut app = opened();
+            open_dialog(&mut app);
+            press_control(&mut app, TimeControl::Hour(Pick::Sunset));
+            press_control(&mut app, TimeControl::Set);
+            assert_eq!(requests(&mut app), [SetTimeOfDay { minute: 18 * 60 }]);
+            assert!(open(&app) && !app.world().resource::<Menu>().time);
+            let shown = texts(&mut app);
+            assert!(
+                shown
+                    .iter()
+                    .any(|t| t == "Time set to sunset, Day 4, 18:00."),
+                "{shown:?}"
+            );
+            // As the Server answers.
+            at(&mut app, Some(SKY), 3, 18.0);
+            assert!(texts(&mut app).iter().any(|t| t == "Day 4, 18:00"));
+
+            open_dialog(&mut app);
+            press_control(&mut app, TimeControl::Cancel);
+            assert!(requests(&mut app).is_empty(), "Cancel asks nothing");
+        }
+
+        #[test]
+        fn the_custom_row_steps_a_quarter_hour_and_takes_a_typed_time() {
+            let mut app = opened();
+            open_dialog(&mut app);
+            press_control(&mut app, TimeControl::Later);
+            press_control(&mut app, TimeControl::Later);
+            assert_eq!(field_text(&mut app), "20:15");
+            assert!(texts(&mut app).iter().any(|t| t == "Today, 20:15"));
+            press_control(&mut app, TimeControl::Set);
+            assert_eq!(
+                requests(&mut app),
+                [SetTimeOfDay {
+                    minute: 20 * 60 + 15
+                }]
+            );
+
+            open_dialog(&mut app);
+            press_control(&mut app, TimeControl::Earlier);
+            assert_eq!(field_text(&mut app), "19:30");
+            assert!(texts(&mut app).iter().any(|t| t == "Day 4, 19:30"));
+            type_in(&mut app, "1430");
+            press_control(&mut app, TimeControl::Set);
+            assert_eq!(
+                requests(&mut app),
+                [SetTimeOfDay {
+                    minute: 14 * 60 + 30
+                }]
+            );
+
+            open_dialog(&mut app);
+            type_in(&mut app, "6");
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::Enter);
+            app.update();
+            assert_eq!(field_text(&mut app), "06:00", "Enter takes it");
+            press_control(&mut app, TimeControl::Set);
+            assert_eq!(requests(&mut app), [SetTimeOfDay { minute: 6 * 60 }]);
+        }
+
+        #[test]
+        fn a_time_that_is_not_one_puts_the_field_back_and_set_sends_the_pick() {
+            let mut app = opened();
+            open_dialog(&mut app);
+            type_in(&mut app, "25:00");
+            let noon = control(&mut app, TimeControl::Hour(Pick::Noon));
+            app.world_mut()
+                .resource_mut::<InputFocus>()
+                .set(noon, bevy::input_focus::FocusCause::Pressed);
+            app.update();
+            assert_eq!(field_text(&mut app), "19:45");
+            assert!(
+                texts(&mut app)
+                    .iter()
+                    .any(|t| t == "Type a time from 00:00 to 23:59.")
+            );
+            press_control(&mut app, TimeControl::Set);
+            assert_eq!(requests(&mut app), [SetTimeOfDay { minute: 12 * 60 }]);
+        }
     }
 }
