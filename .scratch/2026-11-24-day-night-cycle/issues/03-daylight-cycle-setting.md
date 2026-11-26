@@ -21,7 +21,7 @@ beside Game mode.
 
 ## Acceptance
 
-- [ ] The mockup shows the toggle on both screens and the user approved it.
+- [x] The mockup shows the toggle on both screens and the user approved it.
 - [x] A World created with the cycle off opens at the start hour and stays
       there.
 - [x] Turning it off in Edit World holds the hour from the next open; on
@@ -68,3 +68,5 @@ mock Game with a sky).
   change and note).
 
 The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
+
+The user approved the toggle in the mockup on 2026-11-26.
