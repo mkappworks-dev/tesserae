@@ -18,15 +18,28 @@ struct Clouds {
 @group(constants::MATERIAL_BIND_GROUP) @binding(0)
 var<uniform> clouds: Clouds;
 
-// Lattice cells across one noise period in the coarse octave: 160 m each over the 20 480 m
-// period, so a view straight up or down spans several. The fine octave has four times as many.
-// Whole numbers, so both repeat with the period.
-const CELLS: f32 = 128.0;
-const FINE: f32 = 4.0;
-const FINE_SHARE: f32 = 0.35;
-// Two octaves of value noise bunch about 0.5; stretched by this, they spread near enough evenly
-// over 0 to 1 that a cover of 0.4 covers about 40% of the sky.
-const CONTRAST: f32 = 2.5;
+// Lattice cells across one noise period in the coarsest octave: 320 m each over the 20 480 m
+// period, so a view straight up or down spans several. Each octave doubles them, down to 40 m.
+// Whole numbers, so every octave repeats with the period.
+const CELLS: f32 = 64.0;
+const OCTAVES: u32 = 4u;
+// The field's spread, measured over the period. With it the cover's threshold is placed by the
+// logistic fit to the normal curve, so a cover of 0.3 leaves about 70% of the sky clear.
+const FIELD_SIGMA: f32 = 0.133;
+const LOGISTIC_FIT: f32 = 1.702;
+// The warp bends the lattice's straight runs into billows: coarser than the field, and up to
+// about two thirds of its coarsest cell.
+const WARP_CELLS: f32 = 32.0;
+const WARP_M: f32 = 200.0;
+// The two finest octaves fade out between these distances along the ray: further, a pixel and
+// the spacing between samples are wider than their cells, and they shimmer.
+const DETAIL_FROM_M: f32 = 600.0;
+const DETAIL_TO_M: f32 = 2500.0;
+const DETAILED_OCTAVES: u32 = 2u;
+// Samples closer than the first apart resolve the cloud and are not dithered; from the second the
+// steps between them would band, and the dither spreads them fully.
+const DITHER_FROM_M: f32 = 40.0;
+const DITHER_TO_M: f32 = 160.0;
 
 // Samples along the ray inside the slab: enough for a sense of thickness, few enough to stay
 // within the Cloud layer's 0.2 ms.
@@ -37,10 +50,12 @@ const MAX_MARCH_M: f32 = 1500.0;
 const EXTINCTION_PER_M: f32 = 0.1;
 // How far round the Eye the cloud it stands in fogs the view.
 const IN_CLOUD_M: f32 = 60.0;
-// How far past the cover's threshold the noise climbs before a column fills the slab's thickness.
-const BILLOW: f32 = 0.3;
-// How soft a cloud's top and bottom are, as a share of the thickness.
-const SOFT_EDGE: f32 = 0.15;
+// How far past the cover's threshold the field climbs, in its spreads, before a column reaches
+// the slab's top.
+const BILLOW_SIGMAS: f32 = 1.0;
+// How soft a cloud's flat base and its rounded top are, as shares of the thickness.
+const SOFT_BASE: f32 = 0.08;
+const SOFT_TOP: f32 = 0.15;
 
 // The shares of the light and the sky a cloud's underside keeps against its sunlit top.
 const UNDERSIDE_LIGHT: f32 = 0.5;
@@ -90,39 +105,80 @@ fn hash(x: u32) -> u32 {
     return (word >> 22u) ^ word;
 }
 
-// The value at a lattice corner, the lattice wrapped to `cells` so the noise repeats.
-fn corner(cell: vec2<f32>, cells: f32) -> f32 {
+const TAU: f32 = 6.2831853;
+
+// The contribution of a lattice corner's gradient at `f`, from that corner; the lattice wrapped
+// to `cells` so the noise repeats.
+fn corner(cell: vec2<f32>, cells: f32, f: vec2<f32>) -> f32 {
     let wrapped = vec2<u32>(cell - cells * floor(cell / cells));
-    return f32(hash(wrapped.x + hash(wrapped.y)) & 0xffffu) / 65535.0;
+    let angle = f32(hash(wrapped.x + hash(wrapped.y)) & 0xffffu) / 65535.0 * TAU;
+    return dot(vec2<f32>(cos(angle), sin(angle)), f);
 }
 
-// Value noise from 0 to 1 at `q`, a point in one period from 0 to 1 on each axis.
-fn value_noise(q: vec2<f32>, cells: f32) -> f32 {
+// Gradient noise about 0 at `q`, a point in one period from 0 to 1 on each axis: no value sits on
+// the lattice, so its rows do not show the way value noise's do.
+fn gradient_noise(q: vec2<f32>, cells: f32) -> f32 {
     let p = q * cells;
     let i = floor(p);
     let f = p - i;
-    let u = f * f * (3.0 - 2.0 * f);
-    let a = corner(i, cells);
-    let b = corner(i + vec2<f32>(1.0, 0.0), cells);
-    let c = corner(i + vec2<f32>(0.0, 1.0), cells);
-    let d = corner(i + vec2<f32>(1.0, 1.0), cells);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let a = corner(i, cells, f);
+    let b = corner(i + vec2<f32>(1.0, 0.0), cells, f - vec2<f32>(1.0, 0.0));
+    let c = corner(i + vec2<f32>(0.0, 1.0), cells, f - vec2<f32>(0.0, 1.0));
+    let d = corner(i + vec2<f32>(1.0, 1.0), cells, f - vec2<f32>(1.0, 1.0));
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// The cloud field at `m`, metres in the noise's own frame.
-fn field(m: vec2<f32>) -> f32 {
+// How far the field is bent at `m`, metres in the noise's own frame. Slow to vary, so one per
+// pixel serves every sample along its ray.
+fn warp(m: vec2<f32>) -> vec2<f32> {
     let q = fract(m / clouds.period_m);
-    let n = mix(value_noise(q, CELLS), value_noise(q, CELLS * FINE), FINE_SHARE);
-    return clamp((n - 0.5) * CONTRAST + 0.5, 0.0, 1.0);
+    return WARP_M * vec2<f32>(
+        gradient_noise(q, WARP_CELLS),
+        gradient_noise(fract(q + vec2<f32>(0.5, 0.25)), WARP_CELLS),
+    );
 }
 
-// How dense the cloud is where the field reads `n`, at `h` from 0 (the base) to 1 (the top): a
-// column the noise clears the cover's threshold by more stands taller about the slab's middle.
-fn density(n: f32, h: f32) -> f32 {
-    let cover = clouds.field.w;
-    let over = clamp((n - (1.0 - cover)) / BILLOW, 0.0, 1.0);
-    let half_height = 0.5 * sqrt(over);
-    return smoothstep(0.0, SOFT_EDGE, half_height - abs(h - 0.5));
+// The cloud field about 0 at `m`, metres in the noise's own frame, with `detail` from 0 to 1 of the
+// finest octaves. Each octave is shifted so their lattices do not line up.
+fn field(m: vec2<f32>, detail: f32) -> f32 {
+    let q = fract(m / clouds.period_m);
+    var n = 0.0;
+    var amplitude = 1.0;
+    var total = 0.0;
+    var cells = CELLS;
+    for (var o: u32 = 0u; o < OCTAVES; o = o + 1u) {
+        let share = select(1.0, detail, o >= DETAILED_OCTAVES);
+        if share > 0.0 {
+            n += share * amplitude * gradient_noise(fract(q + f32(o) * 0.31), cells);
+        }
+        // The full total, so fading the detail softens the edges without moving the cover.
+        total += amplitude;
+        amplitude *= 0.5;
+        cells *= 2.0;
+    }
+    return n / total;
+}
+
+// Where the field crosses into cloud for the cover.
+fn threshold() -> f32 {
+    let cover = clamp(clouds.field.w, 0.001, 0.999);
+    return FIELD_SIGMA * log((1.0 - cover) / cover) / LOGISTIC_FIT;
+}
+
+// How dense the cloud is where the field reads `n`, at `h` from 0 (the base) to 1 (the top): every
+// cloud sits on the slab's base, and one the field clears the threshold by more stands taller.
+fn density(n: f32, h: f32, at: f32) -> f32 {
+    let over = clamp((n - at) / (BILLOW_SIGMAS * FIELD_SIGMA), 0.0, 1.0);
+    let top = sqrt(over);
+    return smoothstep(0.0, SOFT_BASE, h) * smoothstep(0.0, SOFT_TOP, top - h);
+}
+
+// A per-pixel offset for the samples, so their spacing shows as fine grain, not bands. Hashed
+// rather than interleaved gradient noise: with no temporal smoothing that one's diagonals show.
+fn dither(pixel: vec2<f32>) -> f32 {
+    let p = vec2<u32>(pixel);
+    return f32(hash(p.x + hash(p.y)) & 0xffffu) / 65536.0;
 }
 
 // The glow bevy_pbr's fog adds toward each directional light, as `sky.wesl`'s `fog_glow`, so a
@@ -180,14 +236,19 @@ fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
 
     // Relative to the Eye the origin was taken under, so no large coordinate enters the noise.
     let under_eye = clouds.field.xy + (eye.xz - clouds.slab.xz);
+    let at = threshold();
+    let bend = warp(under_eye + direction.xz * 0.5 * (enter + leave));
+    let spread = smoothstep(DITHER_FROM_M, DITHER_TO_M, spacing);
+    let jitter = 0.5 + spread * (dither(in.clip.xy) - 0.5);
+    let detail = 1.0 - smoothstep(DETAIL_FROM_M, DETAIL_TO_M, enter);
     // Metres of the densest cloud the ray crosses, and what it sees weighted by them.
     var depth_m = 0.0;
     var height = 0.0;
     var along = 0.0;
     for (var i: u32 = 0u; i < SAMPLES; i = i + 1u) {
-        let t = enter + (f32(i) + 0.5) * spacing;
+        let t = enter + (f32(i) + jitter) * spacing;
         let h = clamp((eye.y + direction.y * t - base) / thickness, 0.0, 1.0);
-        let m = density(field(under_eye + direction.xz * t), h) * spacing * edge;
+        let m = density(field(under_eye + bend + direction.xz * t, detail), h, at) * spacing * edge;
         depth_m += m;
         height += m * h;
         along += m * t;
@@ -197,7 +258,7 @@ fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
     var near_m = 0.0;
     let eye_h = clamp((eye.y - base) / thickness, 0.0, 1.0);
     if enter <= 0.0 {
-        near_m = density(field(under_eye), eye_h) * min(leave, IN_CLOUD_M);
+        near_m = density(field(under_eye + warp(under_eye), 1.0), eye_h, at) * min(leave, IN_CLOUD_M);
     }
     if depth_m + near_m <= 0.0 {
         discard;

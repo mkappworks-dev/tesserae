@@ -129,3 +129,11 @@ The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
   Daylight of the sun's colour while its light fades at the horizon, so they
   read peach, not brown. Stacked samples still show faint terraced rims at a
   distance; left for the look pass.
+
+2026-11-26: the field is now warped gradient fBm (4 octaves from 320 m cells
+down to 40 m, one domain warp per pixel), so the lattice no longer shows. The
+cover is placed by the field's measured spread (σ 0.133, logistic fit to the
+normal curve), so a cover of 0.3 leaves about 70% of the sky clear. Clouds sit
+on a flat base with rounded tops. The two finest octaves fade from 600 m to
+2.5 km along the ray, and samples more than 40 m apart are dithered per pixel,
+so grazing rays grain instead of banding.
