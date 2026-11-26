@@ -241,8 +241,11 @@ declares what it does today. Each field has one ticket that adds it.
   at any LOD level.
 - The dim floor a face that sees no sky keeps is the noon floor, carried in its
   own uniform, not scaled by the hour, so a sealed cave looks the same at every
-  hour. Validation keeps the curve's ambient at or above that floor, so open
-  ground is never darker than a cave. Block light is unchanged.
+  hour. Validation keeps the curve's ambient at or above that floor in every
+  colour channel, so open ground is never darker than a cave. Block light is
+  unchanged. The floor is carried by dividing the ambient colour back out in the
+  chunk shader, not by a uniform, so the chunk materials never change per frame.
+  Entities and dropped items have no floor and dim in a cave at night; accepted.
 - Underwater fog and the clear colour behind it dim and tint with the ambient
   light, so water is dark at night; a fluid that emits (lava) keeps its own.
   Cave fog does not change with the hour.
