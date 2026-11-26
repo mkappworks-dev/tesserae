@@ -269,9 +269,12 @@ pub struct SkyState {
     pub daylight: f32,
 }
 
-/// [`sky_state_on`] the engine's default Day curve.
+/// [`sky_state_on`] the Game's Day curve, or the engine's default if it declares none.
 pub fn sky_state(inputs: &SkyInputs) -> SkyState {
-    sky_state_on(&DEFAULT_DAY_CURVE, inputs)
+    let curve = inputs
+        .sky
+        .map_or(&DEFAULT_DAY_CURVE[..], SkyParams::day_curve);
+    sky_state_on(curve, inputs)
 }
 
 pub fn sky_state_on(curve: &[DayKey], inputs: &SkyInputs) -> SkyState {

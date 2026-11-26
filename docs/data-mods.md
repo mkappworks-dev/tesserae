@@ -106,6 +106,18 @@ sun's path leans toward the south (+Z), so the noon sun stands that far from
 overhead. The clock reads 06:00 at sunrise and 18:00 at sunset whatever the
 share. Omitted, the World is held at noon.
 
+`[[world.sky.day-curve]]` rows are the Day curve, 1 to 16 of them in ascending
+`hour` from 0 up to 24, eased linearly between and across midnight. Each row is
+`hour`; `sun`, `moon` (at full moon; a thinner phase lights less) and `ambient`,
+each `{ colour = [r, g, b], strength }`; `sky-tint` and `fog-tint`, each
+`{ colour = [r, g, b], amount }`; and `stars`. Colours are linear and every
+value is from 0 to 1. A strength is a share of the engine's noon, and `ambient`
+is at least 0.0642, the share a sealed cave keeps at every hour, so open ground
+is never darker than a cave. A tint moves a Biome's sky or fog colour toward its
+colour by its amount, in linear light; a Cave Biome's air is never tinted. The
+sun's and moon's light fade to nothing at the horizon whatever the curve says.
+Omitted, the engine's default curve is used.
+
 An ore is a blob of `vein-size-m` metres at most, in a cube of that edge; a
 `rarity` fraction of the cubes hold one. It replaces rock only, never soil, the
 surface, water or air, inside its depth band and its Biomes. Caves carve the ore

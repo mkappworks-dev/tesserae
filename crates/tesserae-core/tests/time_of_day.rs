@@ -6,6 +6,7 @@ const TERRA: SkyParams = SkyParams {
     start_hour: 7.0,
     day_share: 0.7,
     tilt_deg: 25.0,
+    day_curve: None,
 };
 
 /// 1200 s of 1/64 s steps.
@@ -297,7 +298,7 @@ fn each_sky_rule_names_its_field() {
         (tilt(f32::NAN), "sky.tilt_deg"),
     ];
     for (sky, field) in cases {
-        assert_eq!(sky.validate().unwrap_err().field, field, "{sky:?}");
+        assert_eq!(sky.validate().unwrap_err().field(), field, "{sky:?}");
     }
     assert!(
         SkyParams {

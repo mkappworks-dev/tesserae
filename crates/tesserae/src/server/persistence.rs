@@ -508,7 +508,7 @@ impl Persistence {
                     "New World - unsaved".into(),
                 )
             };
-        let mut clock = Clock::open(loaded.sky, saved_time);
+        let mut clock = Clock::open(loaded.sky.clone(), saved_time);
         clock.set_cycle(daylight_cycle);
         let writer = opening
             .directory
@@ -647,7 +647,7 @@ fn install(world: &mut World) {
         p.saved_entities = entities.revision();
         world.insert_resource(EntityStore(entities));
     }
-    world.insert_resource(super::time_of_day::WorldClock::opened(p.clock));
+    world.insert_resource(super::time_of_day::WorldClock::opened(p.clock.clone()));
     world.insert_resource(super::container::Containers::restore(
         std::mem::take(&mut p.initial_containers),
         std::mem::take(&mut p.initial_looted),

@@ -5,6 +5,8 @@ use tesserae_core::{
     CombustionError, FluidError, MaterialError, ParamError, ReactionError, ShapeError, UseError,
 };
 
+use tesserae_core::sky::SkyError;
+
 use crate::registry::Kind;
 use crate::trust::Untrusted;
 
@@ -89,6 +91,10 @@ pub enum ModError {
         id: String,
         what: &'static str,
         source: ParamError,
+    },
+    Sky {
+        id: String,
+        source: SkyError,
     },
     Material {
         id: String,
@@ -377,6 +383,7 @@ impl fmt::Display for ModError {
             ModError::Params { id, what, source } => {
                 write!(f, "mod `{id}`: {what}: {source}")
             }
+            ModError::Sky { id, source } => write!(f, "mod `{id}`: world: {source}"),
             ModError::Material {
                 id,
                 row,

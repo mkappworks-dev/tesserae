@@ -171,6 +171,7 @@ mod tests {
         start_hour: 7.0,
         day_share: 0.7,
         tilt_deg: 25.0,
+        day_curve: None,
     };
 
     const RATE: f32 = 64.0;

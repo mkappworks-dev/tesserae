@@ -192,6 +192,24 @@ start-hour = 7.0
 day-share = 0.7
 tilt-deg = 25.0
 
+[[world.sky.day-curve]]
+hour = 6.0
+sun = { colour = [1.0, 0.55, 0.28], strength = 1.0 }
+moon = { colour = [0.62, 0.72, 1.0], strength = 0.15 }
+ambient = { colour = [0.95, 0.75, 0.65], strength = 0.55 }
+sky-tint = { colour = [0.25, 0.18, 0.3], amount = 0.4 }
+fog-tint = { colour = [1.0, 0.45, 0.18], amount = 0.55 }
+stars = 0.2
+
+[[world.sky.day-curve]]
+hour = 12.0
+sun = { colour = [1.0, 1.0, 1.0], strength = 1.0 }
+moon = { colour = [0.62, 0.72, 1.0], strength = 0.15 }
+ambient = { colour = [1.0, 1.0, 1.0], strength = 1.0 }
+sky-tint = { colour = [0.0, 0.0, 0.0], amount = 0.0 }
+fog-tint = { colour = [0.0, 0.0, 0.0], amount = 0.0 }
+stars = 0.0
+
 [[biomes]]
 name = "dry"
 temperature = 0.8

@@ -265,6 +265,44 @@ interface content {
         /// How far the sun's path leans toward the south (+Z), in degrees from
         /// 0 to 60: the noon sun stands that far from overhead.
         tilt-deg: f32,
+        /// The Day curve: from 1 to 16 keys, hours ascending, eased linearly
+        /// between them and across midnight. `none` is the engine's default
+        /// curve.
+        day-curve: option<list<day-key>>,
+    }
+
+    /// How the sky looks at one hour. Colours are linear, each channel from 0
+    /// to 1; strengths are shares of the engine's noon, from 0 to 1.
+    record day-key {
+        /// From 0 up to but not including 24, after the key before it.
+        hour: f32,
+        /// The sun's light while it is up; faded to nothing at the horizon
+        /// whatever the curve says.
+        sun: curve-light,
+        /// The moon's light while the sun is down, at full moon; a thinner
+        /// phase lights less.
+        moon: curve-light,
+        /// The light from the open sky, at least 0.0642: a sealed cave keeps
+        /// that share of noon at every hour, and open ground is never darker.
+        ambient: curve-light,
+        /// Move the Biome's sky and fog colours toward a colour; a Cave
+        /// Biome's air is never tinted.
+        sky-tint: curve-tint,
+        fog-tint: curve-tint,
+        /// How bright the stars are, from 0 to 1.
+        stars: f32,
+    }
+
+    record curve-light {
+        colour: tuple<f32, f32, f32>,
+        strength: f32,
+    }
+
+    /// `amount` from 0 (the Biome's colour) to 1 (the tint's), in linear
+    /// light.
+    record curve-tint {
+        colour: tuple<f32, f32, f32>,
+        amount: f32,
     }
 
     /// A region of the underground, chosen where the cave Climate (two 3D

@@ -385,14 +385,11 @@ pub fn apply(
     let sky = declaration
         .world
         .as_ref()
-        .and_then(|p| p.sky)
+        .and_then(|p| p.sky.as_ref())
         .map(crate::convert::sky_params);
     if let Some(sky) = &sky {
-        sky.validate().map_err(|source| ModError::Params {
-            id: id(),
-            what: "world",
-            source,
-        })?;
+        sky.validate()
+            .map_err(|source| ModError::Sky { id: id(), source })?;
     }
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let lava = declaration.world.as_ref().and_then(|p| p.lava.clone());

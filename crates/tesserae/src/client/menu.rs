@@ -1068,6 +1068,7 @@ mod tests {
         start_hour: 7.0,
         day_share: 0.7,
         tilt_deg: 25.0,
+        day_curve: None,
     };
 
     /// The Server's sky and Time of day, and the Player in the meadow.
@@ -1077,10 +1078,10 @@ mod tests {
         if !app.world().contains_resource::<ClientTimeOfDay>() {
             app.add_plugins(super::super::time_of_day::plugin);
         }
-        app.world_mut().write_message(WorldSky(sky));
+        app.world_mut().write_message(WorldSky(sky.clone()));
         app.world_mut().write_message(TimeOfDaySync {
-            time: sky.map_or(TimeOfDay::from_steps(0), |sky| {
-                TimeOfDay::on_day(day, hour, &sky)
+            time: sky.as_ref().map_or(TimeOfDay::from_steps(0), |sky| {
+                TimeOfDay::on_day(day, hour, sky)
             }),
             steps_per_s: 0.0,
         });

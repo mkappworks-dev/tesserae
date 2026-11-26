@@ -8,6 +8,7 @@ const TERRA: SkyParams = SkyParams {
     start_hour: 7.0,
     day_share: 0.7,
     tilt_deg: 25.0,
+    day_curve: None,
 };
 
 const DRY: Air = Air {
@@ -348,4 +349,149 @@ fn moonlight_shades_water_as_the_ambient_does() {
     for c in 0..3 {
         assert!(night[c] < water[c], "channel {c}");
     }
+}
+
+fn declaring(curve: Vec<DayKey>) -> SkyParams {
+    SkyParams {
+        day_curve: Some(curve),
+        ..TERRA
+    }
+}
+
+#[test]
+fn a_sky_without_a_curve_reads_the_default() {
+    for hour in [0.0, 5.5, 6.0, 12.0, 18.2, 21.0] {
+        for phase in [FULL, NEW] {
+            let inputs = at(hour, phase, Some(&TERRA), DRY);
+            assert_eq!(
+                sky_state(&inputs),
+                sky_state_on(&DEFAULT_DAY_CURVE, &inputs),
+                "{hour}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_declared_curve_is_the_one_the_sky_state_reads() {
+    let sky = declaring(blazing().to_vec());
+    for hour in [0.0, 6.0, 12.0, 18.2, 21.0] {
+        let inputs = at(hour, FULL, Some(&sky), DRY);
+        assert_eq!(
+            sky_state(&inputs),
+            sky_state_on(&blazing(), &inputs),
+            "{hour}"
+        );
+    }
+    let midnight = sky_state(&at(0.0, FULL, Some(&sky), DRY));
+    assert_eq!(midnight.ambient, Light::NOON, "not the default's dim night");
+}
+
+#[test]
+fn a_declared_key_with_amount_0_returns_the_biome_pair_unchanged() {
+    let red = Tint {
+        colour: [1.0, 0.0, 0.0],
+        amount: 0.0,
+    };
+    let sky = declaring(vec![DayKey {
+        sky_tint: red,
+        fog_tint: red,
+        ..blazing()[0]
+    }]);
+    for hour in [0.0, 6.0, 12.0, 18.5] {
+        let state = sky_state(&at(hour, FULL, Some(&sky), DRY));
+        assert_eq!((state.sky, state.fog), (DRY.sky, DRY.fog), "{hour}");
+    }
+}
+
+#[test]
+fn the_default_curve_passes_its_own_validation() {
+    assert_eq!(declaring(DEFAULT_DAY_CURVE.to_vec()).validate(), Ok(()));
+}
+
+#[test]
+fn each_day_curve_rule_names_its_field() {
+    let key = |hour| DayKey {
+        hour,
+        ..DEFAULT_DAY_CURVE[0]
+    };
+    let two = || vec![key(6.0), key(18.0)];
+    let edit = |change: fn(&mut DayKey)| {
+        let mut keys = two();
+        change(&mut keys[1]);
+        keys
+    };
+    let cases: Vec<(Vec<DayKey>, &str)> = vec![
+        (Vec::new(), "sky.day_curve"),
+        ((0..17).map(|h| key(h as f32)).collect(), "sky.day_curve"),
+        (vec![key(-0.5)], "sky.day_curve[0].hour"),
+        (vec![key(24.0)], "sky.day_curve[0].hour"),
+        (vec![key(f32::NAN)], "sky.day_curve[0].hour"),
+        (vec![key(18.0), key(6.0)], "sky.day_curve[1].hour"),
+        (vec![key(6.0), key(6.0)], "sky.day_curve[1].hour"),
+        (
+            edit(|k| k.sun.colour[0] = 1.5),
+            "sky.day_curve[1].sun.colour",
+        ),
+        (
+            edit(|k| k.sun.strength = -0.1),
+            "sky.day_curve[1].sun.strength",
+        ),
+        (
+            edit(|k| k.moon.colour[2] = f32::NAN),
+            "sky.day_curve[1].moon.colour",
+        ),
+        (
+            edit(|k| k.moon.strength = 1.1),
+            "sky.day_curve[1].moon.strength",
+        ),
+        (
+            edit(|k| k.ambient.colour[1] = -0.1),
+            "sky.day_curve[1].ambient.colour",
+        ),
+        (
+            edit(|k| k.ambient.strength = 1.1),
+            "sky.day_curve[1].ambient.strength",
+        ),
+        (
+            edit(|k| k.ambient.strength = CAVE_FLOOR - 0.001),
+            "sky.day_curve[1].ambient.strength",
+        ),
+        (
+            edit(|k| k.sky_tint.colour[0] = 2.0),
+            "sky.day_curve[1].sky_tint.colour",
+        ),
+        (
+            edit(|k| k.sky_tint.amount = 1.5),
+            "sky.day_curve[1].sky_tint.amount",
+        ),
+        (
+            edit(|k| k.fog_tint.colour[2] = -1.0),
+            "sky.day_curve[1].fog_tint.colour",
+        ),
+        (
+            edit(|k| k.fog_tint.amount = -0.1),
+            "sky.day_curve[1].fog_tint.amount",
+        ),
+        (edit(|k| k.stars = 1.5), "sky.day_curve[1].stars"),
+    ];
+    for (curve, field) in cases {
+        let sky = declaring(curve);
+        assert_eq!(sky.validate().unwrap_err().field(), field, "{sky:?}");
+    }
+    let edges = vec![
+        DayKey {
+            hour: 0.0,
+            ambient: Light {
+                strength: CAVE_FLOOR,
+                ..DEFAULT_DAY_CURVE[0].ambient
+            },
+            stars: 0.0,
+            ..DEFAULT_DAY_CURVE[0]
+        },
+        key(23.99),
+    ];
+    assert_eq!(declaring(edges).validate(), Ok(()));
+    let sixteen = (0..16).map(|h| key(h as f32)).collect();
+    assert_eq!(declaring(sixteen).validate(), Ok(()));
 }

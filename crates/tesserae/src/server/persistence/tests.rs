@@ -2687,7 +2687,7 @@ fn a_reopened_world_lays_out_the_settlements_it_was_saved_with_whatever_the_game
 }
 
 fn clock(rig: &Rig) -> tesserae_core::sky::Clock {
-    *rig.app.world().resource::<WorldClock>().clock()
+    rig.app.world().resource::<WorldClock>().clock().clone()
 }
 
 #[test]

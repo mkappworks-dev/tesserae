@@ -2545,6 +2545,7 @@ fn sky() -> content::SkyParams {
         start_hour: 7.0,
         day_share: 0.7,
         tilt_deg: 25.0,
+        day_curve: None,
     }
 }
 
@@ -2567,6 +2568,7 @@ fn a_games_sky_is_kept_and_a_world_without_one_has_none() {
             start_hour: 7.0,
             day_share: 0.7,
             tilt_deg: 25.0,
+            day_curve: None,
         })
     );
     assert_eq!(declare_sky(None, true).unwrap().sky, None);
@@ -2601,8 +2603,81 @@ fn a_bad_sky_is_a_load_error_naming_the_field() {
         let mut s = sky();
         edit(&mut s);
         match declare_sky(Some(s), true).unwrap_err() {
-            ModError::Params { id, what, source } => {
-                assert_eq!((id.as_str(), what, source.field), ("game", "world", field));
+            ModError::Sky { id, source } => {
+                assert_eq!((id.as_str(), source.field().as_str()), ("game", field));
+            }
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+}
+
+fn day_key(hour: f32) -> content::DayKey {
+    let light = |colour, strength| content::CurveLight { colour, strength };
+    let tint = |colour, amount| content::CurveTint { colour, amount };
+    content::DayKey {
+        hour,
+        sun: light((1.0, 0.55, 0.28), 1.0),
+        moon: light((0.62, 0.72, 1.0), 0.15),
+        ambient: light((0.6, 0.7, 1.0), 0.25),
+        sky_tint: tint((0.005, 0.007, 0.02), 0.92),
+        fog_tint: tint((0.008, 0.012, 0.027), 0.0),
+        stars: 1.0,
+    }
+}
+
+#[test]
+fn a_games_day_curve_is_kept_and_a_sky_without_one_reads_the_default() {
+    let curve = vec![day_key(5.0), day_key(19.0)];
+    let applied = declare_sky(
+        Some(content::SkyParams {
+            day_curve: Some(curve),
+            ..sky()
+        }),
+        true,
+    )
+    .unwrap();
+    let kept = applied.sky.unwrap();
+    let keys = kept.day_curve();
+    assert_eq!(keys.len(), 2);
+    assert_eq!(keys[1].hour, 19.0);
+    assert_eq!(keys[0].moon.colour, [0.62, 0.72, 1.0]);
+    assert_eq!(keys[0].ambient.strength, 0.25);
+    assert_eq!(keys[0].sky_tint.colour, [0.005, 0.007, 0.02]);
+    assert_eq!(keys[0].fog_tint.amount, 0.0);
+    let without = declare_sky(Some(sky()), true).unwrap().sky.unwrap();
+    assert_eq!(
+        without.day_curve(),
+        &tesserae_core::sky::DEFAULT_DAY_CURVE[..]
+    );
+}
+
+#[test]
+fn a_bad_day_curve_is_a_load_error_naming_the_key_and_field() {
+    type Edit = fn(&mut Vec<content::DayKey>);
+    let cases: [(Edit, &str); 6] = [
+        (|c| c.clear(), "sky.day_curve"),
+        (
+            |c| c.extend((0..15).map(|h| day_key(h as f32))),
+            "sky.day_curve",
+        ),
+        (|c| c[1].hour = 24.0, "sky.day_curve[1].hour"),
+        (|c| c[1].hour = 5.0, "sky.day_curve[1].hour"),
+        (|c| c[0].sun.colour.1 = 1.2, "sky.day_curve[0].sun.colour"),
+        (
+            |c| c[1].ambient.strength = 0.05,
+            "sky.day_curve[1].ambient.strength",
+        ),
+    ];
+    for (edit, field) in cases {
+        let mut curve = vec![day_key(5.0), day_key(19.0)];
+        edit(&mut curve);
+        let s = content::SkyParams {
+            day_curve: Some(curve),
+            ..sky()
+        };
+        match declare_sky(Some(s), true).unwrap_err() {
+            ModError::Sky { id, source } => {
+                assert_eq!((id.as_str(), source.field().as_str()), ("game", field));
             }
             other => panic!("{field}: {other:?}"),
         }

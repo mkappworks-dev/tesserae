@@ -34,7 +34,7 @@ impl WorldClock {
     /// `pin` is `TESSERAE_TIME_OF_DAY`'s value: it holds the clock at that moment.
     pub fn new(mut clock: Clock, pin: Option<&str>) -> Self {
         if let Some(asked) = pin {
-            match (Pin::parse(asked), clock.sky().copied()) {
+            match (Pin::parse(asked), clock.sky().cloned()) {
                 (Some(pin), Some(sky)) => clock.hold(pin.time(&sky)),
                 (None, _) => eprintln!(
                     "TESSERAE_TIME_OF_DAY={asked} is not an hour (\"19:30\") or a night and an \
@@ -140,6 +140,7 @@ mod tests {
         start_hour: 7.0,
         day_share: 0.7,
         tilt_deg: 25.0,
+        day_curve: None,
     };
 
     fn opened(pin: Option<&str>) -> WorldClock {

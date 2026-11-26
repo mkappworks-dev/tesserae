@@ -81,6 +81,14 @@ fn motion(swing_deg: f32, rate_hz: f32, arm_raise_deg: f32) -> content::LimbMoti
     }
 }
 
+fn light(colour: (f32, f32, f32), strength: f32) -> content::CurveLight {
+    content::CurveLight { colour, strength }
+}
+
+fn tint(colour: (f32, f32, f32), amount: f32) -> content::CurveTint {
+    content::CurveTint { colour, amount }
+}
+
 /// What a component Game would return for [`FULL`] and the character.
 fn component() -> Declaration {
     use content::{Occlusion as O, RenderClass as R};
@@ -204,6 +212,26 @@ fn component() -> Declaration {
                 start_hour: 7.0,
                 day_share: 0.7,
                 tilt_deg: 25.0,
+                day_curve: Some(vec![
+                    content::DayKey {
+                        hour: 6.0,
+                        sun: light((1.0, 0.55, 0.28), 1.0),
+                        moon: light((0.62, 0.72, 1.0), 0.15),
+                        ambient: light((0.95, 0.75, 0.65), 0.55),
+                        sky_tint: tint((0.25, 0.18, 0.3), 0.4),
+                        fog_tint: tint((1.0, 0.45, 0.18), 0.55),
+                        stars: 0.2,
+                    },
+                    content::DayKey {
+                        hour: 12.0,
+                        sun: light((1.0, 1.0, 1.0), 1.0),
+                        moon: light((0.62, 0.72, 1.0), 0.15),
+                        ambient: light((1.0, 1.0, 1.0), 1.0),
+                        sky_tint: tint((0.0, 0.0, 0.0), 0.0),
+                        fog_tint: tint((0.0, 0.0, 0.0), 0.0),
+                        stars: 0.0,
+                    },
+                ]),
             }),
             sea_level_m: 20.0,
             relief_m: 12.0,
@@ -704,6 +732,7 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
         ),
         ("[world.movement]", "[world.walking]", "walking"),
         ("[world.climate]", "[world.weather]", "weather"),
+        ("stars = 0.2", "stars = 0.2\nglow = 1.0", "glow"),
         (
             "temperature-size-m = 400.0",
             "temperature-size-m = 400.0\nwind = 1",
@@ -814,6 +843,8 @@ fn shared_validation_bounds_apply_to_data() {
         ),
         ("max-health = 30", "max-health = 0", "max-health"),
         ("safe-fall-m = 4.5", "safe-fall-m = 1001", "safe-fall-m"),
+        ("stars = 0.2", "stars = 1.5", "sky.day_curve[0].stars"),
+        ("hour = 12.0", "hour = 5.0", "sky.day_curve[1].hour"),
     ] {
         refused(replace, with, field);
     }

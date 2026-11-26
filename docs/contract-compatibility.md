@@ -335,6 +335,15 @@ A Declaration built against the earlier 0.3 text needs a rebuild.
 leans toward the south (+Z), so the noon sun stands that far from overhead. A
 Declaration built against the earlier 0.3 text needs a rebuild.
 
+`sky-params` then gained `day-curve` last, an optional list of 1 to 16 `day-key`
+records with ascending hours from 0 up to 24, each the sun's, the moon's and the
+ambient light's colour and strength (`curve-light`), a sky and a fog tint
+(`curve-tint`, a colour and an amount) and a star brightness. Colours are linear
+and every value from 0 to 1; the ambient strength is at least the cave floor,
+0.0642. `none` is the engine's default curve, so a Game that declared a `sky`
+before looks as it did. A Declaration built against the earlier 0.3 text needs a
+rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

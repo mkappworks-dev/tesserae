@@ -19,6 +19,8 @@ pub const MIN_DAY_LENGTH_S: f32 = 60.0;
 
 pub const MAX_TILT_DEG: f32 = 60.0;
 
+pub const MAX_DAY_KEYS: usize = 16;
+
 const SUNRISE: f64 = 6.0;
 const NOON: f32 = 12.0;
 const SUNSET: f64 = 18.0;
@@ -29,7 +31,7 @@ const TWILIGHT_DEG: f32 = 10.0;
 const MOON_PHASES: i64 = 8;
 
 /// What a Game declares of its day.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct SkyParams {
     pub day_length_s: f32,
     /// The hour a new World starts at.
@@ -39,10 +41,26 @@ pub struct SkyParams {
     /// How far the sun's path leans toward the south (+Z): the noon sun stands this far from
     /// overhead.
     pub tilt_deg: f32,
+    /// `None` is [`DEFAULT_DAY_CURVE`].
+    pub day_curve: Option<Vec<DayKey>>,
 }
 
 impl SkyParams {
-    pub fn validate(&self) -> Result<(), ParamError> {
+    pub fn validate(&self) -> Result<(), SkyError> {
+        self.validate_fields()
+            .map_err(|source| SkyError { key: None, source })?;
+        if let Some(curve) = &self.day_curve {
+            validate_day_curve(curve)?;
+        }
+        Ok(())
+    }
+
+    /// The Day curve [`sky_state`] reads.
+    pub fn day_curve(&self) -> &[DayKey] {
+        self.day_curve.as_deref().unwrap_or(&DEFAULT_DAY_CURVE)
+    }
+
+    fn validate_fields(&self) -> Result<(), ParamError> {
         if !(self.day_length_s.is_finite() && self.day_length_s >= MIN_DAY_LENGTH_S) {
             return Err(ParamError {
                 field: "sky.day_length_s",
@@ -80,6 +98,94 @@ impl SkyParams {
         let share = self.day_share as f64;
         ((1.0 - share) * day / 2.0, share * day)
     }
+}
+
+/// A `sky` rule broken, by a field of `sky` itself or of one Day curve key.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SkyError {
+    /// The Day curve key, from 0; the field is then the key's own, such as `hour`.
+    pub key: Option<usize>,
+    pub source: ParamError,
+}
+
+impl SkyError {
+    /// As a Mod author writes it: `sky.tilt_deg`, `sky.day_curve[2].hour`.
+    pub fn field(&self) -> String {
+        match self.key {
+            None => self.source.field.to_owned(),
+            Some(key) => format!("sky.day_curve[{key}].{}", self.source.field),
+        }
+    }
+}
+
+impl std::fmt::Display for SkyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.field(), self.source.rule)
+    }
+}
+
+impl std::error::Error for SkyError {}
+
+fn validate_day_curve(keys: &[DayKey]) -> Result<(), SkyError> {
+    if !(1..=MAX_DAY_KEYS).contains(&keys.len()) {
+        return Err(SkyError {
+            key: None,
+            source: ParamError {
+                field: "sky.day_curve",
+                rule: "must have from 1 to 16 keys",
+            },
+        });
+    }
+    let mut after = None;
+    for (index, key) in keys.iter().enumerate() {
+        let bad = |field, rule| SkyError {
+            key: Some(index),
+            source: ParamError { field, rule },
+        };
+        if !(0.0..24.0).contains(&key.hour) {
+            return Err(bad("hour", "must be from 0 up to but not including 24"));
+        }
+        if after.is_some_and(|before| key.hour <= before) {
+            return Err(bad("hour", "must be after the key before it"));
+        }
+        after = Some(key.hour);
+        let unit = |v: f32| (0.0..=1.0).contains(&v);
+        let lights = [
+            (&key.sun, "sun.colour", "sun.strength"),
+            (&key.moon, "moon.colour", "moon.strength"),
+            (&key.ambient, "ambient.colour", "ambient.strength"),
+        ];
+        for (light, colour, strength) in lights {
+            if !light.colour.into_iter().all(unit) {
+                return Err(bad(colour, "must have every channel from 0 to 1"));
+            }
+            if !unit(light.strength) {
+                return Err(bad(strength, "must be from 0 to 1"));
+            }
+        }
+        if key.ambient.strength < CAVE_FLOOR {
+            return Err(bad(
+                "ambient.strength",
+                "must be at least the cave floor, 0.0642",
+            ));
+        }
+        let tints = [
+            (&key.sky_tint, "sky_tint.colour", "sky_tint.amount"),
+            (&key.fog_tint, "fog_tint.colour", "fog_tint.amount"),
+        ];
+        for (tint, colour, amount) in tints {
+            if !tint.colour.into_iter().all(unit) {
+                return Err(bad(colour, "must have every channel from 0 to 1"));
+            }
+            if !unit(tint.amount) {
+                return Err(bad(amount, "must be from 0 to 1"));
+            }
+        }
+        if !unit(key.stars) {
+            return Err(bad("stars", "must be from 0 to 1"));
+        }
+    }
+    Ok(())
 }
 
 /// Logical steps since day 0's midnight.
@@ -187,7 +293,7 @@ impl Pin {
 }
 
 /// The Server's Time of day, which runs one step per logical step while the Daylight cycle is on.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Clock {
     sky: Option<SkyParams>,
     time: TimeOfDay,
@@ -248,19 +354,19 @@ impl Clock {
 
     /// What a World saves: nothing without a sky, so its saves stay as they were.
     pub fn saved(&self) -> Option<TimeOfDay> {
-        self.sky.map(|_| self.time)
+        self.sky.as_ref().map(|_| self.time)
     }
 
     pub fn hour(&self) -> f32 {
-        self.sky.map_or(NOON, |sky| self.time.hour(&sky))
+        self.sky.as_ref().map_or(NOON, |sky| self.time.hour(sky))
     }
 
     pub fn moon_phase(&self) -> u8 {
-        self.sky.map_or(0, |sky| self.time.moon_phase(&sky))
+        self.sky.as_ref().map_or(0, |sky| self.time.moon_phase(sky))
     }
 
     pub fn daylight(&self) -> f32 {
-        let tilt = self.sky.map_or(0.0, |sky| sky.tilt_deg);
+        let tilt = self.sky.as_ref().map_or(0.0, |sky| sky.tilt_deg);
         daylight(sun_elevation_deg(self.hour(), tilt))
     }
 

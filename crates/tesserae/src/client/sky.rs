@@ -349,6 +349,7 @@ mod tests {
             start_hour: 7.0,
             day_share: 0.7,
             tilt_deg: 25.0,
+            day_curve: None,
         };
 
         /// Holds the Client's clock at `when` ("18:30", "4 00:00") under Terra's sky.
