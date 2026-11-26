@@ -14,7 +14,9 @@ The ground: six solid Materials with 48 by 16 textures. Data only; no code.
 Each Material also has an item of the same name that a removed Voxel of it drops
 (0.25 m). Declares no fluids, Shapes, reactions or fire. Depends on nothing.
 
-**Used by:** `meadow`, `ember`, `tidewater`, `lumen`, and `hearth` (basalt).
+**Used by:** `terra`, `meadow`, `ember`, `tidewater`, `lumen`, `hearth`
+(basalt), and `workshop`, `brickwork` and `glassworks` (stone, clay and sand for
+their Recipes).
 
 ## Licence and artwork
 

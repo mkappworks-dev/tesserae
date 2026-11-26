@@ -1,132 +1,73 @@
-//! Terra's building Materials and the Stations its buildings hold: declared, textured, in the
-//! Catalogue, and Obtainable from what its worldgen lays.
-
-use std::collections::HashSet;
+//! The shared building Materials and Stations Terra's buildings hold: textured, in the Catalogue,
+//! and Obtainable from what Terra's worldgen lays, through Stations that are.
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
+use tesserae_core::Voxel;
 use tesserae_core::craft::{Count, Station};
-use tesserae_core::{GroundParams, MaterialId, SurfacePlantKind, Voxel};
 
 use super::{loaded, material};
 use crate::server::craft::{self, Craft, CraftRefusal, CraftRefused};
 use crate::server::inventory::Inventory;
-use crate::server::mods::{LoadedMods, placeable};
+use crate::server::mods::placeable;
+use crate::server::obtainable::obtainable;
 use crate::server::player::Player;
 use crate::server::station::AtStation;
 
-const STATIONS: [&str; 3] = ["anvil", "forge", "oven"];
+const STATIONS: [(&str, &str); 3] = [
+    ("workshop:anvil", "anvil"),
+    ("workshop:forge", "forge"),
+    ("workshop:oven", "oven"),
+];
 
-/// The Materials the approved mockup's Templates name in Terra, beyond what it already had.
-const BUILDING: [&str; 15] = [
-    "oak_planks",
-    "spruce_planks",
-    "dark_oak_planks",
-    "red_planks",
-    "oak_log",
-    "dark_log",
-    "whitewash",
-    "cobblestone",
-    "ashlar",
-    "clay_tiles",
-    "terracotta_tiles",
-    "thatch",
-    "slate",
-    "shingles",
-    "awning",
+/// The Materials Terra's Templates are built of, from the shared building Mods.
+const BUILDING: [&str; 22] = [
+    "timber:planks",
+    "timber:pine_planks",
+    "timber:dark_planks",
+    "timber:red_planks",
+    "timber:frame",
+    "timber:dark_frame",
+    "timber:shingles",
+    "timber:thatch",
+    "timber:awning",
+    "timber:door",
+    "brickwork:cobble",
+    "brickwork:ashlar",
+    "brickwork:slate",
+    "brickwork:brick",
+    "brickwork:tile",
+    "brickwork:red_tile",
+    "brickwork:whitewash",
+    "glassworks:glass",
+    "glassworks:lantern",
+    "workshop:workbench",
+    "workshop:chest",
+    "workshop:oven",
 ];
 
 #[test]
-fn terra_declares_its_building_materials_textured_and_in_the_catalogue() {
-    let game = "terra";
-    let (_install, loaded) = loaded(game, 0.5);
+fn terras_building_materials_are_textured_and_in_the_catalogue() {
+    let (_install, loaded) = loaded("terra", 0.5);
     for name in BUILDING {
-        let id = material(&loaded, &format!("{game}:{name}"));
+        let id = material(&loaded, name);
         assert!(
             loaded.textures.iter().any(|t| t.material == id),
-            "{game}:{name} has a texture"
+            "{name} has a texture"
         );
-        assert!(
-            placeable(&loaded.tables, id),
-            "{game}:{name} is in the Catalogue"
-        );
-    }
-}
-
-/// The Materials a World of `loaded` lays: its ground, every Biome's ground, ores and surface
-/// features, and every Material of the Plants those features stand.
-fn laid(loaded: &LoadedMods) -> HashSet<MaterialId> {
-    let world = loaded.world.as_ref().expect("a Game sets its World");
-    let mut laid = HashSet::new();
-    let mut ground = |g: &GroundParams| laid.extend([g.rock, g.soil, g.surface]);
-    world.ground.iter().for_each(&mut ground);
-    for biome in world.biomes.as_slice() {
-        biome.ground.iter().for_each(&mut ground);
-    }
-    laid.extend(world.ores.as_slice().iter().map(|o| o.material));
-    for biome in world.biomes.as_slice() {
-        for feature in biome.surface_features.as_slice() {
-            laid.insert(feature.material);
-            let Some(plant) = feature.plant else { continue };
-            match plant.kind {
-                SurfacePlantKind::Stages { materials, len, .. } => {
-                    laid.extend(&materials[..usize::from(len)])
-                }
-                SurfacePlantKind::Column { material, .. } => {
-                    laid.insert(material);
-                }
-                SurfacePlantKind::Tree(tree) => {
-                    laid.insert(tree.trunk);
-                    laid.extend(tree.canopies(world.biomes.variety()).as_slice());
-                }
-                SurfacePlantKind::Vine(vine) => {
-                    laid.insert(vine.material);
-                    laid.extend(&vine.fruit[..usize::from(vine.len)]);
-                }
-            }
-        }
-    }
-    laid
-}
-
-/// The Items a Player can come by in a World of `loaded`: what breaking a laid Voxel yields or
-/// drops, then every Recipe output whose inputs are already in hand, until nothing changes.
-fn obtainable_items(loaded: &LoadedMods) -> HashSet<String> {
-    let items = loaded.every_item(0.5);
-    let mut held: HashSet<String> = HashSet::new();
-    for material in laid(loaded) {
-        let yields = loaded.tables.plants.yields(material);
-        if yields.is_empty() {
-            held.extend(
-                items
-                    .dropped_by(material)
-                    .map(|at| items.0[at].name.clone()),
-            );
-        } else {
-            held.extend(yields.iter().map(|y| y.item.clone()));
-        }
-    }
-    loop {
-        let before = held.len();
-        for recipe in &loaded.recipes {
-            if recipe.inputs.iter().all(|i| held.contains(&i.item)) {
-                held.insert(recipe.output.item.clone());
-            }
-        }
-        if held.len() == before {
-            return held;
-        }
+        assert!(placeable(&loaded.tables, id), "{name} is in the Catalogue");
     }
 }
 
 #[test]
 fn every_building_material_and_station_is_obtainable_from_what_terras_worldgen_lays() {
-    let game = "terra";
-    let (_install, loaded) = loaded(game, 0.5);
-    let held = obtainable_items(&loaded);
-    for name in BUILDING.iter().chain(&STATIONS) {
-        let name = format!("{game}:{name}");
-        assert!(held.contains(&name), "{name} is Obtainable; held {held:?}");
+    let (_install, loaded) = loaded("terra", 0.5);
+    let got = obtainable(&loaded, &loaded.every_item(0.5));
+    for name in BUILDING.into_iter().chain(STATIONS.map(|(name, _)| name)) {
+        assert!(
+            got.materials.contains(&material(&loaded, name)),
+            "{name} is Obtainable"
+        );
     }
 }
 
@@ -136,9 +77,9 @@ fn every_building_material_and_station_is_obtainable_from_what_terras_worldgen_l
 fn the_anvil_forge_and_oven_are_stations_whose_recipes_craft_only_beside_them() {
     let game = "terra";
     let (_install, loaded) = loaded(game, 0.5);
-    let stations = STATIONS.map(|name| {
-        let id = material(&loaded, &format!("{game}:{name}"));
-        assert_eq!(loaded.tables.uses.station(id), Some(name), "{game}:{name}");
+    let stations = STATIONS.map(|(name, tag)| {
+        let id = material(&loaded, name);
+        assert_eq!(loaded.tables.uses.station(id), Some(tag), "{name}");
         id
     });
     let mut app = App::new();
@@ -151,7 +92,7 @@ fn the_anvil_forge_and_oven_are_stations_whose_recipes_craft_only_beside_them() 
         .next()
         .unwrap()
         .0;
-    for (name, id) in STATIONS.into_iter().zip(stations) {
+    for ((_, name), id) in STATIONS.into_iter().zip(stations) {
         let here: Vec<usize> = (0..book.len())
             .filter(|&at| book[at].station == Station::Tag(name.into()))
             .collect();

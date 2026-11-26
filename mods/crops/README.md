@@ -23,7 +23,7 @@ Recipes, both by hand: three `wheat` make a `bread`; two `berries` and a `wheat`
 make a `berry_pie`.
 
 **Used by:** `terra`, `meadow`, `ember`, `tidewater` and `lumen`, which scatter
-them in Biomes.
+them in Biomes, and `timber`, whose thatch and awning are woven from its wheat.
 
 ## Licence and artwork
 

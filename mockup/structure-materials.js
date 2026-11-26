@@ -209,12 +209,31 @@ const STYLES = {
     trim: "oak-planks",
   },
 };
+const SHARED = {
+  whitewash: "brickwork:whitewash",
+  "oak-log": "timber:frame",
+  "dark-log": "timber:dark_frame",
+  cobblestone: "brickwork:cobble",
+  ashlar: "brickwork:ashlar",
+  thatch: "timber:thatch",
+  "clay-tiles": "brickwork:red_tile",
+  shingles: "timber:shingles",
+  slate: "brickwork:slate",
+  "terracotta-tiles": "brickwork:tile",
+  "oak-planks": "timber:planks",
+  "spruce-planks": "timber:pine_planks",
+  "dark-oak-planks": "timber:dark_planks",
+  "red-planks": "timber:red_planks",
+  brick: "brickwork:brick",
+  awning: "timber:awning",
+};
 function gameMaterial(game, terraName) {
-  const name =
-    game === "Terra" || !SUB[game]?.[terraName]
-      ? `terra:${terraName}`
-      : `${game.toLowerCase()}:${SUB[game][terraName]}`;
-  return name.replace(/-/g, "_");
+  if (game === "Terra" || !SUB[game]?.[terraName]) {
+    if (!SHARED[terraName])
+      throw new Error(`no shared Material for \`${terraName}\``);
+    return SHARED[terraName];
+  }
+  return `${game.toLowerCase()}:${SUB[game][terraName]}`.replace(/-/g, "_");
 }
 function materialLabel(name) {
   const short = name.split(":")[1].replace(/_/g, " ");

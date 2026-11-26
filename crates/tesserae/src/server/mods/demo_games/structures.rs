@@ -152,8 +152,8 @@ fn terra_lays_out_settlements_of_its_buildings_each_door_on_a_closed_door_and_a_
     assert_eq!(names, expected, "{game}");
     let mut used = HashSet::new();
     let exported = export(game);
-    let door = material(&loaded, &format!("{game}:door"));
-    assert!(is_closed_door(&loaded, door), "{game}:door is a Door");
+    let door = material(&loaded, "timber:door");
+    assert!(is_closed_door(&loaded, door), "timber:door is a Door");
     for settlement in settlements {
         let buildings: Vec<_> = settlement
             .centre
@@ -181,7 +181,7 @@ fn terra_lays_out_settlements_of_its_buildings_each_door_on_a_closed_door_and_a_
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|p| p["material"] == format!("{game}:door"));
+                .any(|p| p["material"] == "timber:door");
             assert_eq!(
                 building.door.is_some(),
                 has_door,
@@ -512,8 +512,14 @@ fn a_terra_world_shows_its_templates_and_a_settlement_level_whole_and_furnished(
     let wild = found.iter().filter(|f| kind(f) == "wild").count();
     assert!(wild > 0, "{game}: a wilderness Structure stands");
 
-    let furnishings = ["door", "chest", "workbench", "lamp", "glass"]
-        .map(|n| material(&loaded, &format!("{game}:{n}")));
+    let furnishings = [
+        "timber:door",
+        "workshop:chest",
+        "workshop:workbench",
+        "glassworks:lantern",
+        "glassworks:glass",
+    ]
+    .map(|n| material(&loaded, n));
     for furnishing in furnishings {
         assert!(
             buildings.iter().any(|f| {
@@ -539,7 +545,7 @@ fn a_terra_world_shows_its_templates_and_a_settlement_level_whole_and_furnished(
         .iter()
         .map(|s| s.path.material())
         .collect();
-    let door = material(&loaded, &format!("{game}:door"));
+    let door = material(&loaded, "timber:door");
     let mut facing = 0;
     for f in &buildings {
         let sampled = templates[f.template].sample(1.0, f.turn);
@@ -742,7 +748,7 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
         .with_settlements(&loaded.tables.settlements);
     let world = Generated::around_ground(&generator, terra_town_m(&loaded), 160.0);
     let found = standing(&world, templates, 1.0);
-    let cobble = material(&loaded, "terra:cobblestone");
+    let cobble = material(&loaded, "brickwork:cobble");
     let rects: Vec<[[i32; 2]; 2]> = found
         .iter()
         .map(|f| {

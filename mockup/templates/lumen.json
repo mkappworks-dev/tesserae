@@ -44,25 +44,25 @@
     {
      "symbol": "D",
      "material": "lumen:star_planks",
-     "shape": "lumen:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "F",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "lumen:workbench",
-     "shape": "lumen:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
@@ -73,7 +73,7 @@
     },
     {
      "symbol": "I",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -97,7 +97,7 @@
     },
     {
      "symbol": "M",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -405,7 +405,7 @@
     },
     {
      "symbol": "F",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -417,20 +417,20 @@
     },
     {
      "symbol": "H",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
      "symbol": "I",
      "material": "lumen:ink_planks",
-     "shape": "lumen:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "lumen:workbench",
-     "shape": "lumen:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
@@ -441,13 +441,13 @@
     },
     {
      "symbol": "L",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "M",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -815,7 +815,7 @@
     },
     {
      "symbol": "B",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -839,25 +839,25 @@
     },
     {
      "symbol": "F",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "G",
      "material": "lumen:star_planks",
-     "shape": "lumen:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "lumen:workbench",
-     "shape": "lumen:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -899,7 +899,7 @@
     },
     {
      "symbol": "P",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1171,7 +1171,7 @@
     },
     {
      "symbol": "C",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1196,13 +1196,13 @@
     {
      "symbol": "G",
      "material": "lumen:ink_planks",
-     "shape": "lumen:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
@@ -1213,8 +1213,8 @@
     },
     {
      "symbol": "J",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -1225,13 +1225,13 @@
     },
     {
      "symbol": "L",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "M",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1622,20 +1622,20 @@
     },
     {
      "symbol": "D",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "F",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -1646,13 +1646,13 @@
     },
     {
      "symbol": "H",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1870,19 +1870,19 @@
     },
     {
      "symbol": "C",
-     "material": "lumen:workbench",
-     "shape": "lumen:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "lumen:anvil",
+     "material": "workshop:anvil",
      "shape": "core:slab",
      "orientation": 0
     },
@@ -1894,7 +1894,7 @@
     },
     {
      "symbol": "G",
-     "material": "lumen:forge",
+     "material": "workshop:forge",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1906,13 +1906,13 @@
     },
     {
      "symbol": "I",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2064,8 +2064,8 @@
     },
     {
      "symbol": "D",
-     "material": "lumen:workbench",
-     "shape": "lumen:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
@@ -2082,25 +2082,25 @@
     },
     {
      "symbol": "G",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "lumen:oven",
+     "material": "workshop:oven",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2124,7 +2124,7 @@
     },
     {
      "symbol": "N",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2348,13 +2348,13 @@
     },
     {
      "symbol": "F",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -2458,7 +2458,7 @@
     },
     {
      "symbol": "D",
-     "material": "lumen:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2470,14 +2470,14 @@
     },
     {
      "symbol": "F",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "G",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -2488,7 +2488,7 @@
     },
     {
      "symbol": "I",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2915,7 +2915,7 @@
     },
     {
      "symbol": "C",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3088,13 +3088,13 @@
     },
     {
      "symbol": "G",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "lumen:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -3112,7 +3112,7 @@
     },
     {
      "symbol": "K",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3315,14 +3315,14 @@
     },
     {
      "symbol": "D",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "lumen:door",
-     "shape": "lumen:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
@@ -3432,7 +3432,7 @@
     },
     {
      "symbol": "D",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3521,7 +3521,7 @@
     },
     {
      "symbol": "B",
-     "material": "lumen:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }

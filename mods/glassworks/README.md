@@ -7,9 +7,16 @@ Glass, light, and the Shapes for building with them.
 | Materials | `glass` (clear, blended), `frosted_glass` (blended, dimmer), `lantern` (emission 15) |
 | Shapes    | `slab` (half height), `stair`, `fence` (a post that grows arms towards other fences) |
 
-Depends on nothing.
+| Recipe      | From                     | At        |
+| ----------- | ------------------------ | --------- |
+| `glass`     | 2 `strata:sand`          | oven      |
+| 2 `lantern` | 1 `glass`, 1 `flora:log` | workbench |
 
-**Used by:** `meadow`, `lumen`.
+`frosted_glass` has no Recipe.
+
+**Depends on:** `strata`, `flora`, `workshop`.
+
+**Used by:** `terra`, `meadow`, `ember`, `tidewater`, `lumen`.
 
 ## Licence and artwork
 

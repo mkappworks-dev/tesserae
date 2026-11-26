@@ -89,19 +89,15 @@ impl DeclaredSettlements {
         Ok(())
     }
 
-    /// Refuses the first path Material of a Settlement that is `used`, by its full name, that
-    /// `refuse` gives a reason against, naming the Settlement.
+    /// Refuses the first Settlement path Material that `refuse` gives a reason against, naming
+    /// the Settlement.
     pub fn check(
         &self,
         registry: &Registry,
-        used: impl Fn(&str) -> bool,
         refuse: impl Fn(MaterialId) -> Option<String>,
     ) -> Result<(), ModError> {
         for (mod_id, rows) in &self.rows {
             for (row, def) in rows.iter().enumerate() {
-                if !used(&format!("{mod_id}:{}", def.name)) {
-                    continue;
-                }
                 let Some(id) = registry.id_of(Kind::Material, &def.path) else {
                     continue;
                 };

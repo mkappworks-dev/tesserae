@@ -40,6 +40,62 @@ material = "tile"
 color = [181, 112, 65, 255]
 texture = "art/tile.png"
 
+[[materials]]
+name = "ashlar"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "slate"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "red_tile"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "whitewash"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[appearance]]
+material = "ashlar"
+color = [153, 149, 139, 255]
+texture = "art/ashlar.png"
+
+[[appearance]]
+material = "slate"
+color = [68, 76, 86, 255]
+texture = "art/slate.png"
+
+[[appearance]]
+material = "red_tile"
+color = [158, 67, 43, 255]
+texture = "art/red_tile.png"
+
+[[appearance]]
+material = "whitewash"
+color = [218, 213, 198, 255]
+texture = "art/whitewash.png"
+
 [[shapes]]
 name = "wall"
 boxes = [{ min = [4, 0, 4], max = [12, 16, 12] }]
@@ -55,3 +111,38 @@ arms = [
   { face = 4, boxes = [{ min = [5, 2, 0], max = [11, 14, 4] }], collision = [{ min = [5, 0, 0], max = [11, 24, 4] }] },
   { face = 5, boxes = [{ min = [5, 2, 12], max = [11, 14, 16] }], collision = [{ min = [5, 0, 12], max = [11, 24, 16] }] },
 ]
+
+[[recipes]]
+inputs = [{ item = "strata:stone", count = 1 }]
+output = { item = "brickwork:cobble", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "strata:stone", count = 2 }]
+output = { item = "brickwork:ashlar", count = 2 }
+station = "anvil"
+
+[[recipes]]
+inputs = [{ item = "strata:stone", count = 2 }]
+output = { item = "brickwork:slate", count = 3 }
+station = "anvil"
+
+[[recipes]]
+inputs = [{ item = "strata:clay", count = 2 }]
+output = { item = "brickwork:brick", count = 2 }
+station = "oven"
+
+[[recipes]]
+inputs = [{ item = "strata:clay", count = 1 }, { item = "strata:sand", count = 1 }]
+output = { item = "brickwork:tile", count = 4 }
+station = "oven"
+
+[[recipes]]
+inputs = [{ item = "strata:clay", count = 2 }]
+output = { item = "brickwork:red_tile", count = 4 }
+station = "oven"
+
+[[recipes]]
+inputs = [{ item = "strata:sand", count = 1 }, { item = "strata:stone", count = 1 }]
+output = { item = "brickwork:whitewash", count = 2 }
+station = "oven"

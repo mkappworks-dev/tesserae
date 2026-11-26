@@ -21,30 +21,28 @@ struct Game {
     loaded: LoadedMods,
     generator: Worldgen,
     chest: MaterialId,
-    name: &'static str,
 }
 
 /// `name` loaded as a World of `size` opens it.
 fn game(name: &'static str, size: f32) -> Game {
     let (install, loaded) = loaded(name, size);
-    game_of(name, size, (install, loaded))
+    game_of(size, (install, loaded))
 }
 
-fn game_of(name: &'static str, size: f32, (install, loaded): (Install, LoadedMods)) -> Game {
+fn game_of(size: f32, (install, loaded): (Install, LoadedMods)) -> Game {
     let generator = Worldgen::new(SEED, size, loaded.world.unwrap())
         .with_templates(&loaded.tables.templates)
         .with_settlements(&loaded.tables.settlements)
         .with_loot(&loaded.biome_loot);
     let chest = loaded
         .registry
-        .id_of(Kind::Material, &format!("{name}:chest"))
+        .id_of(Kind::Material, "workshop:chest")
         .unwrap() as MaterialId;
     Game {
         _install: install,
         loaded,
         generator,
         chest,
-        name,
     }
 }
 
@@ -58,7 +56,7 @@ impl Game {
     fn server(&self, chunks: &[(ChunkCoord, Chunk)]) -> App {
         let mut app = app_with_tables(chunks, self.loaded.tables.clone());
         let items = self.loaded.every_item(self.size());
-        let chest_item = format!("{}:chest", self.name);
+        let chest_item = "workshop:chest".to_owned();
         app.insert_resource(WorldSettings {
             voxel_size: self.size(),
             seed: SEED,
@@ -246,7 +244,7 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
     let cobble = terra
         .loaded
         .registry
-        .id_of(Kind::Material, "terra:cobblestone")
+        .id_of(Kind::Material, "brickwork:cobble")
         .unwrap() as MaterialId;
     let cobbled = (-30..30)
         .flat_map(|dz| (-30..30).map(move |dx| [well[0] + dx, well[2] + dz]))
@@ -263,7 +261,7 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
 fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
     let (install, loaded) = loaded("terra", 1.0);
     let town_m = terra_town_m(&loaded);
-    let terra = game_of("terra", 1.0, (install, loaded));
+    let terra = game_of(1.0, (install, loaded));
     let mut seen = BTreeMap::<(&str, bool), usize>::new();
     for (centre_m, half_m) in [(village_m(&terra), 128.0), (town_m, 128.0)] {
         let (world, chests) =
@@ -358,7 +356,7 @@ fn first_voxel(g: &Game, app: &mut App, metre: [i32; 3]) -> [i32; 3] {
     for at in above {
         remove(app, at);
         assert!(
-            dropped_counts(app, &format!("{}:chest", g.name)).is_empty(),
+            dropped_counts(app, "workshop:chest").is_empty(),
             "only the first Voxel draws"
         );
     }
@@ -385,7 +383,7 @@ fn a_chest_draws_alike_opened_or_broken_first_in_any_chunk_order_and_at_every_vo
     }
     remove(&mut broken, at);
     assert_eq!(
-        dropped_counts(&broken, "terra:chest"),
+        dropped_counts(&broken, "workshop:chest"),
         held_counts(&slots),
         "broken first, the same Items spill"
     );
@@ -406,7 +404,7 @@ fn a_chest_put_back_by_a_player_and_one_placed_anywhere_start_empty() {
     let mut app = terra.server(&terra.chunks_round(at));
     remove(&mut app, at);
     assert!(
-        !dropped_counts(&app, "terra:chest").is_empty(),
+        !dropped_counts(&app, "workshop:chest").is_empty(),
         "its loot spilt"
     );
     place_chest(&mut app, at);

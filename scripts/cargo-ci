@@ -56,6 +56,12 @@ for mod in mods/*/; do
   cargo run --locked --features tesserae/dev --bin tesserae -- validate "$mod" --mods mods
 done
 
+step "Validate: Games"
+for game in games/*/; do
+  cargo run --locked --features tesserae/dev --bin tesserae -- validate "$game" --mods mods \
+    --trust-for-run
+done
+
 step "Boundaries"
 ./scripts/check-terra-boundary
 members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')

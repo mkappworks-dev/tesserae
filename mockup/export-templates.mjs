@@ -35,6 +35,7 @@ const SHAPES = {
   fence: "fence",
   cross: "flora:cross",
 };
+const SHARED_SHAPES = { panel: "timber:leaf", table: "workshop:table" };
 /* Wilderness Structures stand on rougher ground than the Settlement levels for its Plots. */
 const WILD_TOLERANCE_M = 2;
 const KEEP = ".",
@@ -79,7 +80,9 @@ function exportTemplate(t) {
       if (!shape) throw new Error(`${t.id}: no Shape for \`${c.shape}\``);
       const voxel = {
           material: materialOf(t, c),
-          shape: shape.includes(":") ? shape : `${game}:${shape}`,
+          shape: shape.includes(":")
+            ? shape
+            : SHARED_SHAPES[shape] || `${game}:${shape}`,
           orientation: orientation(c.turn || 0, c.hinge),
         },
         key = JSON.stringify(voxel);

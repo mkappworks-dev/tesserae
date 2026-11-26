@@ -1274,7 +1274,7 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
         assert_eq!(
             loaded
                 .registry
-                .id_of(tesserae_mods::Kind::Material, "terra:lamp"),
+                .id_of(tesserae_mods::Kind::Material, "terra:lava"),
             Some(usize::from(base))
         );
         assert_eq!(
@@ -1296,44 +1296,32 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
             .iter()
             .filter(|(id, _)| *id >= base)
             .map(|&(id, colour)| (id - base + 8, colour))
-            // Its building Materials follow, covered by the demo Games' building tests.
-            .take(23)
             .collect();
         assert_eq!(
             own,
             [
-                (8, [193, 177, 135, 255]),
-                (9, [247, 130, 21, 255]),
-                (10, [148, 103, 59, 255]),
-                (11, [72, 68, 64, 255]),
-                (12, [82, 63, 41, 224]),
-                (13, [154, 79, 59, 255]),
-                (14, [37, 125, 188, 166]),
-                (15, [132, 132, 139, 255]),
-                (16, [109, 81, 60, 255]),
-                (17, [85, 143, 57, 255]),
-                (18, [164, 207, 249, 89]),
-                (19, [52, 112, 41, 255]),
-                (20, [190, 173, 135, 255]),
-                (21, [218, 222, 228, 255]),
-                (22, [156, 132, 125, 255]),
-                (23, [165, 145, 204, 255]),
-                (24, [77, 138, 51, 255]),
-                (25, [180, 157, 115, 255]),
-                (26, [110, 56, 36, 255]),
-                (27, [111, 76, 43, 255]),
-                (28, [111, 76, 43, 255]),
-                (29, [128, 88, 50, 255]),
-                (30, [128, 88, 50, 255])
+                (8, [247, 130, 21, 255]),
+                (9, [148, 103, 59, 255]),
+                (10, [72, 68, 64, 255]),
+                (11, [82, 63, 41, 224]),
+                (12, [37, 125, 188, 166]),
+                (13, [132, 132, 139, 255]),
+                (14, [109, 81, 60, 255]),
+                (15, [85, 143, 57, 255]),
+                (16, [52, 112, 41, 255]),
+                (17, [190, 173, 135, 255]),
+                (18, [218, 222, 228, 255]),
+                (19, [156, 132, 125, 255]),
+                (20, [165, 145, 204, 255]),
+                (21, [77, 138, 51, 255])
             ]
         );
-        assert_eq!(loaded.tables.materials.def(base).emission, 15);
-        // Lava is Terra's own Material after its lamp; no built-in moved.
+        // Lava is Terra's first Material; no built-in moved.
         let lava = loaded
             .registry
             .id_of(tesserae_mods::Kind::Material, "terra:lava")
             .unwrap() as u16;
-        assert_eq!(lava, base + 1);
+        assert_eq!(lava, base);
         assert_eq!(loaded.tables.materials.def(lava).emission, 15);
         let flow = loaded.tables.fluids.get(lava).unwrap();
         // Its own water, with the fixture water's fluid row and Material, but clear to light.
@@ -1341,7 +1329,7 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
             .registry
             .id_of(tesserae_mods::Kind::Material, "terra:water")
             .unwrap() as u16;
-        assert_eq!(terra_water, base + 6);
+        assert_eq!(terra_water, base + 4);
         assert_eq!(
             *loaded.tables.materials.def(terra_water),
             tesserae_core::MaterialDef {
@@ -1380,8 +1368,8 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
                 .id_of(tesserae_mods::Kind::Material, name)
                 .unwrap() as u16
         };
-        let (mud, brick) = (material("terra:mud"), material("terra:brick"));
-        assert_eq!((mud, brick), (base + 4, base + 5));
+        let (mud, brick) = (material("terra:mud"), material("brickwork:brick"));
+        assert_eq!(mud, base + 3);
         let mud_flow = loaded.tables.fluids.get(mud).unwrap();
         assert!(mud_flow.waterlogs && mud_flow.extinguishes && mud_flow.heat.is_none());
         assert!(
@@ -1391,7 +1379,7 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
         assert_eq!(mud_flow.reach_m, 2.0);
         // Its two reactions, resolved by name, either state of each fluid:
         // lava touching its water becomes terra:stone and the water stays; mud
-        // touching lava becomes terra:brick and the lava stays.
+        // touching lava becomes brickwork:brick and the lava stays.
         let rules = loaded.tables.reactions.rules();
         assert_eq!(rules.len(), 2);
         for (rule, pair, consumed, product) in [
@@ -1438,7 +1426,7 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
             .add_plugins(super::super::plugin);
         assert_eq!(
             h.app.world().resource::<ContentTables>().shapes.len(),
-            usize::from(shape_base) + 3
+            usize::from(shape_base) + 1
         );
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::for_tests(

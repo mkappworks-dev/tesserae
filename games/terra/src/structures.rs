@@ -79,7 +79,7 @@ fn village_loot() -> LootTable {
             ("crops:potato", 1, 4, 2.0),
             ("flora:apple", 1, 3, 2.0),
             ("crops:wheat_seeds", 2, 5, 2.0),
-            ("terra:oak_planks", 2, 8, 1.0),
+            ("timber:planks", 2, 8, 1.0),
             ("terra:rock", 1, 4, 1.0),
         ],
     )
@@ -95,10 +95,10 @@ fn town_loot() -> LootTable {
             ("flora:cherries", 2, 5, 2.0),
             ("flora:orange", 2, 5, 2.0),
             ("terra:iron", 1, 4, 2.0),
-            ("terra:glass", 2, 6, 1.5),
-            ("terra:lamp", 1, 2, 1.0),
-            ("terra:spruce_planks", 4, 12, 1.0),
-            ("terra:brick", 4, 12, 1.0),
+            ("glassworks:glass", 2, 6, 1.5),
+            ("glassworks:lantern", 1, 2, 1.0),
+            ("timber:pine_planks", 4, 12, 1.0),
+            ("brickwork:brick", 4, 12, 1.0),
         ],
     )
 }
@@ -109,7 +109,7 @@ fn smithy_loot() -> LootTable {
         &[
             ("terra:iron", 1, 4, 3.0),
             ("terra:rock", 2, 8, 2.0),
-            ("terra:cobblestone", 4, 12, 2.0),
+            ("brickwork:cobble", 4, 12, 2.0),
             ("terra:wood", 2, 6, 1.0),
         ],
     )
@@ -135,7 +135,7 @@ pub fn biome_loot(biome: &str) -> LootTable {
             &[
                 ("strata:sand", 2, 8, 2.0),
                 ("flora:cactus", 1, 3, 2.0),
-                ("terra:terracotta_tiles", 2, 6, 1.0),
+                ("brickwork:tile", 2, 6, 1.0),
                 ("terra:iron", 1, 2, 1.0),
             ],
         ),
@@ -144,7 +144,7 @@ pub fn biome_loot(biome: &str) -> LootTable {
             &[
                 ("terra:snow", 2, 8, 2.0),
                 ("flora:pine_sapling", 1, 2, 2.0),
-                ("terra:spruce_planks", 2, 6, 2.0),
+                ("timber:pine_planks", 2, 6, 2.0),
                 ("terra:iron", 1, 2, 1.0),
             ],
         ),
@@ -154,7 +154,7 @@ pub fn biome_loot(biome: &str) -> LootTable {
                 ("flora:coconut", 1, 3, 2.0),
                 ("flora:jungle_sapling", 1, 2, 2.0),
                 ("flora:vine", 2, 6, 2.0),
-                ("terra:lamp", 1, 1, 1.0),
+                ("glassworks:lantern", 1, 1, 1.0),
             ],
         ),
         "swamp" => loot(
@@ -170,7 +170,7 @@ pub fn biome_loot(biome: &str) -> LootTable {
             &[
                 ("flora:acacia_sapling", 1, 2, 2.0),
                 ("flora:dry_grass", 2, 6, 2.0),
-                ("terra:clay_tiles", 2, 6, 1.0),
+                ("brickwork:red_tile", 2, 6, 1.0),
                 ("terra:iron", 1, 2, 1.0),
             ],
         ),
@@ -317,7 +317,7 @@ pub fn settlements() -> Vec<SettlementDef> {
                 plot("garden", 2.0, 0, 6),
             ],
             20,
-            "terra:cobblestone",
+            "brickwork:cobble",
             town_loot(),
             (
                 TOWN_MARGIN_M,

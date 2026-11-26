@@ -10,16 +10,16 @@ const CASES = {
 const VIEWS = { outside: "Outside", inside: "Inside", placing: "Placing" };
 const STOREY = 4;
 
-/* Roles a builder names; a Template's style says which Material fills each. These are each Game's own furnishings. */
+/* Roles a builder names; a Template's style says which Material fills each. Every Game's furnishings are the shared Mods'. */
 const FIXED = {
-  glass: "glass",
-  door: "door",
-  lamp: "lamp",
-  chest: "chest",
-  bench: "workbench",
-  anvil: "anvil",
-  forge: "forge",
-  oven: "oven",
+  glass: "glassworks:glass",
+  door: "timber:door",
+  lamp: "glassworks:lantern",
+  chest: "workshop:chest",
+  bench: "workshop:workbench",
+  anvil: "workshop:anvil",
+  forge: "workshop:forge",
+  oven: "workshop:oven",
 };
 const ROLE = {
   chest: "Container",
@@ -852,7 +852,7 @@ const B = {
   },
   mushroomShed: (w = 7, d = 6) => {
     const g = new Grid(),
-      wall = M("terra:oak_planks");
+      wall = M("timber:planks");
     for (let x = 0; x < w; x++)
       for (let z = 0; z < d; z++) {
         const edge = x === 0 || z === 0 || x === w - 1 || z === d - 1;
@@ -870,7 +870,7 @@ const B = {
           );
         g.put(x, 4, z, wall);
       }
-    doorway(g, w >> 1, d - 1, 1, [0, w - 1], "terra:oak_planks");
+    doorway(g, w >> 1, d - 1, 1, [0, w - 1], "timber:planks");
     return g.done();
   },
   /* Young fruit trees in rows on grass, three metres apart, which grow up as wild ones do. */
@@ -900,7 +900,7 @@ const B = {
             z,
             z === d - 1 && gate.includes(x)
               ? "air"
-              : M("terra:oak_planks", "fence"),
+              : M("timber:planks", "fence"),
           );
         else if (cell?.plant) g.put(x, 1, z, cell.plant);
       }
@@ -1261,7 +1261,7 @@ const WATER_LOOK = {
   Terra: {
     rim: "terra:sand",
     bed: "strata:clay",
-    stone: "terra:cobblestone",
+    stone: "brickwork:cobble",
     rock: "terra:stone",
     top: "terra:grass",
     pad: "aquatic:lily_pad",
@@ -1785,7 +1785,7 @@ function materialOf(t, c) {
   if (c.m.includes(":")) return c.m;
   if (c.m === "water")
     return t.game === "Terra" ? "terra:water" : "waters:water";
-  if (FIXED[c.m]) return `${t.game.toLowerCase()}:${FIXED[c.m]}`;
+  if (FIXED[c.m]) return FIXED[c.m];
   const style = STYLES[t.style] || STYLES.wild,
     role = { wall2: style.wall2 ? "wall2" : "wall", table: "trim" }[c.m] || c.m;
   return gameMaterial(

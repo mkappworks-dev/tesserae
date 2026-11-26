@@ -1,7 +1,6 @@
-//! Meadow's building Materials: birch, walnut, fieldstone, straw, moss and honey-coloured tiles,
-//! and the Stations and furnishings its buildings hold.
+//! Meadow's building Materials: birch, walnut, fieldstone, straw, moss and honey-coloured tiles.
 
-use demo_kit::building::{Block, Pattern::*, block, make, station};
+use demo_kit::building::{Block, Pattern::*, block, make};
 
 const LOG: &str = "flora:log";
 const LEAVES: &str = "flora:leaves";
@@ -11,7 +10,7 @@ const CLAY: &str = "strata:clay";
 const SOIL: &str = "strata:soil";
 const WHEAT: &str = "crops:wheat";
 
-pub const BLOCKS: [Block; 24] = [
+pub const BLOCKS: [Block; 16] = [
     block(
         "whitewash",
         Plaster,
@@ -123,62 +122,6 @@ pub const BLOCKS: [Block; 24] = [
         0xe8b84a,
         0xf1ead6,
         make("hand", &[(WHEAT, 2), (LEAVES, 2)], 2),
-    ),
-    station(
-        "anvil",
-        Anvil,
-        0x5b6168,
-        0x6b4a30,
-        make("forge", &[(STONE, 4), ("strata:basalt", 1)], 1),
-    ),
-    station(
-        "forge",
-        Forge,
-        0x9c9a88,
-        0x6e6c5d,
-        make("hand", &[(STONE, 8)], 1),
-    ),
-    station(
-        "oven",
-        Oven,
-        0xb9704f,
-        0xe9dfc9,
-        make("hand", &[(CLAY, 6)], 1),
-    ),
-    station(
-        "workbench",
-        Workbench,
-        0x6e4a2e,
-        0x3f3a34,
-        make("hand", &[(LOG, 4)], 1),
-    ),
-    block(
-        "chest",
-        Chest,
-        0x6e4a2e,
-        0x3f3a34,
-        make("workbench", &[(LOG, 8)], 1),
-    ),
-    block(
-        "door",
-        Door,
-        0x6e4a2e,
-        0x3f3a34,
-        make("workbench", &[(LOG, 3)], 1),
-    ),
-    block(
-        "glass",
-        Glass,
-        0xcfe8c0,
-        0xc9b48a,
-        make("oven", &[(SAND, 2)], 1),
-    ),
-    block(
-        "lamp",
-        Lamp,
-        0xffd98a,
-        0x6e4a2e,
-        make("workbench", &[("meadow:glass", 1), ("strata:basalt", 1)], 2),
     ),
 ];
 

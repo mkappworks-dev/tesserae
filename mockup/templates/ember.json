@@ -44,25 +44,25 @@
     {
      "symbol": "D",
      "material": "ember:soot_planks",
-     "shape": "ember:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "F",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "ember:workbench",
-     "shape": "ember:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
@@ -73,7 +73,7 @@
     },
     {
      "symbol": "I",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -97,7 +97,7 @@
     },
     {
      "symbol": "M",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -405,7 +405,7 @@
     },
     {
      "symbol": "F",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -417,20 +417,20 @@
     },
     {
      "symbol": "H",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
      "symbol": "I",
      "material": "ember:char_planks",
-     "shape": "ember:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "ember:workbench",
-     "shape": "ember:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
@@ -441,13 +441,13 @@
     },
     {
      "symbol": "L",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "M",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -815,7 +815,7 @@
     },
     {
      "symbol": "B",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -839,25 +839,25 @@
     },
     {
      "symbol": "F",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "G",
      "material": "ember:soot_planks",
-     "shape": "ember:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "ember:workbench",
-     "shape": "ember:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -899,7 +899,7 @@
     },
     {
      "symbol": "P",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1171,7 +1171,7 @@
     },
     {
      "symbol": "C",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1196,13 +1196,13 @@
     {
      "symbol": "G",
      "material": "ember:char_planks",
-     "shape": "ember:table",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
@@ -1213,8 +1213,8 @@
     },
     {
      "symbol": "J",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -1225,13 +1225,13 @@
     },
     {
      "symbol": "L",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "M",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1622,20 +1622,20 @@
     },
     {
      "symbol": "D",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "F",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -1646,13 +1646,13 @@
     },
     {
      "symbol": "H",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1870,19 +1870,19 @@
     },
     {
      "symbol": "C",
-     "material": "ember:workbench",
-     "shape": "ember:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "ember:anvil",
+     "material": "workshop:anvil",
      "shape": "core:slab",
      "orientation": 0
     },
@@ -1894,7 +1894,7 @@
     },
     {
      "symbol": "G",
-     "material": "ember:forge",
+     "material": "workshop:forge",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -1906,13 +1906,13 @@
     },
     {
      "symbol": "I",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2064,8 +2064,8 @@
     },
     {
      "symbol": "D",
-     "material": "ember:workbench",
-     "shape": "ember:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
@@ -2082,25 +2082,25 @@
     },
     {
      "symbol": "G",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "ember:oven",
+     "material": "workshop:oven",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2124,7 +2124,7 @@
     },
     {
      "symbol": "N",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2348,13 +2348,13 @@
     },
     {
      "symbol": "F",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -2458,7 +2458,7 @@
     },
     {
      "symbol": "D",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2470,14 +2470,14 @@
     },
     {
      "symbol": "F",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "G",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -2488,7 +2488,7 @@
     },
     {
      "symbol": "I",
-     "material": "ember:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -2915,7 +2915,7 @@
     },
     {
      "symbol": "C",
-     "material": "ember:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3343,7 +3343,7 @@
     },
     {
      "symbol": "B",
-     "material": "ember:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -3361,8 +3361,8 @@
     },
     {
      "symbol": "E",
-     "material": "ember:door",
-     "shape": "ember:panel",
+     "material": "timber:door",
+     "shape": "timber:leaf",
      "orientation": 6
     }
    ],

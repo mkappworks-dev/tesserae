@@ -779,66 +779,37 @@ pub(crate) async fn declare_all(
         world.lava = lava;
         world.cave_biomes = cave_biomes;
     }
-    let obtainable = super::obtainable::obtainable(&loaded, &loaded.every_item(world.voxel_size));
-    let (used_templates, used_settlements) = stood_by_biomes(&loaded);
+    let every_item = loaded.every_item(world.voxel_size);
+    let obtainable = super::obtainable::obtainable(&loaded, &every_item);
     // A fluid cell is exempt: a well is meant to be a Settlement's water, even where nothing else is.
     let refuse = |m| {
         let planted = loaded.tables.plants.planted_as(m).unwrap_or(m);
-        (!obtainable.contains(&planted) && !loaded.tables.fluids.contains(m)).then(|| {
-            "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
-             what is"
-                .to_owned()
+        if obtainable.materials.contains(&planted) || loaded.tables.fluids.contains(m) {
+            return None;
+        }
+        let stations = obtainable.missing_stations(&loaded.recipes, &every_item, planted);
+        let reason = "is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes \
+                      it from what is";
+        Some(if stations.is_empty() {
+            reason.to_owned()
+        } else {
+            format!(
+                "{reason} at a Station a Player can get (needs `{}`)",
+                stations.join("`, `")
+            )
         })
     };
     templates
-        .check(
-            &loaded.registry,
-            |name| used_templates.contains(name),
-            refuse,
-        )
+        .check(&loaded.registry, refuse)
         .map_err(|e| e.to_string())?;
     settlements
-        .check(
-            &loaded.registry,
-            |name| used_settlements.contains(name),
-            refuse,
-        )
+        .check(&loaded.registry, refuse)
         .map_err(|e| e.to_string())?;
-    let items = loaded.every_item(world.voxel_size).0;
+    let items = every_item.0;
     settlements.check_loot(&items).map_err(|e| e.to_string())?;
     loaded.biome_loot =
         tesserae_mods::biome_loot(&biome_rows, &items).map_err(|e| e.to_string())?;
     Ok(loaded)
-}
-
-/// The names of the Templates and Settlements the World's Biomes stand, a Settlement's own
-/// Templates included: only these must be Obtainable, as the `place` Tool is Creative's alone.
-fn stood_by_biomes(loaded: &LoadedMods) -> (HashSet<String>, HashSet<String>) {
-    let tables = &loaded.tables;
-    let biomes = loaded
-        .world
-        .as_ref()
-        .map_or(&[][..], |w| w.biomes.as_slice());
-    let settlements: Vec<&Settlement> = biomes
-        .iter()
-        .flat_map(|b| b.surface_features.settlements())
-        .filter_map(|row| tables.settlements.get(usize::from(row.settlement)))
-        .collect();
-    let templates = biomes
-        .iter()
-        .flat_map(|b| b.surface_features.structures())
-        .map(|row| row.template)
-        .chain(settlements.iter().flat_map(|s| {
-            s.centre
-                .iter()
-                .chain(s.rules.iter().map(|r| &r.building))
-                .map(|b| b.template)
-        }))
-        .filter_map(|at| tables.templates.get(usize::from(at)))
-        .map(|t| t.name.clone())
-        .collect();
-    let settlements = settlements.iter().map(|s| s.name.clone()).collect();
-    (templates, settlements)
 }
 
 fn load_with_opening(
@@ -1248,22 +1219,22 @@ mod tests {
             &super::super::persistence::Opening::ephemeral(),
             &WorldSettings::default(),
         );
-        let lamp = loaded
+        let crystal = loaded
             .registry
             .names(Kind::Material)
-            .find(|(_, name)| *name == "terra:lamp")
+            .find(|(_, name)| *name == "terra:crystal")
             .map(|(id, _)| id as MaterialId)
             .unwrap();
         let mut params = super::super::worldgen_params(loaded.world);
         assert!(
             !ground_materials(&params, &loaded.tables, &loaded.registry, Some("terra"))
-                .contains(&lamp)
+                .contains(&crystal)
         );
         let ground = params.ground.as_mut().unwrap();
-        ground.surface = lamp;
+        ground.surface = crystal;
         assert!(
             ground_materials(&params, &loaded.tables, &loaded.registry, Some("terra"))
-                .contains(&lamp)
+                .contains(&crystal)
         );
     }
 
@@ -1810,7 +1781,6 @@ biomes = ["plain:dry"]
         assert_eq!(world.climate, tesserae_core::ClimateParams::default());
     }
 
-    /// A Biome standing the hut, so the hut must be Obtainable.
     const HUT_BIOME: &str = r#"[[biomes]]
 name = "huts"
 temperature = 0.5
@@ -1880,50 +1850,75 @@ layers = [["rp"]]
     }
 
     #[test]
-    fn only_what_a_biome_stands_must_be_obtainable() {
-        let hamlet = "[[settlements]]\nname = \"hamlet\"\nradius-m = 8.0\nplots = 1\n\
-                      path = \"plain:gem\"\ntemplates = [{ template = \"plain:hut\" }]\n";
-        let settled = "settlements = [{ settlement = \"plain:hamlet\", spacing-m = 64.0 }]\n";
-        let unlisted = |game: String| game.replace(HUT_BIOME, "");
-        let listed = |game: String| {
-            game.replace(
-                HUT_BIOME,
-                &HUT_BIOME.replace("structures = [", &format!("{settled}structures = [")),
+    fn a_recipe_counts_only_at_a_station_a_player_can_get() {
+        let recipe = |output: &str, input: &str, station: &str| {
+            format!(
+                "[[recipes]]\ninputs = [{{ item = \"{input}\", count = 1 }}]\n\
+                 output = {{ item = \"{output}\", count = 1 }}\nstation = \"{station}\"\n"
             )
         };
-        let want = "mod `plain`: settlement 0 `hamlet`: path: Material `plain:gem` is not \
+        let station = |name: &str| {
+            format!(
+                "[[materials]]\nname = \"{name}\"\nemission = 0\ndimming = 15\n\
+                 occlusion = \"opaque\"\nrender = \"opaque\"\nsolid = true\n\
+                 [[voxel-uses]]\nkind = \"station\"\nmaterial = \"plain:{name}\"\ntag = \"{name}\"\n"
+            )
+        };
+        let at_bench = format!(
+            "{}{}{}",
+            station("bench"),
+            station("forge"),
+            recipe("plain:planks", "plain:rock", "bench")
+        );
+        let s = Scratch::new();
+        data(&s, "plain", true, "", &hut_game(&at_bench));
+        let want = "mod `plain`: template 0 `hut`: palette `p`: Material `plain:planks` is not \
                     Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from \
-                    what is";
-        for (game, refusal) in [
-            (unlisted(hut_game("")), None),
-            (unlisted(hut_game(hamlet)), None),
-            (listed(hut_game(hamlet)), Some("plain:planks")),
+                    what is at a Station a Player can get (needs `bench`)";
+        let (created, opened) = refusals(&s);
+        assert_eq!(created.unwrap_err(), want);
+        assert_eq!(opened.unwrap_err(), want);
+        for bench in [
+            recipe("plain:bench", "plain:rock", "hand"),
+            recipe("plain:bench", "plain:rock", "forge")
+                + &recipe("plain:forge", "plain:rock", "hand"),
+        ] {
+            let s = Scratch::new();
+            data(
+                &s,
+                "plain",
+                true,
+                "",
+                &hut_game(&format!("{at_bench}{bench}")),
+            );
+            assert_eq!(refusals(&s), (Ok(()), Ok(())), "{bench}");
+        }
+    }
+
+    #[test]
+    fn every_template_and_settlement_path_must_be_obtainable_whether_or_not_a_biome_stands_it() {
+        let hamlet = "[[settlements]]\nname = \"hamlet\"\nradius-m = 8.0\nplots = 1\n\
+                      path = \"plain:gem\"\ntemplates = [{ template = \"plain:hut\" }]\n";
+        let unlisted = |game: String| game.replace(HUT_BIOME, "");
+        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
+                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
+        for (game, material) in [
+            (unlisted(hut_game("")), "plain:planks"),
+            (
+                unlisted(hut_game(&format!("{from_rock}{hamlet}"))),
+                "plain:gem",
+            ),
         ] {
             let s = Scratch::new();
             data(&s, "plain", true, "", &game);
             let (created, opened) = refusals(&s);
-            match refusal {
-                None => assert_eq!((created, opened), (Ok(()), Ok(())), "{game}"),
-                Some(material) => {
-                    for refusal in [created, opened] {
-                        assert!(refusal.unwrap_err().contains(material), "{game}");
-                    }
-                }
+            for refusal in [created, opened] {
+                assert!(refusal.unwrap_err().contains(material), "{game}");
             }
         }
-        let from_rock = "[[recipes]]\ninputs = [{ item = \"plain:rock\", count = 1 }]\n\
-                         output = { item = \"plain:planks\", count = 4 }\nstation = \"hand\"\n";
         let s = Scratch::new();
-        data(
-            &s,
-            "plain",
-            true,
-            "",
-            &listed(hut_game(&format!("{from_rock}{hamlet}"))),
-        );
-        let (created, opened) = refusals(&s);
-        assert_eq!(created.unwrap_err(), want);
-        assert_eq!(opened.unwrap_err(), want);
+        data(&s, "plain", true, "", &unlisted(hut_game(from_rock)));
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
     }
 
     #[test]
@@ -2053,6 +2048,103 @@ layers = [["rp"]]
                 "{extra}: {created:?}"
             );
         }
+    }
+
+    /// The shared building Mods' Materials, each Obtainable from the world Materials their Recipes
+    /// name: a fixture Game lays strata's stone, clay and sand, and stands a flora tree and a wheat
+    /// field, so nothing but the shared Mods makes the rest.
+    #[test]
+    fn the_shared_building_mods_make_every_material_from_world_materials() {
+        let shared = [
+            "strata",
+            "flora",
+            "crops",
+            "workshop",
+            "timber",
+            "brickwork",
+            "glassworks",
+        ];
+        let made = [
+            "workshop:workbench",
+            "workshop:forge",
+            "workshop:anvil",
+            "workshop:oven",
+            "workshop:chest",
+            "timber:planks",
+            "timber:pine_planks",
+            "timber:dark_planks",
+            "timber:red_planks",
+            "timber:frame",
+            "timber:dark_frame",
+            "timber:shingles",
+            "timber:thatch",
+            "timber:awning",
+            "timber:door",
+            "timber:gate",
+            "brickwork:cobble",
+            "brickwork:ashlar",
+            "brickwork:slate",
+            "brickwork:brick",
+            "brickwork:tile",
+            "brickwork:red_tile",
+            "brickwork:whitewash",
+            "glassworks:glass",
+            "glassworks:lantern",
+        ];
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+        let installed = || {
+            let s = Scratch::new();
+            for id in shared {
+                super::demo_games::copy_tree(&checkout.join(id), &s.0.join("mods").join(id));
+            }
+            s
+        };
+        let symbols: Vec<char> = ('a'..='z').chain('A'..='Z').take(made.len()).collect();
+        assert_eq!(
+            symbols.len(),
+            made.len(),
+            "a palette symbol for each Material"
+        );
+        let palette: String = symbols
+            .iter()
+            .zip(made)
+            .map(|(c, m)| format!("\"{c}\" = {{ material = \"{m}\" }}\n"))
+            .collect();
+        let row: String = symbols.iter().collect();
+        let game = format!(
+            r#"[world.ground]
+rock = "strata:stone"
+soil = "strata:clay"
+surface = "strata:sand"
+[[biomes]]
+name = "shared"
+temperature = 0.5
+humidity = 0.5
+surface-features = [{{ plant = "flora:oak", spacing-m = 8.0 }}]
+crop-fields = [{{ crops = [["crops:wheat", 1.0]], plot-m = [8.0, 8.0], spacing-m = 72.0 }}]
+[[templates]]
+name = "everything"
+cell-m = 1.0
+ground-layer = 0
+layers = [["{row}"]]
+[templates.palette]
+{palette}"#
+        );
+        let depends = format!("depends = {shared:?}");
+        let s = installed();
+        data(&s, "plain", true, &depends, &game);
+        assert_eq!(refusals(&s), (Ok(()), Ok(())));
+        let s = installed();
+        let bare = game.replace(
+            "surface-features = [{ plant = \"flora:oak\", spacing-m = 8.0 }]\n",
+            "",
+        );
+        data(&s, "plain", true, &depends, &bare);
+        let (created, _) = refusals(&s);
+        assert!(
+            created.unwrap_err().contains("workshop:workbench"),
+            "no tree, no logs"
+        );
     }
 
     const WHEAT: &str = "[[materials]]\nname = \"sprout\"\nemission = 0\ndimming = 0\n\
@@ -2913,25 +3005,28 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     #[test]
-    fn a_terra_workbench_is_always_a_table_and_the_player_is_offered_neither_fixed_shape() {
+    fn terras_workbench_is_always_a_table_and_the_player_is_offered_neither_fixed_shape() {
         let loaded = super::runtime::tests::terra_loaded(1.0);
         let id = |kind, name| loaded.registry.id_of(kind, name).unwrap();
-        let table = id(Kind::Shape, "terra:table") as u8;
+        let table = id(Kind::Shape, "workshop:table") as u8;
         assert_eq!(
             loaded
                 .tables
                 .uses
-                .shape(id(Kind::Material, "terra:workbench") as MaterialId),
+                .shape(id(Kind::Material, "workshop:workbench") as MaterialId),
             Some(table)
         );
-        let chest = id(Kind::Material, "terra:chest") as MaterialId;
+        let chest = id(Kind::Material, "workshop:chest") as MaterialId;
         assert_eq!(loaded.tables.uses.shape(chest), None);
         let catalogue = published_catalogue(loaded);
-        let fixed: Vec<_> = catalogue.shapes.iter().filter(|s| s.fixed).collect();
-        assert_eq!(
-            fixed.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
-            ["terra:panel", "terra:table"]
-        );
+        let mut fixed: Vec<_> = catalogue
+            .shapes
+            .iter()
+            .filter(|s| s.fixed)
+            .map(|s| s.name.as_str())
+            .collect();
+        fixed.sort_unstable();
+        assert_eq!(fixed, ["timber:leaf", "workshop:table"]);
     }
 
     #[test]
@@ -2975,7 +3070,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         }
         assert!(material("terra:water").fluid < material("terra:lava").fluid);
         assert!(material("terra:wood").solid && material("terra:wood").burns);
-        for solid in ["terra:stone", "terra:brick", "terra:lamp"] {
+        for solid in ["terra:stone", "brickwork:brick", "glassworks:lantern"] {
             let solid = material(solid);
             assert!(solid.solid && solid.fluid.is_none() && !solid.burns);
         }
@@ -3024,8 +3119,8 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let at = book
             .0
             .iter()
-            .position(|r| r.output.item == "terra:workbench")
-            .expect("Terra declares the Workbench Recipe");
+            .position(|r| r.output.item == "workshop:workbench")
+            .expect("workshop declares the Workbench Recipe");
         assert_eq!(book.0[at].station, Station::Hand);
         let mut inventory = super::super::inventory::Inventory::default();
         inventory.receive("flora:log", 4, 64);
@@ -3043,11 +3138,11 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .query::<&super::super::inventory::Inventory>();
         let held = held.single(app.world()).unwrap();
         assert_eq!(held.count("flora:log"), 0);
-        assert_eq!(held.count("terra:workbench"), 1);
+        assert_eq!(held.count("workshop:workbench"), 1);
     }
 
     #[test]
-    fn a_terra_workbench_is_a_station_that_crafts_a_chest_a_door_and_a_gate_from_wood() {
+    fn terras_workbench_is_a_station_that_crafts_a_chest_a_door_and_a_gate_from_wood() {
         use super::super::craft::{Craft, CraftRefusal, CraftRefused, craft};
         use super::super::station::AtStation;
         use bevy::ecs::system::RunSystemOnce;
@@ -3056,7 +3151,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let loaded = super::runtime::tests::terra_loaded(1.0);
         let workbench = loaded
             .registry
-            .id_of(Kind::Material, "terra:workbench")
+            .id_of(Kind::Material, "workshop:workbench")
             .unwrap() as MaterialId;
         assert_eq!(loaded.tables.uses.station(workbench), Some("workbench"));
         let mut app = App::new();
@@ -3095,7 +3190,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            ask(&mut app, at("terra:chest")),
+            ask(&mut app, at("workshop:chest")),
             [CraftRefusal::NeedsStation]
         );
         app.world_mut().entity_mut(player).insert(AtStation {
@@ -3103,34 +3198,34 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             voxel: tesserae_core::Voxel::cube(workbench),
             tag: "workbench".into(),
         });
-        assert_eq!(ask(&mut app, at("terra:chest")), []);
-        assert_eq!(ask(&mut app, at("terra:door")), []);
-        assert_eq!(ask(&mut app, at("terra:gate")), []);
+        assert_eq!(ask(&mut app, at("workshop:chest")), []);
+        assert_eq!(ask(&mut app, at("timber:door")), []);
+        assert_eq!(ask(&mut app, at("timber:gate")), []);
         let mut held = app
             .world_mut()
             .query::<&super::super::inventory::Inventory>();
         let held = held.single(app.world()).unwrap();
         assert_eq!(held.count("flora:log"), 0);
-        assert_eq!(held.count("terra:chest"), 1);
-        assert_eq!(held.count("terra:door"), 1);
-        assert_eq!(held.count("terra:gate"), 1);
+        assert_eq!(held.count("workshop:chest"), 1);
+        assert_eq!(held.count("timber:door"), 1);
+        assert_eq!(held.count("timber:gate"), 1);
     }
 
     #[test]
-    fn a_terra_gate_is_a_one_metre_panel_door_at_every_voxel_size() {
+    fn terras_gate_is_a_one_metre_panel_door_at_every_voxel_size() {
         for (size, cells) in [(1.0, [1, 1]), (0.25, [4, 4])] {
             let loaded = super::runtime::tests::terra_loaded(size);
             let id = |kind, name| loaded.registry.id_of(kind, name).unwrap();
             let gate = loaded
                 .tables
                 .uses
-                .door(id(Kind::Material, "terra:gate") as MaterialId)
+                .door(id(Kind::Material, "timber:gate") as MaterialId)
                 .expect("the Gate is a Door");
             assert_eq!(
                 gate.open,
-                id(Kind::Material, "terra:gate_open") as MaterialId
+                id(Kind::Material, "timber:gate_open") as MaterialId
             );
-            assert_eq!(gate.shape, Some(id(Kind::Shape, "terra:panel") as u8));
+            assert_eq!(gate.shape, Some(id(Kind::Shape, "timber:leaf") as u8));
             assert_eq!(gate.cells(size), cells, "{size} m");
         }
     }
@@ -3217,24 +3312,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 .pixels;
             assert_eq!(pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
-            if matches!(
-                material.name.as_str(),
-                "terra:glass" | "terra:water" | "terra:mud" | "terra:gate" | "terra:gate_open"
-            ) {
+            if matches!(material.name.as_str(), "terra:water" | "terra:mud") {
                 assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {
                 assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
             }
             assert_eq!(
                 textures.0.iter().filter(|t| &t.pixels == pixels).count(),
-                // An open Door or Gate is the same panel turned.
-                if material.name.starts_with("terra:door")
-                    || material.name.starts_with("terra:gate")
-                {
-                    2
-                } else {
-                    1
-                },
+                1,
                 "{} has distinct artwork",
                 material.name
             );
@@ -3269,9 +3354,17 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         for (id, name) in loaded.registry.names(Kind::Material) {
             let sprite = sprites.contains(&(id as MaterialId));
             // The other Mods' blocks keep the colours they were declared with.
-            let measured = ["terra:", "flora:", "strata:", "crops:"]
-                .iter()
-                .any(|m| name.starts_with(m));
+            let measured = [
+                "terra:",
+                "flora:",
+                "strata:",
+                "crops:",
+                "timber:",
+                "brickwork:",
+                "workshop:",
+            ]
+            .iter()
+            .any(|m| name.starts_with(m));
             if !sprite && !measured {
                 continue;
             }
@@ -3367,7 +3460,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             ("terra:dirt", Turned),
             ("terra:sand", Turned),
             ("terra:wood", Fixed),
-            ("terra:brick", Fixed),
+            ("brickwork:brick", Fixed),
             ("flora:jungle_leaves", TurnedAndPatched),
             ("flora:oak_log", Fixed),
             ("strata:stone", Turned),

@@ -2,6 +2,7 @@
 # Builds test guests to target/guests and the Terra Game to games/terra/dist/games/terra,
 # beside the shared Mods it depends on in dist/mods, the layout `--mods games/terra/dist/mods` reads. Also builds the
 # demo Games (meadow, ember, tidewater, lumen) into their own project folders.
+# `build-guests games` builds only the Games, for validating them.
 #
 # Cargo may use a shared target directory; metadata locates the artifact
 # under either layout before the finished component is copied out.
@@ -14,6 +15,7 @@ out="$PWD/target/guests"
 mkdir -p "$out"
 
 for dir in "$guests"/*/; do
+  [ "${1:-}" = games ] && break
   name=$(basename "$dir")
   # RUSTFLAGS is cleared: cargo-ci's -D warnings would fail a guest on a lint
   # of wit-bindgen's generated code.
@@ -34,7 +36,7 @@ cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/dist/games/terra
 cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/terra.wasm
 cp games/terra/mod.toml games/terra/thumbnail.png games/terra/dist/games/terra/
 # Terra's dependencies; a World with no record loads every Mod installed beside it.
-for dep in strata waters flora crops aquatic; do
+for dep in strata waters flora crops aquatic workshop timber brickwork glassworks; do
   rm -rf "games/terra/dist/mods/$dep"
   cp -R "mods/$dep" "games/terra/dist/mods/$dep"
 done

@@ -49,7 +49,7 @@ impl Drop for Install {
     }
 }
 
-fn copy_tree(from: &Path, to: &Path) {
+pub(in crate::server) fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
@@ -242,15 +242,36 @@ fn assert_ore_in_band(game: &str, material_name: &str) {
 }
 
 #[test]
-fn terra_declares_its_own_sand_snow_and_ore_and_takes_its_plants_from_shared_mods() {
+fn terra_declares_its_own_sand_snow_and_ore_and_takes_its_plants_and_buildings_from_shared_mods() {
     assert_eq!(
         depends("terra"),
-        ["strata", "waters", "flora", "crops", "aquatic"]
+        [
+            "strata",
+            "waters",
+            "flora",
+            "crops",
+            "aquatic",
+            "workshop",
+            "timber",
+            "brickwork",
+            "glassworks"
+        ]
     );
     let (_install, loaded) = loaded("terra", 0.5);
     assert_eq!(
         ids(&loaded),
-        ["strata", "flora", "crops", "waters", "aquatic", "terra"]
+        [
+            "strata",
+            "flora",
+            "crops",
+            "waters",
+            "aquatic",
+            "workshop",
+            "brickwork",
+            "glassworks",
+            "timber",
+            "terra"
+        ]
     );
     for name in ["terra:sand", "terra:snow", "terra:iron"] {
         material(&loaded, name);

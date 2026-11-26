@@ -23,6 +23,7 @@ repo = pathlib.Path(__file__).resolve().parent.parent
 # the plant's sprite standing on a Voxel of `ground`, a "mod/texture" path.
 MODS = {
     "timber": ["planks", "thatch"],
+    "workshop": ["workbench", "forge", "oven", "anvil"],
     "crystals": ["amethyst", "citrine", "aquamarine"],
     "hearth": ["ash", "lava"],
     "frost": ["snow", "ice", "packed_ice"],

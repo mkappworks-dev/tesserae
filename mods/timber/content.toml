@@ -26,6 +26,160 @@ material = "thatch"
 color = [194, 168, 91, 255]
 texture = "art/thatch.png"
 
+[[materials]]
+name = "pine_planks"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "dark_planks"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "red_planks"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "frame"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "dark_frame"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "shingles"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "awning"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "door"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "door_open"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "gate"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "gate_open"
+emission = 0
+dimming = 0
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.4
+
+[[appearance]]
+material = "pine_planks"
+color = [107, 76, 45, 255]
+texture = "art/pine_planks.png"
+
+[[appearance]]
+material = "dark_planks"
+color = [73, 50, 30, 255]
+texture = "art/dark_planks.png"
+
+[[appearance]]
+material = "red_planks"
+color = [126, 52, 38, 255]
+texture = "art/red_planks.png"
+
+[[appearance]]
+material = "frame"
+color = [119, 87, 52, 255]
+texture = "art/frame.png"
+
+[[appearance]]
+material = "dark_frame"
+color = [81, 57, 34, 255]
+texture = "art/dark_frame.png"
+
+[[appearance]]
+material = "shingles"
+color = [90, 75, 57, 255]
+texture = "art/shingles.png"
+
+[[appearance]]
+material = "awning"
+color = [208, 166, 155, 255]
+texture = "art/awning.png"
+
+[[appearance]]
+material = "door"
+color = [111, 72, 36, 255]
+texture = "art/door.png"
+
+[[appearance]]
+material = "door_open"
+color = [111, 72, 36, 255]
+texture = "art/door_open.png"
+
+[[appearance]]
+material = "gate"
+color = [128, 85, 44, 255]
+texture = "art/gate.png"
+
+[[appearance]]
+material = "gate_open"
+color = [128, 85, 44, 255]
+texture = "art/gate_open.png"
+
 [[shapes]]
 name = "beam"
 boxes = [{ min = [0, 6, 6], max = [16, 10, 10] }]
@@ -35,3 +189,81 @@ collision = [{ min = [0, 6, 6], max = [16, 10, 10] }]
 name = "panel"
 boxes = [{ min = [0, 0, 7], max = [16, 16, 9] }]
 collision = [{ min = [0, 0, 7], max = [16, 16, 9] }]
+
+# A Door's leaf, 3/16 thick against its own +Z, which the engine turns to face the Player and Use
+# turns about its hinge. Apart from `panel`, because a Shape a Door fixes is never offered to place.
+[[shapes]]
+name = "leaf"
+boxes = [{ min = [0, 0, 13], max = [16, 16, 16] }]
+
+# 2 m by 3 m, so a Player's 0.6 m by 1.8 m body passes with room, and whole Template cells.
+[[voxel-uses]]
+kind = "door"
+material = "timber:door"
+open = "timber:door_open"
+width-m = 2.0
+height-m = 3.0
+shape = "timber:leaf"
+
+[[voxel-uses]]
+kind = "door"
+material = "timber:gate"
+open = "timber:gate_open"
+width-m = 1.0
+height-m = 1.0
+shape = "timber:leaf"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "timber:planks", count = 4 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "timber:pine_planks", count = 4 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "timber:dark_planks", count = 4 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "timber:red_planks", count = 4 }
+station = "workbench"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "timber:frame", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 1 }]
+output = { item = "timber:dark_frame", count = 1 }
+station = "workbench"
+
+[[recipes]]
+inputs = [{ item = "timber:planks", count = 2 }]
+output = { item = "timber:shingles", count = 4 }
+station = "workbench"
+
+[[recipes]]
+inputs = [{ item = "crops:wheat", count = 2 }]
+output = { item = "timber:thatch", count = 2 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "crops:wheat", count = 2 }, { item = "flora:leaves", count = 2 }]
+output = { item = "timber:awning", count = 2 }
+station = "workbench"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 3 }]
+output = { item = "timber:door", count = 1 }
+station = "workbench"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 2 }]
+output = { item = "timber:gate", count = 1 }
+station = "workbench"

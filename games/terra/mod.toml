@@ -3,6 +3,16 @@ version = "0.1.0"
 description = "Earth, stone & open skies"
 api = "0.3"
 root = true
-depends = ["strata", "waters", "flora", "crops", "aquatic"]
+depends = [
+  "strata",
+  "waters",
+  "flora",
+  "crops",
+  "aquatic",
+  "workshop",
+  "timber",
+  "brickwork",
+  "glassworks",
+]
 wasm = "terra.wasm"
 thumbnail = "thumbnail.png"

@@ -1,16 +1,30 @@
 # timber
 
-Building timber: sawn planks and thatch, with a horizontal beam and a thin
-upright panel.
+Building timber: planks in four stains, squared frames, roofing, an awning, and
+the doors and gates that hang in them, all made from `flora`'s logs and leaves
+and `crops`' wheat at `workshop`'s Stations.
 
-| Declares  | Name                                                |
-| --------- | --------------------------------------------------- |
-| Materials | `planks`, `thatch`                                  |
-| Shapes    | `beam` (a bar along x), `panel` (a 2/16 thick wall) |
+| Declares   | Name                                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Materials  | `planks`, `pine_planks`, `dark_planks`, `red_planks`, `frame`, `dark_frame`, `shingles`, `thatch`, `awning`, `door`, `gate` and their open states |
+| Shapes     | `beam` (a bar along x), `panel` (a 2/16 thick wall), `leaf` (a Door's 3/16 thick leaf against +Z)                                                 |
+| Voxel uses | `door`, a Door 2 m by 3 m; `gate`, a Door 1 m by 1 m, cut out between its rails                                                                   |
 
-**Depends on:** nothing.
+| Recipe                                   | From                              | At        |
+| ---------------------------------------- | --------------------------------- | --------- |
+| 4 `planks`, `pine_planks`, `dark_planks` | 1 `flora:log`                     | hand      |
+| 4 `red_planks`                           | 1 `flora:log`                     | workbench |
+| `frame`                                  | 1 `flora:log`                     | hand      |
+| `dark_frame`                             | 1 `flora:log`                     | workbench |
+| 4 `shingles`                             | 2 `planks`                        | workbench |
+| 2 `thatch`                               | 2 `crops:wheat`                   | hand      |
+| 2 `awning`                               | 2 `crops:wheat`, 2 `flora:leaves` | workbench |
+| `door`                                   | 3 `flora:log`                     | workbench |
+| `gate`                                   | 2 `flora:log`                     | workbench |
 
-**Used by:** nothing yet.
+**Depends on:** `flora`, `crops`, `workshop`.
+
+**Used by:** `terra`, `meadow`, `ember`, `tidewater`, `lumen`.
 
 ## Licence and artwork
 
