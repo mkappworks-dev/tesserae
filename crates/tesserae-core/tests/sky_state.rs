@@ -455,7 +455,11 @@ fn each_day_curve_rule_names_its_field() {
         ),
         (
             edit(|k| k.ambient.strength = CAVE_FLOOR - 0.001),
-            "sky.day_curve[1].ambient.strength",
+            "sky.day_curve[1].ambient",
+        ),
+        (
+            edit(|k| k.ambient.colour[0] = 0.0),
+            "sky.day_curve[1].ambient",
         ),
         (
             edit(|k| k.sky_tint.colour[0] = 2.0),
@@ -483,8 +487,8 @@ fn each_day_curve_rule_names_its_field() {
         DayKey {
             hour: 0.0,
             ambient: Light {
+                colour: [1.0; 3],
                 strength: CAVE_FLOOR,
-                ..DEFAULT_DAY_CURVE[0].ambient
             },
             stars: 0.0,
             ..DEFAULT_DAY_CURVE[0]

@@ -2663,10 +2663,7 @@ fn a_bad_day_curve_is_a_load_error_naming_the_key_and_field() {
         (|c| c[1].hour = 24.0, "sky.day_curve[1].hour"),
         (|c| c[1].hour = 5.0, "sky.day_curve[1].hour"),
         (|c| c[0].sun.colour.1 = 1.2, "sky.day_curve[0].sun.colour"),
-        (
-            |c| c[1].ambient.strength = 0.05,
-            "sky.day_curve[1].ambient.strength",
-        ),
+        (|c| c[1].ambient.strength = 0.05, "sky.day_curve[1].ambient"),
     ];
     for (edit, field) in cases {
         let mut curve = vec![day_key(5.0), day_key(19.0)];

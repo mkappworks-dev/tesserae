@@ -22,3 +22,52 @@ The night sky.
 - [ ] The reach's edge stays hidden at every hour.
 - [ ] GPU frame time of the sky on `flight` at noon and midnight, interleaved
       against `main`, at most 0.1 ms over it, recorded in Comments.
+
+## Comments
+
+Built; tests written, not yet run (every test runs once at the end of the
+spec), and no captures or frame times taken, so the boxes stay unticked.
+
+- Uniforms: `SkyMaterial` gains `toward_moon`, `moon_light`,
+  `stars_from_world` (a `Mat4`) and `stars`, all from `SkyNow` through
+  `SkyMaterial::new(sky, &state)`. `MOON_PHASES` in `tesserae_core::sky` is
+  now public.
+- Moon: the moon stands opposite the sun, so a real phase angle would always
+  be full. `moon_light(state)` is toward the sun at full and away at new, and
+  between them swings along the moon's path (`pole × toward_moon`): ahead
+  while waxing (5 to 7), as the set sun is, behind while waning (1 to 3). The
+  shader lights the disc as a sphere from it, with a narrow terminator and a
+  little limb darkening; the dark part is the sky without stars, so a new moon
+  hides stars but shows nothing. A faint glow scales with how full it is.
+  Radius 0.014 rad, about three times the real moon. No maria.
+- Stars: the view direction turned into the stars' frame (about `pole` by
+  `-star_turn_rad`), then one cell of an equi-angular cube map, 90 cells a
+  face (about 1°); a PCG hash of the cell gives 16% of cells a star, its place
+  (kept 15% of a cell from the edges, so a pixel reads only its own cell),
+  brightness (mostly faint) and a slight warm or blue tint. Three hashes, two
+  `atan` and two `tan` per pixel at most.
+- No shimmer: a star's light is a smooth bump reaching 2 pixels, sized from
+  the projection and viewport height, so whatever the resolution it covers
+  a few pixels and keeps its brightness as it turns across the pixel grid.
+- Fog and the reach: stars are scaled by the horizon band's own `up`, so they
+  are gone where the sky is the fog colour; the moon and its glow fade by a
+  steeper haze (half gone 1° up) and nothing of either is drawn at or below
+  the horizon. The shader returns before any of it below the horizon, and
+  skips the stars when `stars` is under 0.004 and the moon outside its disc
+  and glow.
+- Clouds (ticket 07) need no hook: they draw over the sky in the blended
+  pass, so they hide the stars and the moon.
+- Cave floor fix: validation now checks each channel of the ambient colour
+  times its strength against `CAVE_FLOOR`, error field
+  `sky.day_curve[i].ambient`; the test in `sky_state.rs` has a black channel
+  case and its edge key is white at the floor, and `tesserae-mods`'
+  `declare.rs` names the new field. The WIT doc (both copies), `data-mods.md`
+  and `contract-compatibility.md` state the rule per channel. The shader's
+  division in `cave_floor()` already had `max(…, MIN_AMBIENT)` (1e-3). The
+  default curve's lowest channel is 0.6 × 0.25 = 0.15 and Terra's
+  0.55 × 0.38 = 0.21, both above 0.0642; `full.toml`'s 0.65 × 0.55 too.
+- Tests (`render/sky.rs`): full moon lit from the sun and new from behind;
+  waxing ahead and waning behind along the path, a crescent mostly behind the
+  face; the sun keeps its place among the stars all day; the material follows
+  `SkyNow`'s moon and stars. No shader validation test or naga tool exists in
+  the repo, so `sky.wesl` is read, not compiled, until the first run.

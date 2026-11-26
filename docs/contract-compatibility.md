@@ -339,10 +339,10 @@ Declaration built against the earlier 0.3 text needs a rebuild.
 records with ascending hours from 0 up to 24, each the sun's, the moon's and the
 ambient light's colour and strength (`curve-light`), a sky and a fog tint
 (`curve-tint`, a colour and an amount) and a star brightness. Colours are linear
-and every value from 0 to 1; the ambient strength is at least the cave floor,
-0.0642. `none` is the engine's default curve, so a Game that declared a `sky`
-before looks as it did. A Declaration built against the earlier 0.3 text needs a
-rebuild.
+and every value from 0 to 1; each channel of the ambient colour times its
+strength is at least the cave floor, 0.0642. `none` is the engine's default
+curve, so a Game that declared a `sky` before looks as it did. A Declaration
+built against the earlier 0.3 text needs a rebuild.
 
 ## What is not frozen
 

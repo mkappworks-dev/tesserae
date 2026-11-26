@@ -28,7 +28,8 @@ const SUNSET: f64 = 18.0;
 /// Daylight is 0 with the sun this far below the horizon and 1 this far above.
 const TWILIGHT_DEG: f32 = 10.0;
 
-const MOON_PHASES: i64 = 8;
+/// Phase 0 is full and half of this is new.
+pub const MOON_PHASES: i64 = 8;
 
 /// What a Game declares of its day.
 #[derive(Clone, PartialEq, Debug)]
@@ -163,10 +164,16 @@ fn validate_day_curve(keys: &[DayKey]) -> Result<(), SkyError> {
                 return Err(bad(strength, "must be from 0 to 1"));
             }
         }
-        if key.ambient.strength < CAVE_FLOOR {
+        // Per channel: the chunk shader divides the cave floor by each channel of the ambient.
+        if key
+            .ambient
+            .colour
+            .into_iter()
+            .any(|c| c * key.ambient.strength < CAVE_FLOOR)
+        {
             return Err(bad(
-                "ambient.strength",
-                "must be at least the cave floor, 0.0642",
+                "ambient",
+                "must have each colour channel times the strength at least the cave floor, 0.0642",
             ));
         }
         let tints = [

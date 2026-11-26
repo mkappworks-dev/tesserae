@@ -1,5 +1,6 @@
 //! The sky: the air's sky colour at the zenith, blending to its fog colour at
-//! the horizon, with a sun disc and glow where the Sky state puts the sun.
+//! the horizon, with a sun disc and glow where the Sky state puts the sun, and
+//! by night the moon in its phase and the stars.
 //!
 //! Drawn in the main pass, so its horizon is the fog uniform through the same
 //! tonemapper as the fogged terrain, which meets it with no edge whatever the
@@ -19,6 +20,10 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 
+use std::f32::consts::TAU;
+
+use tesserae_core::sky::{MOON_PHASES, SkyState};
+
 use super::fog::FogSettings;
 use crate::client::camera::MainCamera;
 use crate::client::sky::SkyNow;
@@ -33,6 +38,46 @@ pub struct SkyMaterial {
     /// night.
     #[uniform(0)]
     pub toward_sun: Vec4,
+    #[uniform(0)]
+    pub toward_moon: Vec4,
+    /// Unit length, toward what lights the moon's face; see [`moon_light`].
+    #[uniform(0)]
+    pub moon_light: Vec4,
+    /// Turns a view direction into the stars' own frame, which turns with the Time of day.
+    #[uniform(0)]
+    pub stars_from_world: Mat4,
+    /// The Day curve's star brightness, 0 to 1.
+    #[uniform(0)]
+    pub stars: f32,
+}
+
+impl SkyMaterial {
+    /// `sky` is the air's sky colour, sRGB.
+    pub fn new(sky: [f32; 3], state: &SkyState) -> Self {
+        Self {
+            zenith: zenith(sky),
+            toward_sun: Vec3::from(state.toward_sun).extend(0.0),
+            toward_moon: Vec3::from(state.toward_moon).extend(0.0),
+            moon_light: moon_light(state).extend(0.0),
+            stars_from_world: stars_from_world(state),
+            stars: state.stars,
+        }
+    }
+}
+
+/// Where the moon's face is lit from: toward the sun at full moon and away from it at new. The
+/// moon always stands opposite the sun here, so between them the light swings along the moon's
+/// path instead: ahead of it while waxing, as the set sun is, and behind it while waning.
+pub fn moon_light(state: &SkyState) -> Vec3 {
+    let moon = Vec3::from(state.toward_moon);
+    let ahead = Vec3::from(state.pole).cross(moon).normalize_or_zero();
+    let from_full = TAU * f32::from(state.moon_phase) / MOON_PHASES as f32;
+    -(moon * from_full.cos() + ahead * from_full.sin())
+}
+
+/// The turn that undoes the stars' turn about the pole, so each star stays put in its frame.
+pub fn stars_from_world(state: &SkyState) -> Mat4 {
+    Mat4::from_axis_angle(Vec3::from(state.pole), -state.star_turn_rad)
 }
 
 impl Material for SkyMaterial {
@@ -113,10 +158,10 @@ fn build_assets(
 ) {
     commands.insert_resource(SkyAssets {
         triangle: meshes.add(covering_triangle()),
-        material: materials.add(SkyMaterial {
-            zenith: zenith(FogSettings::default().sky),
-            toward_sun: Vec3::from(SkyNow::default().0.toward_sun).extend(0.0),
-        }),
+        material: materials.add(SkyMaterial::new(
+            FogSettings::default().sky,
+            &SkyNow::default().0,
+        )),
     });
 }
 
@@ -173,11 +218,8 @@ fn follow_air(
     for mut sky in &mut skies {
         sky.set_if_neq(visibility);
     }
-    let toward_sun = now.map_or_else(|| SkyNow::default().0.toward_sun, |now| now.0.toward_sun);
-    let want = SkyMaterial {
-        zenith: zenith(settings.sky),
-        toward_sun: Vec3::from(toward_sun).extend(0.0),
-    };
+    let state = now.map_or_else(|| SkyNow::default().0, |now| now.0);
+    let want = SkyMaterial::new(settings.sky, &state);
     // Read first: `get_mut` alone re-uploads the uniform every frame.
     if materials.get(&assets.material) != Some(&want)
         && let Some(mut material) = materials.get_mut(&assets.material)
@@ -304,6 +346,93 @@ mod tests {
             sun.y < 0.0,
             "below the horizon, where the shader draws none of it"
         );
+    }
+
+    fn terra_at(hour: f32, moon_phase: u8) -> SkyState {
+        use tesserae_core::sky::{Air, SkyInputs, SkyParams, sky_state};
+        let terra = SkyParams {
+            day_length_s: 1200.0,
+            start_hour: 7.0,
+            day_share: 0.7,
+            tilt_deg: 25.0,
+            day_curve: None,
+        };
+        let haze = FogSettings::default();
+        sky_state(&SkyInputs {
+            hour,
+            moon_phase,
+            sky: Some(&terra),
+            air: Air {
+                sky: haze.sky,
+                fog: haze.color,
+                underground: 0.0,
+            },
+        })
+    }
+
+    #[test]
+    fn the_full_moon_is_lit_from_the_sun_and_the_new_moon_from_behind() {
+        let full = terra_at(0.0, 0);
+        assert!(moon_light(&full).distance(Vec3::from(full.toward_sun)) < 1e-5);
+        let new = terra_at(0.0, 4);
+        assert!(moon_light(&new).distance(Vec3::from(new.toward_moon)) < 1e-5);
+    }
+
+    #[test]
+    fn a_waxing_moon_is_lit_ahead_along_its_path_and_a_waning_one_behind() {
+        for hour in [21.0, 0.0, 3.0] {
+            let waning = terra_at(hour, 2);
+            let moon = Vec3::from(waning.toward_moon);
+            let ahead = Vec3::from(waning.pole).cross(moon).normalize();
+            let lit = moon_light(&waning);
+            assert!(lit.dot(moon).abs() < 1e-5, "a half moon at {hour}");
+            assert!(lit.distance(-ahead) < 1e-5, "waning at {hour}: {lit}");
+            let waxing = moon_light(&terra_at(hour, 6));
+            assert!(waxing.distance(ahead) < 1e-5, "waxing at {hour}: {waxing}");
+            let crescent = moon_light(&terra_at(hour, 3));
+            assert!(crescent.dot(moon) > 0.5 && crescent.dot(ahead) < 0.0);
+            assert!((crescent.length() - 1.0).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn the_stars_turn_with_the_sun_so_it_keeps_its_place_among_them() {
+        let place = |hour| {
+            let state = terra_at(hour, 0);
+            stars_from_world(&state).transform_vector3(Vec3::from(state.toward_sun))
+        };
+        let dawn = place(6.0);
+        for hour in [0.0, 9.5, 12.0, 18.0, 23.0] {
+            assert!(place(hour).distance(dawn) < 1e-5, "{hour}: {}", place(hour));
+        }
+        let pole = Vec3::from(terra_at(3.0, 0).pole);
+        let turn = stars_from_world(&terra_at(3.0, 0));
+        assert!(turn.transform_vector3(pole).distance(pole) < 1e-6);
+    }
+
+    #[test]
+    fn the_moon_and_the_stars_follow_the_sky_state() {
+        let mut app = app();
+        app.world_mut().spawn(MainCamera);
+        app.update();
+        let noon = the_sky(&mut app).2;
+        assert_eq!(noon.stars, 0.0, "no stars without a sky");
+
+        let midnight = terra_at(0.0, 6);
+        app.insert_resource(SkyNow(midnight));
+        app.update();
+        let material = the_sky(&mut app).2;
+        assert_eq!(
+            material,
+            SkyMaterial::new(FogSettings::default().sky, &midnight)
+        );
+        assert_eq!(
+            material.toward_moon.truncate(),
+            Vec3::from(midnight.toward_moon)
+        );
+        assert_eq!(material.moon_light.truncate(), moon_light(&midnight));
+        assert_eq!(material.stars, midnight.stars);
+        assert!(material.stars > 0.9);
     }
 
     #[test]

@@ -282,8 +282,9 @@ interface content {
         /// The moon's light while the sun is down, at full moon; a thinner
         /// phase lights less.
         moon: curve-light,
-        /// The light from the open sky, at least 0.0642: a sealed cave keeps
-        /// that share of noon at every hour, and open ground is never darker.
+        /// The light from the open sky, each colour channel times the
+        /// strength at least 0.0642: a sealed cave keeps that share of noon
+        /// at every hour, and open ground is never darker.
         ambient: curve-light,
         /// Move the Biome's sky and fog colours toward a colour; a Cave
         /// Biome's air is never tinted.
