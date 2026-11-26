@@ -94,6 +94,7 @@ impl Rig {
                 super::super::entities::plugin,
                 super::super::inventory::plugin,
                 super::super::container::plugin,
+                super::super::time_of_day::plugin,
             ))
             .add_systems(FixedPreUpdate, super::super::fluids::simulate);
         app.world_mut().spawn((restored_player, mode));
@@ -708,6 +709,7 @@ fn real_terra_builds_nothing_new_or_reopened() {
         containers: Vec::new(),
         map: Default::default(),
         game_mode: Default::default(),
+        time_of_day: None,
         looted: Vec::new(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
@@ -2677,4 +2679,64 @@ fn a_reopened_world_lays_out_the_settlements_it_was_saved_with_whatever_the_game
         .unwrap() as u16;
     let reopened = loaded.world_settlements.unwrap();
     assert_eq!(reopened[0].path, Voxel::cube(stone));
+}
+
+fn clock(rig: &Rig) -> tesserae_core::sky::Clock {
+    *rig.app.world().resource::<WorldClock>().clock()
+}
+
+#[test]
+fn a_reopened_world_keeps_the_hour_it_was_saved_at() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    let start = clock(&rig);
+    assert!((start.hour() - 7.0).abs() < 1e-3, "Terra starts at 07:00");
+    for _ in 0..200 {
+        rig.tick();
+    }
+    rig.settled_save();
+    let ran = clock(&rig).time();
+    assert!(
+        ran.steps() > start.time().steps(),
+        "the clock runs with the steps"
+    );
+    drop(rig);
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.time_of_day;
+    let saved = saved.expect("Terra declares a sky");
+    assert!(saved > start.time().steps() && saved <= ran.steps());
+    let reopened = clock(&Rig::new(&dir));
+    assert_eq!(reopened.time().steps(), saved);
+    assert!(reopened.runs());
+}
+
+#[test]
+fn a_world_saved_without_a_time_of_day_opens_at_the_games_start_hour() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    for _ in 0..200 {
+        rig.tick();
+    }
+    rig.settled_save();
+    drop(rig);
+    rewrite(&dir.0, |c| c.time_of_day = None);
+    let reopened = clock(&Rig::new(&dir));
+    assert_eq!(reopened.time().day(reopened.sky().unwrap()), 0);
+    assert!((reopened.hour() - 7.0).abs() < 1e-3);
+}
+
+#[test]
+fn a_game_with_no_sky_is_held_at_noon_and_saves_no_time() {
+    let dir = Directory::new();
+    let mut rig = Rig::open_with(dir.opening(), WorldSettings::default(), |l| l.sky = None);
+    for _ in 0..200 {
+        rig.tick();
+    }
+    assert_eq!(clock(&rig).hour(), 12.0);
+    assert!(!clock(&rig).runs());
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(
+        save::inspect(&dir.0).unwrap().unwrap().commit.time_of_day,
+        None
+    );
 }

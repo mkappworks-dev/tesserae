@@ -99,6 +99,11 @@ its Biome, switching hard at the border, and a Biome without `ground` has the
 World's; surface height, relief, sea level and lakes are never a Biome's. A
 World with no ground is empty air whatever its Biomes name.
 
+`[world.sky]` is the Game's alone: `day-length-s`, at least 60; `start-hour`,
+the hour a new World opens at, from 0 up to 24; and `day-share`, how much of the
+day the sun is up, above 0 and below 1. The clock reads 06:00 at sunrise and
+18:00 at sunset whatever the share. Omitted, the World is held at noon.
+
 An ore is a blob of `vein-size-m` metres at most, in a cube of that edge; a
 `rarity` fraction of the cubes hold one. It replaces rock only, never soil, the
 surface, water or air, inside its depth band and its Biomes. Caves carve the ore

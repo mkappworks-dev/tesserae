@@ -100,6 +100,24 @@ impl From<Caves> for content::CaveParams {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Sky {
+    day_length_s: f32,
+    start_hour: f32,
+    day_share: f32,
+}
+
+impl From<Sky> for content::SkyParams {
+    fn from(s: Sky) -> Self {
+        Self {
+            day_length_s: s.day_length_s,
+            start_hour: s.start_hour,
+            day_share: s.day_share,
+        }
+    }
+}
+
 impl From<Climate> for content::ClimateParams {
     fn from(c: Climate) -> Self {
         Self {

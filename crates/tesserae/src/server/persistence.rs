@@ -7,12 +7,14 @@ use bevy::ecs::resource::IsResource;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures::check_ready};
 use tesserae_core::save::{self, Content, Generation, Mapping, WorldId, Writer, library};
+use tesserae_core::sky::{Clock, TimeOfDay};
 
 use super::entities::EntityStore;
 use super::fluids::FluidSim;
 use super::items::Items;
 use super::mods::LoadedMods;
 use super::player::Player;
+use super::time_of_day::WorldClock;
 use super::world_state::{ChunkStore, Lifetime};
 use crate::session::{SessionApp, SessionTeardown};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -326,6 +328,7 @@ pub struct Persistence {
     /// The World's default: the mode a Player with none saved starts in.
     game_mode: save::GameMode,
     reopened_game_mode: Option<save::GameMode>,
+    clock: Clock,
     initial_simulation: Option<RestoredSimulation>,
     initial_chunks: Vec<save::SavedChunk>,
     opening_detail: String,
@@ -400,6 +403,7 @@ impl Persistence {
         let mut initial_containers = Vec::new();
         let mut initial_looted = Vec::new();
         let mut initial_map = None;
+        let mut saved_time = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
                 recovered
@@ -410,6 +414,7 @@ impl Persistence {
                 initial_containers = std::mem::take(&mut c.containers);
                 initial_looted = std::mem::take(&mut c.looted);
                 initial_map = Some(std::mem::take(&mut c.map));
+                saved_time = c.time_of_day.map(TimeOfDay::from_steps);
                 let items = loaded.every_item(settings.voxel_size);
                 restored_entities = Some(
                     c.entities
@@ -563,6 +568,7 @@ impl Persistence {
             reopened_eye,
             game_mode,
             reopened_game_mode,
+            clock: Clock::open(loaded.sky, saved_time),
             initial_simulation,
             initial_chunks,
             opening_detail: detail,
@@ -629,6 +635,7 @@ fn install(world: &mut World) {
         p.saved_entities = entities.revision();
         world.insert_resource(EntityStore(entities));
     }
+    world.insert_resource(super::time_of_day::WorldClock::opened(p.clock));
     world.insert_resource(super::container::Containers::restore(
         std::mem::take(&mut p.initial_containers),
         std::mem::take(&mut p.initial_looted),
@@ -732,7 +739,7 @@ pub(super) fn drive(
     mut status: ResMut<SaveStatus>,
     mut store: ResMut<ChunkStore>,
     mut sim: ResMut<FluidSim>,
-    (held, time): (Held, Res<Time<Real>>),
+    (held, time, clock): (Held, Res<Time<Real>>, Option<Res<WorldClock>>),
     mut leave: crate::launch::Leave,
     #[cfg(feature = "profiling")] mut profile: ResMut<SaveProfile>,
 ) {
@@ -919,6 +926,7 @@ pub(super) fn drive(
     let generation = p.generation.clone();
     let generator = p.generator;
     let game_mode = p.game_mode;
+    let time_of_day = clock.and_then(|c| c.clock().saved()).map(|t| t.steps());
     let settings = p.settings;
     let id = p.id.clone();
     let pending = p
@@ -971,6 +979,7 @@ pub(super) fn drive(
                 looted,
                 map: saved_map,
                 game_mode,
+                time_of_day,
             };
             writer.write_draft(commit)?;
             if let Err(e) = writer.retain() {

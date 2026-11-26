@@ -186,6 +186,11 @@ food = 2.5
 temperature-size-m = 400.0
 humidity-size-m = 640.0
 
+[world.sky]
+day-length-s = 1200.0
+start-hour = 7.0
+day-share = 0.7
+
 [[biomes]]
 name = "dry"
 temperature = 0.8

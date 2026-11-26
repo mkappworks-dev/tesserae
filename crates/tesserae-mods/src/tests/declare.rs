@@ -2538,3 +2538,68 @@ fn a_materials_tags_are_kebab_case_labels_and_at_most_eight() {
         assert!(with(&[bad]).is_err(), "{bad:?}");
     }
 }
+
+fn sky() -> content::SkyParams {
+    content::SkyParams {
+        day_length_s: 1200.0,
+        start_hour: 7.0,
+        day_share: 0.7,
+    }
+}
+
+fn declare_sky(sky: Option<content::SkyParams>, is_root: bool) -> Result<Applied, ModError> {
+    let mut d = declaring(&[], &[]);
+    let mut world = crate::convert::engine_world_params();
+    world.sky = sky;
+    d.world = Some(world);
+    let mut load = Load::new();
+    apply(d, "game", &mut load.tables, &mut load.registry, is_root)
+}
+
+#[test]
+fn a_games_sky_is_kept_and_a_world_without_one_has_none() {
+    let applied = declare_sky(Some(sky()), true).unwrap();
+    assert_eq!(
+        applied.sky,
+        Some(tesserae_core::sky::SkyParams {
+            day_length_s: 1200.0,
+            start_hour: 7.0,
+            day_share: 0.7,
+        })
+    );
+    assert_eq!(declare_sky(None, true).unwrap().sky, None);
+}
+
+#[test]
+fn only_the_game_sets_the_sky() {
+    assert!(matches!(
+        declare_sky(Some(sky()), false),
+        Err(ModError::NotAGame {
+            field: "world.sky",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_bad_sky_is_a_load_error_naming_the_field() {
+    type Edit = fn(&mut content::SkyParams);
+    let cases: [(Edit, &str); 6] = [
+        (|s| s.day_length_s = 59.0, "sky.day_length_s"),
+        (|s| s.day_length_s = f32::NAN, "sky.day_length_s"),
+        (|s| s.start_hour = 24.0, "sky.start_hour"),
+        (|s| s.start_hour = -1.0, "sky.start_hour"),
+        (|s| s.day_share = 0.0, "sky.day_share"),
+        (|s| s.day_share = 1.0, "sky.day_share"),
+    ];
+    for (edit, field) in cases {
+        let mut s = sky();
+        edit(&mut s);
+        match declare_sky(Some(s), true).unwrap_err() {
+            ModError::Params { id, what, source } => {
+                assert_eq!((id.as_str(), what, source.field), ("game", "world", field));
+            }
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+}

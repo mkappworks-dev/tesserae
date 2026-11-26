@@ -84,6 +84,7 @@ pub(super) fn fixture() -> Commit {
         looted: Vec::new(),
         map: Default::default(),
         game_mode: GameMode::Creative,
+        time_of_day: None,
     }
 }
 
@@ -1836,6 +1837,20 @@ mod dropped_items {
         assert_eq!(json["game_mode"], "survival");
         let back: Commit = serde_json::from_value(json).unwrap();
         assert_eq!(back.game_mode, GameMode::Survival);
+    }
+
+    #[test]
+    fn a_commit_keeps_its_time_of_day_and_one_without_it_has_none() {
+        let json = serde_json::to_value(fixture()).unwrap();
+        assert!(json.get("time_of_day").is_none());
+        let old: Commit = serde_json::from_value(json).unwrap();
+        assert_eq!(old.time_of_day, None);
+        let dusk = Commit {
+            time_of_day: Some(123_456),
+            ..fixture()
+        };
+        let back: Commit = serde_json::from_value(serde_json::to_value(&dusk).unwrap()).unwrap();
+        assert_eq!(back.time_of_day, Some(123_456));
     }
 
     #[test]

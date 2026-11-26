@@ -325,6 +325,12 @@ patches about 5 m across). The 0.1 and 0.2 adapters and an omitted data-only
 `variation` give `fixed`, which draws exactly as before. A Declaration built
 against the earlier 0.3 text needs a rebuild.
 
+`world-params` of line 0.3 then gained `sky`, an optional `sky-params` record
+last: `day-length-s` (at least 60), `start-hour` (from 0 up to 24) and
+`day-share` (above 0 and below 1). It is the Game's alone, like `climate`.
+`none` holds the World at noon, so a Game that declares no sky looks as before.
+A Declaration built against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

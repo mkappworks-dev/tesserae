@@ -38,6 +38,7 @@ pub mod save;
 pub mod seed;
 pub mod settlement;
 pub mod shape;
+pub mod sky;
 pub mod survival;
 pub mod tables;
 pub mod template;

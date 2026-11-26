@@ -69,8 +69,11 @@ identity independent of seed, a monotonic commit sequence, seed, Voxel size,
 named generation parameters, exact required Game/Mod builds, content names,
 current Player Eye, authoritative Chunks and simulation checkpoints. Dropped
 items are a separate `entities` record, below, and the World's default game mode
-is an optional `game_mode`, absent meaning Creative. Global preferences are
-separate data.
+is an optional `game_mode`, absent meaning Creative. The Time of day is an
+optional `time_of_day`, logical steps since day 0's midnight, written only when
+the Game declares a sky; absent, the World opens at the Game's start hour. It is
+captured with each commit and never marks the World unsaved, since it changes
+every step. Global preferences are separate data.
 
 Changed Chunks are complete level-0 records, including Air. Traversal is x/y/z,
 z fastest. Format 2 names each distinct cell of a Chunk once in a palette and

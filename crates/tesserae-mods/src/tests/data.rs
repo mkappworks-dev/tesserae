@@ -199,6 +199,11 @@ fn component() -> Declaration {
             }),
             lava: None,
             cave_biomes: None,
+            sky: Some(content::SkyParams {
+                day_length_s: 1200.0,
+                start_hour: 7.0,
+                day_share: 0.7,
+            }),
             sea_level_m: 20.0,
             relief_m: 12.0,
             feature_size_m: 48.0,

@@ -36,3 +36,33 @@ can pin, before anything in the sky moves.
 - [ ] Each validation rule (Day length at least 60 s, start hour in [0, 24),
       day share in (0, 1)) is a load error naming the field; a Declaration
       without `sky` loads as today; only the Game may set `sky`.
+
+## Comments
+
+Built; tests written, not yet run (every test runs once at the end of the
+spec), so the boxes stay unticked until then.
+
+- Core: `tesserae_core::sky` holds `SkyParams` (`day_length_s`, `start_hour`,
+  `day_share`, `validate`, `day_steps`), `TimeOfDay` (steps since day 0's
+  midnight: `on_day`, `day`, `hour`, `moon_phase`), `sun_elevation_deg(hour)`
+  (no tilt yet: ticket 04 adds it), `daylight(elevation_deg)`, `Pin` (parses
+  `TESSERAE_TIME_OF_DAY`) and `Clock` (`open`, `step`, `set_cycle`, `hold`,
+  `runs`, `saved`, `hour`, `moon_phase`, `daylight`, `steps_per_s`). Tests in
+  `crates/tesserae-core/tests/time_of_day.rs`.
+- Night `n` starts on day `n`'s evening, so a World's first night is full and
+  `"4 00:00"` is day 5's midnight, the new moon. Noon is always step
+  `day_steps / 2`.
+- Server: `crate::server::time_of_day::WorldClock` (a session resource, read
+  with `clock()`) catches up with `FluidSim::now()` in `FixedPreUpdate`, after
+  `simulate` and before `persistence::drive`. `Persistence::prepare` opens the
+  `Clock` from `LoadedMods::sky` and the commit; `persistence::install` inserts
+  `WorldClock::opened`, which applies the pin under `dev` and `profiling`.
+- Ticket 03: the Daylight cycle is `Clock::set_cycle`; nothing saves it yet and
+  `WorldClock` has no mutable accessor yet. Ticket 02: `Clock::steps_per_s` is
+  the rate (64, or 0 while held or off).
+- Save: `Commit::time_of_day: Option<u64>`, written only with a sky. It never
+  marks the World unsaved (it changes every step), so the hour saved is the
+  last commit's; Save and Quit always commits.
+- Contract: `world-params.sky: option<sky-params>`, data-only `[world.sky]`,
+  Game-only (`world.sky` in `beyond_character`); errors are
+  `what: "world"`, fields `sky.day_length_s`, `sky.start_hour`, `sky.day_share`.

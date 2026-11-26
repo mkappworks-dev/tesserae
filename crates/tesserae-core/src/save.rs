@@ -2260,6 +2260,10 @@ pub struct Commit<C = SavedChunk, P = ([i32; 3], Simulation)> {
     /// modes: those Worlds were Creative.
     #[serde(default)]
     pub game_mode: GameMode,
+    /// The Time of day in logical steps since day 0's midnight. Absent in commits written before
+    /// it, or by a Game with no sky: opens at the Game's start hour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_of_day: Option<u64>,
 }
 
 impl<C, P> Commit<C, P> {
@@ -2283,6 +2287,7 @@ impl<C, P> Commit<C, P> {
             looted,
             map,
             game_mode,
+            time_of_day,
         } = self;
         let head = Commit {
             format,
@@ -2302,6 +2307,7 @@ impl<C, P> Commit<C, P> {
             looted,
             map,
             game_mode,
+            time_of_day,
         };
         (head, chunks, paused)
     }

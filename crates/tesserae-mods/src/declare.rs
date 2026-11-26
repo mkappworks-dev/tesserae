@@ -17,6 +17,7 @@ use tesserae_core::{
 };
 
 use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
+use tesserae_core::sky::SkyParams;
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::convert::world_params;
@@ -153,6 +154,8 @@ pub struct Applied {
     pub view: Option<ViewParams>,
     pub movement: Option<content::MovementPolicy>,
     pub map: Option<content::MapPolicy>,
+    /// `None` holds the World at noon.
+    pub sky: Option<SkyParams>,
     pub character: Option<crate::character::Character>,
     pub tools: Vec<ToolDef>,
     /// The Game's, with its omitted fields at the engine's defaults.
@@ -203,6 +206,7 @@ fn beyond_character(world: &content::WorldParams) -> Option<&'static str> {
         (world.water.is_some(), "world.water"),
         (world.ground.is_some(), "world.ground"),
         (world.climate.is_some(), "world.climate"),
+        (world.sky.is_some(), "world.sky"),
         (world.sea_level_m != bare.sea_level_m, "world.sea-level-m"),
         (world.relief_m != bare.relief_m, "world.relief-m"),
         (
@@ -378,6 +382,18 @@ pub fn apply(
         });
     }
     let map = declaration.world.as_ref().and_then(|p| p.map_policy);
+    let sky = declaration
+        .world
+        .as_ref()
+        .and_then(|p| p.sky)
+        .map(crate::convert::sky_params);
+    if let Some(sky) = &sky {
+        sky.validate().map_err(|source| ModError::Params {
+            id: id(),
+            what: "world",
+            source,
+        })?;
+    }
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let lava = declaration.world.as_ref().and_then(|p| p.lava.clone());
     let cave_biomes = declaration
@@ -520,6 +536,7 @@ pub fn apply(
         view,
         movement,
         map,
+        sky,
         character,
         tools,
         survival,

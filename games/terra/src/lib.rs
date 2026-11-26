@@ -171,6 +171,11 @@ impl Guest for Terra {
             temperature_size_m: 256.0,
             humidity_size_m: 256.0,
         });
+        world.sky = Some(tesserae::mods::content::SkyParams {
+            day_length_s: 20.0 * 60.0,
+            start_hour: 7.0,
+            day_share: 0.7,
+        });
         Declaration {
             materials: vec![
                 MaterialDef {

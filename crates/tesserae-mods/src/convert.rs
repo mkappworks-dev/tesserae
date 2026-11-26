@@ -157,6 +157,14 @@ pub(crate) fn world_params(
     (terrain, p.water)
 }
 
+pub(crate) fn sky_params(s: content::SkyParams) -> tesserae_core::sky::SkyParams {
+    tesserae_core::sky::SkyParams {
+        day_length_s: s.day_length_s,
+        start_hour: s.start_hour,
+        day_share: s.day_share,
+    }
+}
+
 /// What `default-world-params` returns: the engine's own terrain parameters.
 pub(crate) fn engine_world_params() -> content::WorldParams {
     let p = WorldgenParams::default();
@@ -185,6 +193,7 @@ pub(crate) fn engine_world_params() -> content::WorldParams {
         climate: None,
         lava: None,
         cave_biomes: None,
+        sky: None,
     }
 }
 

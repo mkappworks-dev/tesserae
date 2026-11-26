@@ -248,6 +248,20 @@ interface content {
         /// rock, cavern floor, features and fog, at most 16. `none` leaves the
         /// underground as the surface Biomes lay it. Only the Game may set it.
         cave-biomes: option<list<cave-biome-def>>,
+        /// The day and night. `none` holds the World at noon. Only the Game may
+        /// set it.
+        sky: option<sky-params>,
+    }
+
+    /// A World's day, by the Time of day's clock: 06:00 is always sunrise,
+    /// 12:00 noon and 18:00 sunset, however the Day length is shared.
+    record sky-params {
+        /// Real seconds one day takes, at least 60.
+        day-length-s: f32,
+        /// The hour a new World starts at, from 0 up to but not including 24.
+        start-hour: f32,
+        /// How much of the Day length the sun is up, above 0 and below 1.
+        day-share: f32,
     }
 
     /// A region of the underground, chosen where the cave Climate (two 3D
