@@ -17,6 +17,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
 };
+use bevy::shader::ShaderDefVal;
 use bevy::shader::ShaderRef;
 use bevy::transform::TransformSystems;
 
@@ -24,6 +25,7 @@ use tesserae_core::sky::{
     CLOUD_PERIOD_M, CloudLayer, LightSource, SkyState, cloud_noise_origin_m, srgb_to_linear,
 };
 
+use super::cloud_field;
 use super::fog::{self, FogSettings};
 use super::sky::shows;
 use crate::client::camera::MainCamera;
@@ -63,11 +65,21 @@ pub struct CloudMaterial {
     pub toward_light: Vec4,
     #[uniform(0)]
     pub period_m: f32,
+    /// The noise, baked; see [`super::cloud_field`].
+    #[texture(1)]
+    #[sampler(2)]
+    pub field_texture: Handle<Image>,
 }
 
 impl CloudMaterial {
     /// `eye` in metres; `reach_m` is how far the slab reaches round it.
-    pub fn new(layer: &CloudLayer, state: &SkyState, eye: Vec3, reach_m: f32) -> Self {
+    pub fn new(
+        layer: &CloudLayer,
+        state: &SkyState,
+        eye: Vec3,
+        reach_m: f32,
+        field_texture: Handle<Image>,
+    ) -> Self {
         let [u, v] = cloud_noise_origin_m([eye.x, eye.z], state.cloud_drift_m);
         let strength = match state.light_source {
             LightSource::Sun => state.light.strength.max(LOW_SUN * state.daylight),
@@ -84,6 +96,7 @@ impl CloudMaterial {
             ambient: ambient.extend(0.0),
             toward_light: Vec3::from(state.toward_light).extend(0.0),
             period_m: CLOUD_PERIOD_M as f32,
+            field_texture,
         }
     }
 }
@@ -117,6 +130,15 @@ impl Material for CloudMaterial {
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = None;
+        // Both stages: they are one module, and each compiles all of it.
+        let range = ShaderDefVal::UInt(
+            "CLOUD_FIELD_RANGE".into(),
+            cloud_field::FIELD_RANGE.to_bits(),
+        );
+        descriptor.vertex.shader_defs.push(range.clone());
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            fragment.shader_defs.push(range);
+        }
         Ok(())
     }
 }
@@ -165,6 +187,7 @@ struct CloudAssets {
     base: Handle<Mesh>,
     top: Handle<Mesh>,
     material: Handle<CloudMaterial>,
+    field: Handle<Image>,
 }
 
 /// A square from -1 to 1 across at `y`, which `clouds.wesl` scales to the reach round the Eye and
@@ -190,7 +213,9 @@ fn build_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<CloudMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
+    let field = images.add(cloud_field::image());
     let none = CloudLayer {
         altitude_m: 0.0,
         thickness_m: 1.0,
@@ -206,7 +231,9 @@ fn build_assets(
             &SkyNow::default().0,
             Vec3::ZERO,
             1.0,
+            field.clone(),
         )),
+        field,
     });
 }
 
@@ -279,7 +306,7 @@ fn follow(
         return;
     };
     let reach_m = fog::reach_m(streaming.view_distance_m, streaming.lod_distance_m);
-    let want = CloudMaterial::new(&layer, &state, eye, reach_m);
+    let want = CloudMaterial::new(&layer, &state, eye, reach_m, assets.field.clone());
     // Read first: `get_mut` alone re-uploads the uniform every frame.
     if materials.get(&assets.material) != Some(&want)
         && let Some(mut material) = materials.get_mut(&assets.material)
@@ -319,6 +346,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<CloudMaterial>>()
+            .init_resource::<Assets<Image>>()
             .init_resource::<StreamingSettings>()
             .add_message::<SkyFogTarget>()
             .insert_resource(WorldSettings {
@@ -426,7 +454,8 @@ mod tests {
                 &CLOUDS,
                 &state,
                 eye,
-                fog::reach_m(streaming.view_distance_m, streaming.lod_distance_m)
+                fog::reach_m(streaming.view_distance_m, streaming.lod_distance_m),
+                app.world().resource::<CloudAssets>().field.clone(),
             )
         );
         assert_eq!((got.slab.y, got.slab.w), (300.0, 30.0));

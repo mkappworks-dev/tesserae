@@ -1,6 +1,7 @@
 //! Materials. Step 9 adds the look-pack API that supplies their WESL.
 
 pub mod chunk_material;
+mod cloud_field;
 pub mod clouds;
 pub mod fog;
 pub mod quad_buffer;

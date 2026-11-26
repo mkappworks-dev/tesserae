@@ -17,12 +17,12 @@ struct Clouds {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0)
 var<uniform> clouds: Clouds;
+// The noise, baked over one period: red the coarse octaves, green the fine; see cloud_field.rs.
+@group(constants::MATERIAL_BIND_GROUP) @binding(1)
+var field_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(2)
+var field_sampler: sampler;
 
-// Lattice cells across one noise period in the coarsest octave: 320 m each over the 20 480 m
-// period, so a view straight up or down spans several. Each octave doubles them, down to 40 m.
-// Whole numbers, so every octave repeats with the period.
-const CELLS: f32 = 64.0;
-const OCTAVES: u32 = 4u;
 // The field's spread, measured over the period. With it the cover's threshold is placed by the
 // logistic fit to the normal curve, so a cover of 0.3 leaves about 70% of the sky clear.
 const FIELD_SIGMA: f32 = 0.133;
@@ -31,11 +31,10 @@ const LOGISTIC_FIT: f32 = 1.702;
 // about two thirds of its coarsest cell.
 const WARP_CELLS: f32 = 32.0;
 const WARP_M: f32 = 200.0;
-// The two finest octaves fade out between these distances along the ray: further, a pixel and
-// the spacing between samples are wider than their cells, and they shimmer.
+// The finest octaves fade out between these distances along the ray: further, a pixel and the
+// spacing between samples are wider than their cells, and they shimmer.
 const DETAIL_FROM_M: f32 = 600.0;
 const DETAIL_TO_M: f32 = 2500.0;
-const DETAILED_OCTAVES: u32 = 2u;
 // Samples further apart than the first step a far cloud's edge into combs; from the second the
 // dither spreads them fully. Only far from the Eye: near, the grain shows as dots, and the samples
 // are close enough.
@@ -146,24 +145,10 @@ fn warp(m: vec2<f32>) -> vec2<f32> {
 }
 
 // The cloud field about 0 at `m`, metres in the noise's own frame, with `detail` from 0 to 1 of the
-// finest octaves. Each octave is shifted so their lattices do not line up.
+// finest octaves, which fade without moving the cover.
 fn field(m: vec2<f32>, detail: f32) -> f32 {
-    let q = fract(m / clouds.period_m);
-    var n = 0.0;
-    var amplitude = 1.0;
-    var total = 0.0;
-    var cells = CELLS;
-    for (var o: u32 = 0u; o < OCTAVES; o = o + 1u) {
-        let share = select(1.0, detail, o >= DETAILED_OCTAVES);
-        if share > 0.0 {
-            n += share * amplitude * gradient_noise(fract(q + f32(o) * 0.31), cells);
-        }
-        // The full total, so fading the detail softens the edges without moving the cover.
-        total += amplitude;
-        amplitude *= 0.5;
-        cells *= 2.0;
-    }
-    return n / total;
+    let octaves = textureSampleLevel(field_texture, field_sampler, fract(m / clouds.period_m), 0.0).rg;
+    return (octaves.r + detail * octaves.g) * bitcast<f32>(constants::CLOUD_FIELD_RANGE);
 }
 
 // Where the field crosses into cloud for the cover.
