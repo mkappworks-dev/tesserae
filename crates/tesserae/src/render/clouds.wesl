@@ -31,6 +31,13 @@ const LOGISTIC_FIT: f32 = 1.702;
 // about two thirds of its coarsest cell.
 const WARP_CELLS: f32 = 32.0;
 const WARP_M: f32 = 200.0;
+// The cover changes across regions of about 2.5 km, so the sky is clear over some, scattered with
+// small clouds over others and fuller over a few: under this much of the region noise it is clear,
+// over the second it is the Game's cover times the third, and between it rises smoothly.
+const REGION_CELLS: f32 = 8.0;
+const REGION_CLEAR: f32 = -0.2;
+const REGION_FULL: f32 = 0.25;
+const REGION_MOST: f32 = 1.7;
 // The finest octaves fade out between these distances along the ray: further, a pixel and the
 // spacing between samples are wider than their cells, and they shimmer.
 const DETAIL_FROM_M: f32 = 600.0;
@@ -151,9 +158,16 @@ fn field(m: vec2<f32>, detail: f32) -> f32 {
     return (octaves.r + detail * octaves.g) * bitcast<f32>(constants::CLOUD_FIELD_RANGE);
 }
 
+// The Game's cover where the region at `m` puts it; slow to vary, so one per pixel serves its ray.
+fn regional_cover(m: vec2<f32>) -> f32 {
+    let q = fract(m / clouds.period_m + vec2<f32>(0.13, 0.71));
+    let region = gradient_noise(q, REGION_CELLS);
+    return clouds.field.w * REGION_MOST * smoothstep(REGION_CLEAR, REGION_FULL, region);
+}
+
 // Where the field crosses into cloud for the cover.
-fn threshold() -> f32 {
-    let cover = clamp(clouds.field.w, 0.001, 0.999);
+fn threshold(cover_here: f32) -> f32 {
+    let cover = clamp(cover_here, 0.001, 0.999);
     return FIELD_SIGMA * log((1.0 - cover) / cover) / LOGISTIC_FIT;
 }
 
@@ -228,8 +242,9 @@ fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
 
     // Relative to the Eye the origin was taken under, so no large coordinate enters the noise.
     let under_eye = clouds.field.xy + (eye.xz - clouds.slab.xz);
-    let at = threshold();
-    let bend = warp(under_eye + direction.xz * 0.5 * (enter + leave));
+    let middle = under_eye + direction.xz * 0.5 * (enter + leave);
+    let at = threshold(regional_cover(middle));
+    let bend = warp(middle);
     let spread = smoothstep(DITHER_FROM_M, DITHER_TO_M, spacing)
         * smoothstep(DITHER_NEAR_M, DITHER_FAR_M, enter);
     let jitter = 0.5 + spread * (dither(in.clip.xy) - 0.5);
