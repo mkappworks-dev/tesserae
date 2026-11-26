@@ -8,7 +8,7 @@ Spec: [Day and night cycle](../spec.md).
 
 ## What to build
 
-Birds by day, crickets by night, blended at dawn and dusk.
+Crickets by night, blended in at dusk and out at dawn.
 
 - `ambient-bed` gains `when` (day, night, always by default) and
   `soundscape-def` gains `night-music`, at most 8 Sounds. The data-only TOML,
@@ -17,8 +17,9 @@ Birds by day, crickets by night, blended at dawn and dusk.
   track starts from `music` when Daylight is at least 0.5, from `night-music`
   otherwise, and is never cut by the hour.
 - Terra's outdoor Soundscapes (default, Temperate, Dry, Savanna, Cold) each
-  mark a day bed and a night bed, CC0, under the same licence checks as its
-  other sounds; Biomes may share a pair.
+  mark a night bed, and Dry and Cold a day bed too, CC0, under the same
+  licence checks as its other sounds; Biomes may share beds. No birds and no
+  bats.
 
 ## Acceptance
 
@@ -76,3 +77,7 @@ spec), and nothing listened to in the app, so the boxes stay unticked.
   track plays on into the night); Terra's pairs in `demo_games.rs`.
 
 The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
+
+2026-11-26: the user dropped the birds and asked for no bats: `birds.ogg`, its
+bed and its credit are gone, and the green Biomes keep wind with crickets at
+night. The CREDITS note reserving bird calls for animal entities is restored.

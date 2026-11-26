@@ -12,7 +12,7 @@ the sun disc and the light balance this spec moves. Tickets: [issues/](issues/).
 The sky never changes. The sun stands at one fixed angle, the light is noon
 forever, there is no moon and no stars, and no clouds. A World feels like a
 still photograph: nothing tells a Player that time passes, and the Soundscape
-plays the same birds at every hour. DESIGN.md's step 9 promised "a day/night
+plays the same wind at every hour. DESIGN.md's step 9 promised "a day/night
 cycle" as part of the sky's polish and never delivered it.
 
 ## Solution
@@ -25,7 +25,7 @@ curve** the Game declares: warm at dawn and dusk, blue and dim at night, with
 stars fading in and turning with the sky. Torches stand out at night because
 Block light does not change, and caves look the same at every hour. A **Cloud
 layer** drifts across the sky at an altitude in metres, coloured by the same
-light. Soundscapes blend day and night beds, so birds give way to crickets at
+light. Soundscapes blend day and night beds, so crickets come in at
 dusk. A World can switch its **Daylight cycle** off, which holds the sky still.
 
 Terra declares a 20-minute day. A World with no Game, or a Game that declares no
@@ -68,8 +68,7 @@ Weather (step 24) later adds itself to the **Sky state** as one more layer
     each region's sky has character.
 16. As a Player, I want the clouds to fade into the distance like the terrain,
     so that they do not end in an edge.
-17. As a Player, I want birds by day and crickets by night, so that I can hear
-    the time.
+17. As a Player, I want crickets by night, so that I can hear the time.
 18. As a Player, I want day and night sounds to blend at dawn and dusk, so that
     the change is never a cut.
 19. As a Player, I want music suited to the night after dark, so that the mood
@@ -295,8 +294,9 @@ declares what it does today. Each field has one ticket that adds it.
 - A track starts from `music` when Daylight is at least 0.5 and from
   `night-music` otherwise; a playing track is never cut by the hour.
 - Terra's outdoor Soundscapes (default, Temperate, Dry, Savanna, Cold) each mark
-  a day bed and a night bed; Biomes may share a pair. Sounds are CC0, under the
-  same licence checks as Terra's other sounds.
+  a night bed, and Dry and Cold a day bed too; Biomes may share beds. No birds
+  and no bats: animal calls wait for Mobs. Sounds are CC0, under the same
+  licence checks as Terra's other sounds.
 
 ### Terra
 

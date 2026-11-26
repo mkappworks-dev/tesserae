@@ -37,7 +37,6 @@ a promise of output loudness or listening safety.
 | `music-2.ogg`                                   | 2010_June_HypnoticChill_17.mp3, complete four-minute track, gentle end fades; -25 LUFS                                                                         | [cynicmusic](https://opengameart.org/content/hypnotic-chill-extended-4-minute-mix)                                                            | CC0 1.0 |
 | `dry.ogg`                                       | wind1.wav + wind2.wav, different full takes crossfaded, plus overlapping loop seam; -32 LUFS                                                                   | [Luke.RUSTLTD](https://opengameart.org/content/wind1)                                                                                         | CC0 1.0 |
 | `cold.ogg`                                      | wind4.wav + wind5.wav, different full takes crossfaded, plus overlapping loop seam; -32 LUFS                                                                   | [Luke.RUSTLTD](https://opengameart.org/content/wind1)                                                                                         | CC0 1.0 |
-| `birds.ogg`                                     | park_ambience_birds.wav, 120–224 s of the CC0 park recording, birds in a copse; filtered 250–9000 Hz, overlapping loop seam; -34 LUFS                          | [Thimras](https://opengameart.org/content/park-ambiences)                                                                                     | CC0 1.0 |
 | `crickets.ogg`                                  | cricketsounds090613.wav, complete 38.5 s backyard take; filtered 1500–9000 Hz, overlapping loop seam; -36 LUFS                                                 | [syncopika](https://opengameart.org/content/cricket-sounds)                                                                                   | CC0 1.0 |
 | `cicadas.ogg`                                   | 082526-cicadasounds2.ogg + 082526-cicadasounds.ogg, different full takes crossfaded; filtered 400–8000 Hz, overlapping loop seam; -38 LUFS                     | [syncopika](https://opengameart.org/content/cicada-sounds)                                                                                    | CC0 1.0 |
 | `dry-night.ogg`                                 | crickets.mp3 (served as crickets_1.mp3), the complete 11 s loopable take; filtered 800–9000 Hz, 1 s overlapping loop seam; -36 LUFS                            | [Wolfgang\_; optional notice: Ted Kerr](https://opengameart.org/content/crickets-ambient-noise-loopable)                                      | CC0 1.0 |
@@ -49,12 +48,11 @@ a promise of output loudness or listening safety.
 | `swimming-2.ogg`                                | loop_water_02.ogg, soft 1.2 s water gesture with filtered attack/release                                                                                       | [rubberduck](https://opengameart.org/content/40-cc0-water-splash-slime-sfx)                                                                   | CC0 1.0 |
 | `swimming-3.ogg`                                | loop_water_03.ogg, soft 1.2 s water gesture with filtered attack/release                                                                                       | [rubberduck](https://opengameart.org/content/40-cc0-water-splash-slime-sfx)                                                                   | CC0 1.0 |
 
-Positional bird calls are reserved for future nearby animal entities; the
-distant birdsong and insects above are ambient beds heard by the hour. Terra no
-longer declares the old bird-and-synth music track; its source asset is retained
-for reference. Each outdoor Soundscape keeps its wind and adds a day and a night
-bed: birds and crickets in the green Biomes, cicadas and crickets in Dry and
-Savanna; Cold's wind gives way to a darker night wind.
+Bird calls are reserved for future nearby animal entities. Terra no longer
+declares the old bird-and-synth music track; its source asset is retained for
+reference. Each outdoor Soundscape keeps its wind and adds beds by the hour:
+crickets at night in the green Biomes, cicadas by day and crickets at night in
+Dry and Savanna; Cold's wind gives way to a darker night wind.
 
 Material footsteps and rock breaks have an 8 ms attack fade and up to 60 ms
 release, high-pass at 90 Hz, and peak matching to -8 dBFS before fades and Game

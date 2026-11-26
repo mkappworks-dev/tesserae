@@ -401,7 +401,7 @@ fn terra_shows_its_six_biomes_with_the_approved_sky_and_fog() {
 }
 
 #[test]
-fn terra_outdoor_soundscapes_each_have_a_day_and_a_night_bed() {
+fn terra_outdoor_soundscapes_each_have_a_night_bed() {
     use tesserae_core::audio::{BedHours, SoundscapeId};
     let (_install, loaded) = loaded("terra", 0.5);
     let sounds = &loaded.sounds;
@@ -420,9 +420,11 @@ fn terra_outdoor_soundscapes_each_have_a_day_and_a_night_bed() {
         "terra:cold",
     ] {
         let hours = hours(name);
-        assert!(
-            hours.contains(&BedHours::Day) && hours.contains(&BedHours::Night),
-            "{name}: {hours:?}"
+        assert!(hours.contains(&BedHours::Night), "{name}: {hours:?}");
+        assert_eq!(
+            hours.contains(&BedHours::Day),
+            matches!(name, "terra:dry" | "terra:cold"),
+            "{name}: no birds by day, {hours:?}"
         );
     }
     for name in ["terra:underground", "terra:underwater"] {

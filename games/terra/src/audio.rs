@@ -108,7 +108,6 @@ pub fn sounds() -> Vec<SoundDef> {
         0.35,
     ));
     for (name, bytes) in [
-        ("birds", &include_bytes!("../audio/birds.ogg")[..]),
         ("crickets", &include_bytes!("../audio/crickets.ogg")[..]),
         ("cicadas", &include_bytes!("../audio/cicadas.ogg")[..]),
         ("dry_night", &include_bytes!("../audio/dry-night.ogg")[..]),
@@ -344,12 +343,9 @@ pub fn soundscapes() -> Vec<SoundscapeDef> {
     use BedHours::*;
     use SoundscapeContext::*;
     type Beds = &'static [(&'static str, f32, BedHours)];
-    // Temperate's pair is the default's; Savanna names the Dry Soundscape, so shares its pair.
-    let open: Beds = &[
-        ("open", 1.0, Always),
-        ("birds", 0.8, Day),
-        ("crickets", 0.7, Night),
-    ];
+    // Temperate's beds are the default's; Savanna names the Dry Soundscape, so shares its beds.
+    // No birds by day: bird calls wait for animal entities.
+    let open: Beds = &[("open", 1.0, Always), ("crickets", 0.7, Night)];
     let scapes: [(&str, Option<SoundscapeContext>, Beds); 6] = [
         ("surface", Some(Default), open),
         ("underground", Some(Underground), &[("cave", 1.0, Always)]),
