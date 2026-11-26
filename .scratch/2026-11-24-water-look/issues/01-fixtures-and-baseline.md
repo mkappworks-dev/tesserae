@@ -25,10 +25,24 @@ their subject after the hydrology changes.
 
 ## Acceptance criteria
 
-- [ ] The four fixtures run through `scripts/profile-frames` and are listed in
+- [x] The four fixtures run through `scripts/profile-frames` and are listed in
       the frame-profiling doc.
-- [ ] Captures from each, and from `flight`, with
+- [x] Captures from each, and from `flight`, with
       `TESSERAE_SCREENSHOT_OFFSCREEN=1`, in one `/tmp` folder (never committed),
       shown to the user.
 - [ ] Frame timing and a `--instruments gpu` series for the four and `flight`
       (spec, Testing Decisions), in Comments with the load average and commit.
+
+## Comments
+
+- 2026-11-26, at 2db55d3a plus this ticket's fixtures: the Eyes were found by
+  asking Terra's Generator, not by flying. Within 2.4 km of spawn there are
+  only lakes; rivers start about 3 km west, and the nearest open sea beside a
+  gentle beach is about 8 km west. Terra's sea stands at 24 m, its
+  `sea_level_m`.
+- Captures taken with `TESSERAE_SCREENSHOT_OFFSCREEN=1` at the runner's
+  settings, by running the binary directly, in
+  `/tmp/tesserae-water-look-captures/`.
+- Timing and the `--instruments gpu` series are not run yet: the host had a load
+  average of 24-27 and other sessions' Cargo builds running, which the runner
+  refuses. Run them on a quiet host before 08 lands its first look change.

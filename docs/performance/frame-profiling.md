@@ -227,8 +227,8 @@ fields do not establish power-loss safety, GPU cost or present latency.
 
 ## Streaming fixtures
 
-`--fixtures` also accepts eight streaming fixtures, all on Terra's default seed
-and measured in the same 22–32 s phase:
+`--fixtures` also accepts eight streaming fixtures and four water fixtures, all
+on Terra's default seed and measured in the same 22–32 s phase:
 
 - `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
   heading.
@@ -254,6 +254,19 @@ and measured in the same 22–32 s phase:
   does, then reopens from its save in the same process, as the World list would.
   The reopen's GPU pipelines are already compiled, so it measures the World
   opening and refilling, not a cold launch.
+
+The water fixtures stand the Eye still at a fixed place on Terra's default seed,
+set by the Server on its first tick (`WATER_EYES_M`) and aimed by the runner, so
+captures before and after a water change compare the same view:
+
+- `lake`: 2 m over a lake at 67.25 m, 60 m from its 19 m deep middle, looking
+  low across it so the far side shows the sky's reflection.
+- `river`: 3 m over a pool at 37.6 m, looking downstream over a lip and pools
+  falling to 32.4 m, about 4 km west of spawn.
+- `coast`: at the water's edge of a beach 8 km west of spawn, looking out over
+  the sea at 24 m.
+- `underwater`: 4 m under the `lake` fixture's lake, over its deepest Voxel,
+  looking across its floor.
 
 `restart` and `revisit` need a `TESSERAE_WORLD_DIR` that does not exist yet and
 refuse to start otherwise; the runner gives each run a `world` folder inside its
