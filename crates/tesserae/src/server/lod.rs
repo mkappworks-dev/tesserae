@@ -244,6 +244,7 @@ pub(in crate::server) struct LodGenerators {
     /// What [`Worldgen::built_materials`] answers for `placement`.
     built: Arc<[MaterialId]>,
     answers: Arc<Answers>,
+    derived: Arc<Derived>,
 }
 
 impl LodGenerators {
@@ -278,6 +279,7 @@ impl LodGenerators {
             trees: Arc::new(trees),
             built,
             answers: Arc::default(),
+            derived: Arc::default(),
         };
         generators.direct = generators.made_directly(world, COLUMNS_FROM, false);
         generators
@@ -342,6 +344,7 @@ impl LodGenerators {
     fn persistent(&self) -> Persistent {
         Persistent {
             sources: self.sources.clone(),
+            derived: Arc::clone(&self.derived),
             placement: Arc::clone(&self.placement),
             trees: Arc::clone(&self.trees),
             canopies: Arc::clone(&self.canopies),
@@ -1235,19 +1238,46 @@ fn generate_persistent(
     finer: &HashMap<LodKey, Held>,
     tables: &Tables,
 ) -> Coarse {
+    let derived = derive(level, coord, generators, saved, finer, tables);
+    Coarse {
+        chunk: (*derived.chunk).clone(),
+        overlay: (*derived.overlay).clone(),
+        openings: derived.openings.clone(),
+    }
+}
+
+/// [`generate_persistent`]'s Chunk, from this Session's [`Derived`] while the saved Chunks under
+/// it are the ones it read.
+fn derive(
+    level: u32,
+    coord: ChunkCoord,
+    generators: &Persistent,
+    saved: &std::collections::BTreeMap<ChunkCoord, Held>,
+    finer: &HashMap<LodKey, Held>,
+    tables: &Tables,
+) -> Arc<Memo> {
+    let read: Vec<(ChunkCoord, Held)> = saved
+        .iter()
+        .filter(|(home, _)| home.ancestor(level) == coord)
+        .map(|(&home, held)| (home, held.clone()))
+        .collect();
+    if let Some(memo) = generators.derived.get((level, coord), &read) {
+        return memo;
+    }
     let children = std::array::from_fn(|i| {
         let child = coord.child(i);
         if level == 1 {
             return saved.get(&child).cloned();
         }
-        let relevant = saved.keys().any(|home| home.ancestor(level - 1) == child);
+        let relevant = read
+            .iter()
+            .any(|(home, _)| home.ancestor(level - 1) == child);
         relevant.then(|| {
             finer.get(&(level - 1, child)).cloned().unwrap_or_else(|| {
-                let coarse =
-                    generate_persistent(level - 1, child, generators, saved, finer, tables);
+                let memo = derive(level - 1, child, generators, saved, finer, tables);
                 Held {
-                    chunk: Arc::new(coarse.chunk),
-                    changed: Some(Arc::new(coarse.overlay)),
+                    chunk: Arc::clone(&memo.chunk),
+                    changed: Some(Arc::clone(&memo.overlay)),
                 }
             })
         })
@@ -1263,13 +1293,66 @@ fn generate_persistent(
         Some(makers.trees),
     );
     stand_on_ground(level, coord, makers, &mut coarse.chunk, &children, tables);
-    coarse
+    let memo = Arc::new(Memo {
+        read,
+        chunk: Arc::new(coarse.chunk),
+        overlay: Arc::new(coarse.overlay),
+        openings: coarse.openings,
+    });
+    generators.derived.put((level, coord), Arc::clone(&memo));
+    memo
+}
+
+/// The coarse Chunks [`generate_persistent`] derived this Session. Every coarser level's job
+/// over a saved Chunk derives the whole branch under it unless the finer level already shows it,
+/// which on opening a World it does not yet: each branch was derived once per level above it,
+/// most of the coarse levels' work while a played World filled in. In memory only, like the
+/// column answers (ADR-0035).
+#[derive(Default)]
+pub(in crate::server) struct Derived(std::sync::Mutex<HashMap<LodKey, Arc<Memo>>>);
+
+/// Past this many Chunks [`Derived`] starts again, as the drainage cache does.
+const MAX_DERIVED: usize = 4096;
+
+pub(in crate::server) struct Memo {
+    /// The saved Chunks under it it was derived from, held so a handle is never reused.
+    read: Vec<(ChunkCoord, Held)>,
+    chunk: Arc<Chunk>,
+    overlay: Arc<ChunkOverlay>,
+    openings: SeamOpenings,
+}
+
+impl Derived {
+    /// The Chunk at `key`, if it was derived from exactly `read`: an edit saves a new handle.
+    fn get(&self, key: LodKey, read: &[(ChunkCoord, Held)]) -> Option<Arc<Memo>> {
+        let memo = self.0.lock().unwrap().get(&key).cloned()?;
+        let same = |(a, x): &(ChunkCoord, Held), (b, y): &(ChunkCoord, Held)| {
+            a == b
+                && Arc::ptr_eq(&x.chunk, &y.chunk)
+                && match (&x.changed, &y.changed) {
+                    (Some(x), Some(y)) => Arc::ptr_eq(x, y),
+                    (None, None) => true,
+                    _ => false,
+                }
+        };
+        (memo.read.len() == read.len() && memo.read.iter().zip(read).all(|(m, r)| same(m, r)))
+            .then_some(memo)
+    }
+
+    fn put(&self, key: LodKey, memo: Arc<Memo>) {
+        let mut memos = self.0.lock().unwrap();
+        if memos.len() >= MAX_DERIVED {
+            memos.clear();
+        }
+        memos.insert(key, memo);
+    }
 }
 
 /// What a job over saved changes reads: every source, and the draws.
 #[derive(Clone)]
 pub(in crate::server) struct Persistent {
     sources: Vec<Worldgen>,
+    derived: Arc<Derived>,
     placement: Arc<Worldgen>,
     trees: Arc<TreeMaterials>,
     canopies: Arc<CanopyShapes>,
@@ -5648,15 +5731,67 @@ mod persistence_tests {
                     home.y.div_euclid(divisor),
                     home.z.div_euclid(divisor),
                 );
-                let again = |held: &HashMap<LodKey, Held>| {
-                    generate_persistent(level, at, &generators.persistent(), &saved, held, &tables)
-                };
-                assert!(
-                    same(&again(&finer), &again(&HashMap::new())),
-                    "level {level} {at}"
+                // From scratch: generators of its own, whose memo has derived nothing yet.
+                let scratch = LodGenerators::new(&world, &base, 5).persistent();
+                let read = generate_persistent(
+                    level,
+                    at,
+                    &generators.persistent(),
+                    &saved,
+                    &finer,
+                    &tables,
                 );
+                let derived =
+                    generate_persistent(level, at, &scratch, &saved, &HashMap::new(), &tables);
+                assert!(same(&read, &derived), "level {level} {at}");
             }
         }
+    }
+
+    /// Every coarser level's job derives the branch under a saved Chunk again; the memo makes
+    /// that once a Session, until the saved Chunk changes.
+    #[test]
+    fn a_derived_branch_is_reused_until_a_saved_chunk_under_it_changes() {
+        let tables = crate::server::fixture_tables();
+        let world = WorldSettings::default();
+        let base = Worldgen::new(
+            world.seed,
+            world.voxel_size,
+            tesserae_core::testgen::world_params(),
+        );
+        let generators = LodGenerators::new(&world, &base, 5).persistent();
+        let held = |chunk: Chunk| Held {
+            chunk: Arc::new(chunk),
+            changed: Some(Arc::new(ChunkOverlay::none())),
+        };
+        let home = ChunkCoord::new(0, -2, 0);
+        let (level_one, level_two) = (home.ancestor(1), home.ancestor(2));
+        let saved = BTreeMap::from([(home, held(Chunk::air()))]);
+        let derive_at = |level, at, saved: &BTreeMap<ChunkCoord, Held>| {
+            derive(level, at, &generators, saved, &HashMap::new(), &tables)
+        };
+        let first = derive_at(2, level_two, &saved);
+        assert!(
+            Arc::ptr_eq(&derive_at(2, level_two, &saved).chunk, &first.chunk),
+            "derived again"
+        );
+        let below = derive_at(1, level_one, &saved);
+        assert!(
+            Arc::ptr_eq(&derive_at(1, level_one, &saved).chunk, &below.chunk),
+            "level 1's job derived the branch level 2's job had"
+        );
+        let stone = Voxel::cube(tesserae_core::testgen::fixtures().ground.rock);
+        let edited = BTreeMap::from([(home, held(Chunk::filled(stone)))]);
+        let after = derive_at(2, level_two, &edited);
+        assert!(
+            !Arc::ptr_eq(&after.chunk, &first.chunk),
+            "the edit was missed"
+        );
+        let scratch = LodGenerators::new(&world, &base, 5).persistent();
+        let fresh = generate_persistent(2, level_two, &scratch, &edited, &HashMap::new(), &tables);
+        let after =
+            generate_persistent(2, level_two, &generators, &edited, &HashMap::new(), &tables);
+        assert!(same(&after, &fresh));
     }
 
     #[test]

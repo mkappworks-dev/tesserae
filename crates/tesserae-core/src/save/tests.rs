@@ -172,7 +172,13 @@ fn malformed_cells_and_orientations_fail_without_panics() {
     let refused = |from: &SavedChunk, change: &dyn Fn(&mut SavedChunk)| {
         let mut saved = from.clone();
         change(&mut saved);
-        matches!(saved.restore(&m), Err(Error::Corrupt(_)))
+        let restored = saved.restore(&m);
+        assert_eq!(
+            saved.validate(&m).is_ok(),
+            restored.is_ok(),
+            "validate and restore disagree"
+        );
+        matches!(restored, Err(Error::Corrupt(_)))
     };
     for from in [&good, &format_2] {
         assert!(refused(from, &|s| s.palette.clear()));
@@ -322,6 +328,18 @@ fn a_changed_checksum_recovers_but_a_complete_new_version_refuses_rollback() {
     assert!(matches!(
         recover(&d.0, &c.content),
         Err(Error::Incompatible(_))
+    ));
+}
+
+#[test]
+fn a_commit_holding_a_corrupt_chunk_is_refused() {
+    let mut c = fixture();
+    c.chunks = vec![ground([0, 0, 0], 1, 8)];
+    assert!(c.compatible(&c.content.clone()).is_ok());
+    c.chunks[0].palette[0].solid.orientation = 24;
+    assert!(matches!(
+        c.compatible(&c.content.clone()),
+        Err(Error::Corrupt(_))
     ));
 }
 

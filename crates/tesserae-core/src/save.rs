@@ -376,6 +376,31 @@ impl SavedChunk {
     }
 
     pub fn restore(&self, mapping: &Mapping) -> Result<(Chunk, ChunkOverlay), Error> {
+        let (indices, restored) = self.decode(mapping)?;
+        let mut chunk = Chunk::filled(Voxel::AIR);
+        let mut overlay = ChunkOverlay::none();
+        for (i, &k) in indices.iter().enumerate() {
+            let (x, y, z) = (
+                i / (CHUNK_SIZE * CHUNK_SIZE),
+                i / CHUNK_SIZE % CHUNK_SIZE,
+                i % CHUNK_SIZE,
+            );
+            let (voxel, o) = restored[usize::from(k)];
+            chunk.set(x, y, z, voxel);
+            overlay.set(x, y, z, o);
+        }
+        Ok((chunk, overlay))
+    }
+
+    /// Whether [`Self::restore`] would succeed, without building the Chunk: opening a World
+    /// checks its Commit several times, and setting every Voxel was nearly all of each check.
+    pub fn validate(&self, mapping: &Mapping) -> Result<(), Error> {
+        self.decode(mapping).map(drop)
+    }
+
+    /// Every Voxel's index into the cells, each cell restored, checked as [`Self::restore`]
+    /// needs them.
+    fn decode(&self, mapping: &Mapping) -> Result<Decoded, Error> {
         mapping.validate()?;
         if self
             .coord
@@ -403,21 +428,12 @@ impl SavedChunk {
                 ))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut chunk = Chunk::filled(Voxel::AIR);
-        let mut overlay = ChunkOverlay::none();
-        for (i, &k) in indices.iter().enumerate() {
-            let (x, y, z) = (
-                i / (CHUNK_SIZE * CHUNK_SIZE),
-                i / CHUNK_SIZE % CHUNK_SIZE,
-                i % CHUNK_SIZE,
-            );
-            let (voxel, o) = restored[usize::from(k)];
-            chunk.set(x, y, z, voxel);
-            overlay.set(x, y, z, o);
-        }
-        Ok((chunk, overlay))
+        Ok((indices, restored))
     }
 }
+
+/// Each Voxel's index into the cells, and each cell restored.
+type Decoded = (Vec<u16>, Vec<(Voxel, Overlay)>);
 
 /// Timer deadlines are remaining logical steps, never Unix timestamps.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2381,7 +2397,7 @@ impl Commit {
         let mut coords = BTreeSet::new();
         for chunk in &self.chunks {
             distinct_chunk(&mut coords, chunk.coord)?;
-            chunk.restore(&mapping)?;
+            chunk.validate(&mapping)?;
         }
         let mut homes = self.simulation.homes();
         for (home, paused) in &self.paused {
