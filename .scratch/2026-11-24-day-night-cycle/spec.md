@@ -307,9 +307,8 @@ declares what it does today. Each field has one ticket that adds it.
 
 ### Order and other sessions
 
-- Tickets 01 to 03 and 08 can start from `main` now. Tickets 04 to 07 and 09
-  wait for `fix/colour-art-and-shader` to merge to `main`; ticket 04 stays
-  `needs-info` until then, and the rest wait on it.
+- Tickets 04 to 07 build on the sun disc and rebalanced light that
+  `fix/colour-art-and-shader` merged to `main` (#75).
 - Tickets that amend `sky` run in order (01, 04, 05, 07), so they never edit the
   same record at once.
 - The Look overhaul (`feat/look-overhaul`) has been told: nothing here needs

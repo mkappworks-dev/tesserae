@@ -1,10 +1,7 @@
 # 04: Sun and moon light
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 02
-
-Waiting for `fix/colour-art-and-shader` to merge to `main`: this ticket moves
-its sun disc and rebalanced light. Set `ready-for-agent` once it has.
 
 Spec: [Day and night cycle](../spec.md).
 [ADR-0039](../../../docs/adr/0039-the-sky-is-our-own-shader-not-bevys-atmosphere.md).
