@@ -100,3 +100,9 @@ stands-in = "#water"
 
 [plants.needs]
 soil = ["#sand", "#soil", "#rock"]
+
+# No Plant grows a lily pad, so a pond Template's pads need a Recipe to be Obtainable.
+[[recipes]]
+inputs = [{ item = "aquatic:seagrass", count = 2 }]
+output = { item = "aquatic:lily_pad", count = 1 }
+station = "hand"

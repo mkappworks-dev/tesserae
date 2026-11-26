@@ -16,7 +16,7 @@ use tesserae::mods::content::{
     CombustionDef, FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef,
     MaterialDef, Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack,
     RenderClass, SelectorRange, ShapeDef, SkyFog, SurfaceFeature, TileVariation, ToolDef, ToolKind,
-    ViewParams, VoxelUse, VoxelUseKind, WaterParams,
+    ViewParams, WaterParams,
 };
 use tesserae::mods::types::{Arm, CollisionBox, ConnectDef, NodeBox, Srgba};
 
@@ -90,19 +90,22 @@ fn fence() -> ShapeDef {
 /// Terra's own rock and sand made into strata's, which the shared building Mods' Recipes take:
 /// strata lies only in Terra's bedding, too deep and sparse to build from.
 fn strata_bridges() -> Vec<RecipeDef> {
-    [("terra:rock", "strata:stone"), ("terra:sand", "strata:sand")]
-        .map(|(from, to)| RecipeDef {
-            inputs: vec![RecipeStack {
-                item: from.into(),
-                count: 1,
-            }],
-            output: RecipeStack {
-                item: to.into(),
-                count: 1,
-            },
-            station: "hand".into(),
-        })
-        .into()
+    [
+        ("terra:rock", "strata:stone"),
+        ("terra:sand", "strata:sand"),
+    ]
+    .map(|(from, to)| RecipeDef {
+        inputs: vec![RecipeStack {
+            item: from.into(),
+            count: 1,
+        }],
+        output: RecipeStack {
+            item: to.into(),
+            count: 1,
+        },
+        station: "hand".into(),
+    })
+    .into()
 }
 
 fn marker(name: &str, icon: MarkerIcon, [r, g, b]: [u8; 3]) -> MarkerKindDef {
@@ -228,7 +231,7 @@ impl Guest for Terra {
                     ..solid("crystal")
                 },
                 solid("melon"),
-            ]
+            ],
             shapes: vec![fence()],
             appearance: vec![
                 appearance("lava", [230, 72, 16, 255]),
