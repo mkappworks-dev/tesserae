@@ -551,7 +551,10 @@ multiplayer is a later transport swap, not a rewrite.
    moving sun and moon, Moon phases, stars, a Cloud layer and Soundscapes that
    change with the time, drawn by our own sky shader
    ([ADR-0039](docs/adr/0039-the-sky-is-our-own-shader-not-bevys-atmosphere.md)).
-   Weather (step 24) adds itself to its Sky state as a later layer.
+   Weather (step 24) adds itself to its Sky state as a later layer. The cycle is
+   done: a Player turns it off per World, Creative sets the hour from the Menu,
+   the night's light follows the Moon's phase down to starlight, and Terra's
+   clouds are an 80 m layer of warped gradient noise.
 
 ### Steps 10 to 29: engine systems and game content
 
