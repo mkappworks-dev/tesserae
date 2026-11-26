@@ -590,8 +590,8 @@ fn world_status(
         .with_children(|status| {
             status.spawn((
                 Text::new("YOU ARE HERE"),
-                theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
-                bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
+                theme::weighted(theme::TEXT_STATUS_LABEL, theme::STRONG),
+                bevy::text::LetterSpacing::Px(theme::STATUS_LABEL_TRACKING),
                 TextColor(theme::STATUS_INK),
                 shadow(1.0),
                 Pickable::IGNORE,
@@ -602,7 +602,7 @@ fn world_status(
                 TextColor(theme::INK),
                 shadow(2.0),
                 Node {
-                    margin: UiRect::vertical(Val::Px(8.0)),
+                    margin: UiRect::new(Val::ZERO, Val::ZERO, Val::Px(8.0), Val::Px(10.0)),
                     ..default()
                 },
                 Pickable::IGNORE,
@@ -611,7 +611,7 @@ fn world_status(
                 status.spawn((
                     ClockLine,
                     Text::new(day),
-                    theme::font(theme::TEXT_TAG),
+                    theme::font(theme::TEXT_STATUS_TIME),
                     TextColor(theme::STATUS_INK),
                     shadow(1.0),
                     Node {
@@ -623,7 +623,7 @@ fn world_status(
             }
             status.spawn((
                 Text::new(format!("{game}   /   a little further to explore.")),
-                theme::font(theme::TEXT_TAG),
+                theme::font(theme::TEXT_STATUS_GAME),
                 TextColor(theme::STATUS_INK),
                 shadow(1.0),
                 Pickable::IGNORE,

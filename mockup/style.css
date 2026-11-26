@@ -829,16 +829,20 @@ summary {
 }
 .world-status h3 {
   font-weight: 450;
-  font-size: 24px;
-  margin: 8px 0;
+  font-size: 32px;
+  margin: 8px 0 10px;
 }
 .world-status p {
   color: #c1d2b8;
-  font-size: 11px;
+  font-size: 15px;
+}
+.world-status .eyebrow {
+  font-size: 13px;
 }
 /* Only a Game that declares a sky has a day to tell; the others are held at noon. */
 .world-status .world-time {
   margin-bottom: 6px;
+  font-size: 19px;
   font-variant-numeric: tabular-nums;
 }
 .loading-screen {

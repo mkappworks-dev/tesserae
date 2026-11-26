@@ -21,7 +21,8 @@ The Client knows the hour and shows it.
 - [x] Server tests: the message on open, on a rate change and every 5 s.
 - [x] Client tests: a small correction eases, a large one snaps, the clock runs
       between messages at the sent rate.
-- [ ] The mockup line approved by the user; the Menu shows it on Terra.
+- [x] The mockup line approved by the user.
+- [ ] The Menu shows it on Terra.
 
 ## Comments
 
@@ -55,3 +56,8 @@ user's approval: view it in `mockup/app.js` (`pause()`, the in-game Menu) and
   since it has no day to tell (the spec left this open).
 
 The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
+
+The user approved the mockup line on 2026-11-26 and asked for a larger card:
+"You are here" 13 px, the Biome 32 px, the time 19 px and the Game line 15 px
+(`mockup/style.css`; `theme::TEXT_STATUS*` on the Client). The card is on every
+Game's Menu. Seeing it on Terra waits on the whole-day review (ticket 09).

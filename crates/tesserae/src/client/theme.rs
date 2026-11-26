@@ -432,7 +432,12 @@ pub(super) const RAIL_WIDTH: f32 = 224.0;
 pub(super) const RAIL_ENTRY_HEIGHT: f32 = 48.0;
 /// "You are here" on the World, under the Menu.
 pub(super) const STATUS_INK: Color = Color::srgb_u8(0xee, 0xf1, 0xea);
-pub(super) const TEXT_STATUS: f32 = 24.0;
+pub(super) const TEXT_STATUS: f32 = 32.0;
+pub(super) const TEXT_STATUS_LABEL: f32 = 13.0;
+/// 0.2 em of the label size.
+pub(super) const STATUS_LABEL_TRACKING: f32 = 2.6;
+pub(super) const TEXT_STATUS_TIME: f32 = 19.0;
+pub(super) const TEXT_STATUS_GAME: f32 = 15.0;
 
 // Pass D: the Inventory, the Catalogue and the quick Layout panel.
 pub(super) const ITEM_SURFACE: Color = Color::srgb_u8(0x0b, 0x0b, 0x0d);
