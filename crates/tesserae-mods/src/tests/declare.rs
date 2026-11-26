@@ -1908,25 +1908,21 @@ fn a_biomes_cloud_cover_resolves_and_a_bad_one_names_the_mod_that_declared_it() 
     assert_eq!(scales, [Some(0.25), None]);
 
     for scale in [-0.5, 4.5, f32::NAN] {
-        let mut load = Load::new();
-        let bad = load
-            .apply(
-                "m",
-                with_biomes(
-                    &[],
-                    vec![content::BiomeDef {
-                        soundscape: None,
-                        selectors: None,
-                        strata: None,
-                        cloud_cover: Some(scale),
-                        ..biome("odd", 0.5, 0.5)
-                    }],
-                    vec![],
-                ),
-            )
-            .unwrap()
-            .behaviour;
-        match resolve_biomes(&[bad], &load.tables, &load.registry, None).unwrap_err() {
+        let bad = Load::new().apply(
+            "m",
+            with_biomes(
+                &[],
+                vec![content::BiomeDef {
+                    soundscape: None,
+                    selectors: None,
+                    strata: None,
+                    cloud_cover: Some(scale),
+                    ..biome("odd", 0.5, 0.5)
+                }],
+                vec![],
+            ),
+        );
+        match bad.err().unwrap() {
             ModError::Params { id, what, source } => {
                 assert_eq!((id.as_str(), what), ("m", "biome"), "{scale}");
                 assert_eq!(source.field, "biomes.cloud_cover", "{scale}");
@@ -2635,8 +2631,16 @@ fn a_games_sky_is_kept_and_a_world_without_one_has_none() {
 
 #[test]
 fn only_the_game_sets_the_sky() {
+    // Without the engine's caves and smoothing, which a Mod may not set either and come first.
+    let mut d = declaring(&[], &[]);
+    let mut world = crate::convert::engine_world_params();
+    world.caves = None;
+    world.smoothing = None;
+    world.sky = Some(sky());
+    d.world = Some(world);
+    let mut load = Load::new();
     assert!(matches!(
-        declare_sky(Some(sky()), false),
+        apply(d, "mod", &mut load.tables, &mut load.registry, false),
         Err(ModError::NotAGame {
             field: "world.sky",
             ..

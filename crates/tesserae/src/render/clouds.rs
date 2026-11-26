@@ -276,7 +276,7 @@ fn follow(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::{TimeOfDaySync, WorldSky};
+    use crate::content::{SkyFogTarget, TimeOfDaySync, WorldSky};
     use crate::world::WorldSettings;
     use tesserae_core::sky::{Pin, SkyParams};
 
@@ -305,6 +305,7 @@ mod tests {
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<CloudMaterial>>()
             .init_resource::<StreamingSettings>()
+            .add_message::<SkyFogTarget>()
             .insert_resource(WorldSettings {
                 voxel_size,
                 ..WorldSettings::default()

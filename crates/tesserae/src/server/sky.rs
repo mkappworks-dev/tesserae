@@ -317,9 +317,19 @@ mod tests {
             high - low > 0.5,
             "the walk crosses a border: {low} to {high}"
         );
-        for pair in scales.windows(2) {
+        // A climate 100 m across turns fast, so the steepest 5 m is looked at closer: a blend
+        // only grows smoother there, while a step would stay.
+        let rise = |i: usize| (scales[i] - scales[i - 1]).abs();
+        let steepest = (1..scales.len())
+            .max_by(|&a, &b| rise(a).total_cmp(&rise(b)))
+            .unwrap();
+        let from_m = (steepest - 1) as f32 * 5.0;
+        let close: Vec<f32> = (0..=100)
+            .map(|i| generator.cloud_scale_at(from_m + i as f32 * 0.05, 0.0))
+            .collect();
+        for pair in close.windows(2) {
             assert!(
-                (pair[1] - pair[0]).abs() < 0.2,
+                (pair[1] - pair[0]).abs() < 0.02,
                 "no step at a border: {pair:?}"
             );
         }

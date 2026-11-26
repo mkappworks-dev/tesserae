@@ -650,6 +650,12 @@ fn check_biomes(mod_id: &str, biomes: &[content::BiomeDef]) -> Result<(), ModErr
                 return Err(bad(field, "must be from 0 to 1"));
             }
         }
+        if biome
+            .cloud_cover
+            .is_some_and(|scale| !(0.0..=MAX_CLOUD_SCALE).contains(&scale))
+        {
+            return Err(bad("biomes.cloud_cover", "must be from 0 to 4"));
+        }
     }
     Ok(())
 }
@@ -1094,15 +1100,6 @@ pub fn resolve_biomes(
                 return Err(bad(ParamError {
                     field: "biomes.cave_scale",
                     rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CAVE_SCALE}")),
-                }));
-            }
-            if let Some(scale) = def.cloud_cover
-                && !(0.0..=MAX_CLOUD_SCALE).contains(&scale)
-            {
-                static RULE: OnceLock<String> = OnceLock::new();
-                return Err(bad(ParamError {
-                    field: "biomes.cloud_cover",
-                    rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CLOUD_SCALE}")),
                 }));
             }
             if def.surface_features.len() > tesserae_core::MAX_SURFACE_FEATURES {
