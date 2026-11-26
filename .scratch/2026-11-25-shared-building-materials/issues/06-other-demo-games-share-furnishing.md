@@ -23,6 +23,6 @@ No new tests: demo-Game tests run on Terra only. CI's validate step over
 
 ## Acceptance criteria
 
-- [ ] All five demo Games pass CI's validate step.
-- [ ] No demo Game declares a Station, chest, Door, glass or lamp of its own.
-- [ ] The generator's check mode reports no drift for any Game.
+- [x] All five demo Games pass CI's validate step.
+- [x] No demo Game declares a Station, chest, Door, glass or lamp of its own.
+- [x] The generator's check mode reports no drift for any Game.

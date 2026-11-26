@@ -21,12 +21,12 @@ Mod README's "Used by" is checked against them.
 
 ## Acceptance criteria
 
-- [ ] ADR-0038 exists and ADR-0029 links it.
-- [ ] The glossary's Obtainable entry says a Recipe counts only when its Station
+- [x] ADR-0038 exists and ADR-0029 links it.
+- [x] The glossary's Obtainable entry says a Recipe counts only when its Station
       is Obtainable.
-- [ ] The authoring guide no longer says Stations or unlisted Templates are not
+- [x] The authoring guide no longer says Stations or unlisted Templates are not
       checked, and names no deleted Terra Shape.
-- [ ] Every shared Mod README's "Used by", the Mods README and the demo Games
+- [x] Every shared Mod README's "Used by", the Mods README and the demo Games
       doc agree.
-- [ ] No planning doc names the block game the engine is compared with.
-- [ ] `npm run fmt:check` passes.
+- [x] No planning doc names the block game the engine is compared with.
+- [x] `npm run fmt:check` passes.

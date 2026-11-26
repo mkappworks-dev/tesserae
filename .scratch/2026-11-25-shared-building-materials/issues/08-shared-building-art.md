@@ -19,8 +19,8 @@ requires. The art the colour session drew is not redrawn.
 
 ## Acceptance criteria
 
-- [ ] Every shared building Material has a texture from the generator, and the
+- [x] Every shared building Material has a texture from the generator, and the
       PNGs match a fresh run of it.
-- [ ] Each appearance colour is its tile's linear mean.
-- [ ] A Terra village at a fixed seed reads as it did before ticket 04, in a dev
+- [x] Each appearance colour is its tile's linear mean.
+- [x] A Terra village at a fixed seed reads as it did before ticket 04, in a dev
       capture compared by eye (review-only, not committed).

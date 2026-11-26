@@ -27,18 +27,18 @@ shipped with Terra follows its new `depends`.
 
 ## Acceptance criteria
 
-- [ ] Terra composes and passes the Obtainable check with the Station rule.
-- [ ] No Terra Template, Settlement path, loot table or reaction names a Terra
+- [x] Terra composes and passes the Obtainable check with the Station rule.
+- [x] No Terra Template, Settlement path, loot table or reaction names a Terra
       building Material, Station, chest, Door, glass or lamp.
-- [ ] The Templates-match-the-mockup test passes, the generator's check mode
+- [x] The Templates-match-the-mockup test passes, the generator's check mode
       reports no drift for any Game, and the other four Games' generated
       Templates are unchanged.
-- [ ] The Terra building test walks the shared Materials Terra's Templates use
+- [x] The Terra building test walks the shared Materials Terra's Templates use
       and asserts each is Obtainable through a Station that is.
-- [ ] The Terra `depends` test lists the four new Mods.
-- [ ] Breaking planks, cobble, glass and thatch in Terra plays the wood, stone,
+- [x] The Terra `depends` test lists the four new Mods.
+- [x] Breaking planks, cobble, glass and thatch in Terra plays the wood, stone,
       metal and soft sets.
-- [ ] A village at a fixed seed is compared by eye in a dev capture before and
+- [x] A village at a fixed seed is compared by eye in a dev capture before and
       after: same layout and roles; colours shift only where the spec says
       (review-only, not committed).
-- [ ] Terra's boundary check passes.
+- [x] Terra's boundary check passes.

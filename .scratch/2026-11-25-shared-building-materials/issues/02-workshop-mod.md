@@ -25,11 +25,11 @@ Terra. Ticket 03 reuses it.
 
 ## Acceptance criteria
 
-- [ ] `workshop` composes with only its `depends` and passes validate.
-- [ ] Under the fixture Game, each of the five Materials is Obtainable.
-- [ ] Each Station opens the Recipes that name its tag; a second Mod's Station
+- [x] `workshop` composes with only its `depends` and passes validate.
+- [x] Under the fixture Game, each of the five Materials is Obtainable.
+- [x] Each Station opens the Recipes that name its tag; a second Mod's Station
       with the same tag opens the same Recipes.
-- [ ] The chest holds Stacks and spills them when removed by anything but a
+- [x] The chest holds Stacks and spills them when removed by anything but a
       Player, as a Container does.
-- [ ] The workbench is drawn and collides as the `table` Shape.
-- [ ] The shared-Mods inventory test lists `workshop`, and its thumbnail exists.
+- [x] The workbench is drawn and collides as the `table` Shape.
+- [x] The shared-Mods inventory test lists `workshop`, and its thumbnail exists.

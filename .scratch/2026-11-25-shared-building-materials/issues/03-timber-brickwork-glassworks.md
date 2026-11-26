@@ -30,9 +30,9 @@ lists its Recipes and "Used by".
 
 ## Acceptance criteria
 
-- [ ] Each Mod composes with only its `depends` and passes validate.
-- [ ] Under ticket 02's fixture Game, every Material each declares is Obtainable
+- [x] Each Mod composes with only its `depends` and passes validate.
+- [x] Under ticket 02's fixture Game, every Material each declares is Obtainable
       through Stations that are.
-- [ ] A `timber` door opens and closes as Terra's does: 2 m by 3 m, hinged on
+- [x] A `timber` door opens and closes as Terra's does: 2 m by 3 m, hinged on
       the aimed half, one panel against its jamb when open.
-- [ ] `bog` still composes, and its reaction still makes `brickwork:brick`.
+- [x] `bog` still composes, and its reaction still makes `brickwork:brick`.

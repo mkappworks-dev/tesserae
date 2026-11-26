@@ -18,9 +18,9 @@ tests. The mockup's exported Material gallery is regenerated from the new set.
 
 ## Acceptance criteria
 
-- [ ] Terra declares none of the deleted Materials or Shapes, and nothing in the
+- [x] Terra declares none of the deleted Materials or Shapes, and nothing in the
       workspace names them.
-- [ ] The full test suite passes.
-- [ ] The mockup's Material gallery lists the shared Materials Terra uses and
+- [x] The full test suite passes.
+- [x] The mockup's Material gallery lists the shared Materials Terra uses and
       none of the deleted ones.
-- [ ] Terra's boundary check passes.
+- [x] Terra's boundary check passes.
