@@ -17,7 +17,7 @@ The night sky.
 
 ## Acceptance
 
-- [ ] Captures at dusk and at full-moon and new-moon midnight, approved by the
+- [x] Captures at dusk and at full-moon and new-moon midnight, approved by the
       user; the moon's phase reads at a glance.
 - [ ] The reach's edge stays hidden at every hour.
 - [ ] GPU frame time of the sky on `flight` at noon and midnight, interleaved
@@ -80,3 +80,5 @@ the phase to `STARLIGHT_SHARE` (0.35) at new moon, never under the cave floor
 (0.15) off every star in `sky.wesl`, so the faint two thirds vanish and the
 bright ones dim. Captures: `far-full-midnight-v2`, `far-new-midnight-v2`,
 `sky-full-midnight`, `sky-new-midnight`.
+
+The user approved the look on the captures on 2026-11-26.

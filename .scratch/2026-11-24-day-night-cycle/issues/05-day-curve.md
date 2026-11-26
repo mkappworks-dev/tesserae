@@ -1,6 +1,6 @@
 # 05: Day curve
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 Spec: [Day and night cycle](../spec.md).
@@ -27,7 +27,7 @@ and night look the way the Game wants.
       load error naming the field.
 - [x] A key with amount 0 returns a Biome pair unchanged; a `sky` without a
       curve uses the engine's default.
-- [ ] Terra's curve approved by the user on captures at noon, dusk, full-moon
+- [x] Terra's curve approved by the user on captures at noon, dusk, full-moon
       and new-moon midnight.
 
 ## Comments
@@ -82,3 +82,5 @@ The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
 following the Moon, full-moon midnight is about 12% of noon on the ground
 (`near-full-midnight-v4`) and new-moon midnight sits on the cave floor
 (`near-new-midnight-v4`).
+
+The user approved the look on the captures on 2026-11-26.

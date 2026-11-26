@@ -1,6 +1,6 @@
 # 04: Sun and moon light
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: [Day and night cycle](../spec.md).
@@ -37,7 +37,7 @@ The light moves through the day and night on Terra, from the Sky state.
       curve, full moon brighter than new, cave air untinted, no `sky` is
       today's noon.
 - [x] One shadow caster still lights every level (the one-sun test holds).
-- [ ] Captures at the baseline Eyes at noon, dusk, full-moon and new-moon
+- [x] Captures at the baseline Eyes at noon, dusk, full-moon and new-moon
       midnight, approved by the user; the `cave` fixture's captures at noon and
       midnight match; the map at midnight is the map at noon.
 
@@ -128,3 +128,5 @@ spec), and no captures taken, so the boxes stay unticked until then.
   `server/sky.rs` (the cave flag).
 
 The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
+
+The user approved the look on the captures on 2026-11-26.

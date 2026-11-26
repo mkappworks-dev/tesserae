@@ -34,7 +34,7 @@ Clouds drift across the sky at the Game's altitude.
       field; no Cloud layer draws no clouds.
 - [x] The same Time of day gives the same clouds after a reopen, and the same
       cloud field at another Voxel size.
-- [ ] Captures from under the clouds, from above, from inside, at dusk and at
+- [x] Captures from under the clouds, from above, from inside, at dusk and at
       night, approved by the user.
 - [ ] GPU frame time of the Cloud layer on `flight` at noon and midnight,
       interleaved against `main`, at most 0.2 ms over it, recorded in Comments.
@@ -144,3 +144,5 @@ sample per 25 m of slab, from 4 to 16, and marches at most 600 m, so level
 rays are sampled densely enough that the dither, which showed as dots at cloud
 level, no longer applies. The extra samples fall only on rays near level, a
 band round the horizon; the GPU time is still to be measured on `flight`.
+
+The user approved the look on the captures on 2026-11-26.
