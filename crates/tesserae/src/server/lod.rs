@@ -26,7 +26,7 @@ use tesserae_core::lod::{
     coarsen_structure_parts, coarsen_tree_parts, downsample_changed, stand_canopy_cover,
     stand_structure_parts, stand_tree_parts,
 };
-use tesserae_core::mesh::{POS_Y, Quad, QuadKind};
+use tesserae_core::mesh::{NEG_X, NEG_Z, POS_X, POS_Y, POS_Z, Quad, QuadKind};
 use tesserae_core::shape::SUBDIV;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
@@ -1315,11 +1315,20 @@ pub(in crate::server) struct Shown {
 /// What a mesh job asks of its level's generator.
 trait MeshGenerator: Surface {
     fn water(&self) -> Option<WaterParams>;
+
+    /// What open air over a column fills with water up to, sea or lake.
+    fn water_level_m(&self, _x_m: f32, _z_m: f32) -> Option<f32> {
+        self.water().map(|w| w.level_m)
+    }
 }
 
 impl MeshGenerator for Worldgen {
     fn water(&self) -> Option<WaterParams> {
         Worldgen::water(self)
+    }
+
+    fn water_level_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
+        Worldgen::water_level_m(self, x_m, z_m)
     }
 }
 
@@ -1371,21 +1380,40 @@ fn mesh_coarse(
         .with_openings(&center.openings);
     let mut mesh = mesh_chunk_with_seams(own, neighbors, tables);
     if let Some(water) = water {
-        let floor_m = (coord.y * CHUNK_SIZE as i32) as f32 * voxel_m;
-        level_the_water(&mut mesh.blended, water, floor_m, voxel_m, &center.overlay);
+        let origin_m = Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32)
+            * (CHUNK_SIZE as f32 * voxel_m);
+        let level_at = |x: usize, z: usize| {
+            surface.water_level_m(
+                origin_m.x + (x as f32 + 0.5) * voxel_m,
+                origin_m.z + (z as f32 + 0.5) * voxel_m,
+            )
+        };
+        level_the_water(
+            &mut mesh.blended,
+            water,
+            origin_m.y,
+            voxel_m,
+            &center.overlay,
+            level_at,
+        );
     }
     mesh
 }
 
 /// Moves a coarse mesh's lake surface to where level 0 draws its own: the top of level 0's
 /// highest water Voxel. A coarse Voxel is water when water reaches into it, or under a change
-/// when water holds half of it, so its top is up to a coarse Voxel off; drawn there, a finer
-/// level's row boundary can fall between the two surfaces, and the cut of `drawn_mask` then asks
-/// about the wrong Chunk.
+/// when water holds half of it, so its top is up to a coarse Voxel off; drawn there, it stands
+/// as a box out of the finer level's water at their join, and a finer level's row boundary can
+/// fall between the two surfaces, where the cut of `drawn_mask` then asks about the wrong Chunk.
 ///
-/// Only over packed water, which is the generator's lake (`downsample_changed`): fluid in the
+/// Each coarse column snaps to its own water, `level_at(x, z)`: the sea, or a lake or river at
+/// its own height. The sides of the surface row end there too, seam walls among them, which
+/// would otherwise stand out of the water along every seam plane wherever the coarse row
+/// rounded up.
+///
+/// Only over packed water, which is the generator's (`downsample_changed`): fluid in the
 /// overlay is water that flowed or was placed, whose level-0 surface is anywhere, so it stays
-/// in the coarse Voxel holding it. A quad over both is split and only the lake's cells move.
+/// in the coarse Voxel holding it. A quad over columns that snap apart is split by column.
 ///
 /// The surface lands on the sixteenth at or below it, where the renderer always drew it.
 fn level_the_water(
@@ -1394,39 +1422,109 @@ fn level_the_water(
     floor_m: f32,
     voxel_m: f32,
     overlay: &ChunkOverlay,
+    level_at: impl Fn(usize, usize) -> Option<f32>,
 ) {
-    let surface_m = (water.level_m / water.step_m).ceil() * water.step_m;
-    let at_voxels = (surface_m - floor_m) / voxel_m;
-    let at = (at_voxels * SUBDIV as f32).floor() as i32;
     let wet = overlay.may_contain_fluid();
-    let mut split: Vec<usize> = Vec::new();
-    for (q, quad) in layer.quads.iter_mut().enumerate() {
-        // Only the surface row: an upward face a coarse Voxel or more away is not this water's.
-        let Some(plane) = quad
-            .plane()
-            .filter(|_| quad.kind() == QuadKind::Face(POS_Y))
+    // Asked once per column: a lake's or river's level is a drainage lookup.
+    let mut levels: Vec<Option<Option<f32>>> = vec![None; CHUNK_SIZE * CHUNK_SIZE];
+    let mut target = |top: i32, [x, y, z]: [usize; 3]| -> Option<i32> {
+        if wet && moved(overlay, [x, y, z]) {
+            return None;
+        }
+        let level_m = (*levels[z * CHUNK_SIZE + x].get_or_insert_with(|| level_at(x, z)))?;
+        let surface_m = (level_m / water.step_m).ceil() * water.step_m;
+        let at_voxels = (surface_m - floor_m) / voxel_m;
+        // Only the surface row: a top a coarse Voxel or more away is not this water's.
+        let off = top as f32 / SUBDIV as f32 - at_voxels;
+        (off.abs() < 1.0).then(|| (at_voxels * SUBDIV as f32).floor() as i32)
+    };
+    let mut out = Vec::with_capacity(layer.quads.len());
+    for quad in &layer.quads {
+        let Some((top, cells)) =
+            surface_cells(quad).filter(|_| quad.material == u32::from(water.material))
         else {
+            out.push(*quad);
             continue;
         };
-        let off = plane as f32 / SUBDIV as f32 - at_voxels;
-        if !(quad.material == u32::from(water.material) && off.abs() < 1.0) {
-            continue;
-        }
-        if wet {
-            let lake = cells_under(quad).filter(|&c| !moved(overlay, c)).count();
-            if lake == 0 {
-                continue;
+        let ats: Vec<Option<i32>> = cells.iter().map(|&c| target(top, c)).collect();
+        match ats.first() {
+            _ if ats.iter().all(Option::is_none) => out.push(*quad),
+            Some(&Some(at)) if ats.iter().all(|&a| a == Some(at)) => {
+                out.extend(with_top(quad, None, at));
             }
-            if lake < cells_under(quad).count() {
-                split.push(q);
-                continue;
+            _ => {
+                for (cell, at) in cells.into_iter().zip(ats) {
+                    out.extend(with_top(quad, Some(cell), at.unwrap_or(top)));
+                }
             }
         }
-        *quad = quad.at_plane(at);
     }
-    if !split.is_empty() {
-        split_quads(layer, &split, at, overlay);
+    layer.quads = out;
+}
+
+/// Where a face of a coarse mesh's water could be its surface row: an upward face's plane and
+/// the cells under it, or a side's top and the cells behind it in its top row, as `[x, y, z]`.
+/// `None` for a downward face or a flat form.
+fn surface_cells(quad: &Quad) -> Option<(i32, Vec<[usize; 3]>)> {
+    let QuadKind::Face(face) = quad.kind() else {
+        return None;
+    };
+    let plane = quad.plane()?;
+    let (u, v) = quad.spans()?;
+    let sub = SUBDIV as i32;
+    let cells = |[a0, a1]: [u16; 2]| a0 as usize / SUBDIV..(a1 as usize).div_ceil(SUBDIV);
+    let row = |top: u16| ((i32::from(top) + sub - 1).div_euclid(sub) - 1) as usize;
+    let behind = || {
+        let at = plane.div_euclid(sub) - i32::from(face % 2 == 1);
+        usize::try_from(at).ok().filter(|&at| at < CHUNK_SIZE)
+    };
+    match face {
+        POS_Y => Some((plane, cells_under(quad).collect())),
+        NEG_X | POS_X => {
+            let (x, y) = (behind()?, row(u[1]));
+            Some((i32::from(u[1]), cells(v).map(|z| [x, y, z]).collect()))
+        }
+        NEG_Z | POS_Z => {
+            let (z, y) = (behind()?, row(v[1]));
+            Some((i32::from(v[1]), cells(u).map(|x| [x, y, z]).collect()))
+        }
+        _ => None,
     }
+}
+
+/// `quad` with its surface at `top`: an upward face moved there, a side cut or raised to end
+/// there, and `None` for a side left with no height. With `cell`, only the part over that
+/// column of [`surface_cells`]. Each cell's texture restarts at the cell, which the texture's
+/// repeat per Voxel draws the same.
+fn with_top(quad: &Quad, cell: Option<[usize; 3]>, top: i32) -> Option<Quad> {
+    let QuadKind::Face(face) = quad.kind() else {
+        unreachable!("only faces have a surface");
+    };
+    let plane = quad.plane().expect("a face");
+    let (mut u, mut v) = quad.spans().expect("a face");
+    let sub = SUBDIV as u16;
+    let one = |c: usize| [c as u16 * sub, (c as u16 + 1) * sub];
+    match face {
+        POS_Y => {
+            if let Some([x, _, z]) = cell {
+                (u, v) = (one(z), one(x));
+            }
+            return Some(Quad::face(face, top, u, v, quad.material, quad.light));
+        }
+        NEG_X | POS_X => {
+            if let Some([_, _, z]) = cell {
+                v = one(z);
+            }
+            u[1] = u16::try_from(top).ok().filter(|&t| t > u[0])?;
+        }
+        _ => {
+            if let Some([x, _, _]) = cell {
+                u = one(x);
+            }
+            v[1] = u16::try_from(top).ok().filter(|&t| t > v[0])?;
+        }
+    }
+    Some(Quad::face(face, plane, u, v, quad.material, quad.light))
 }
 
 /// The coarse cells an upward quad lies on, as `[x, y, z]` of the cell under it.
@@ -1444,36 +1542,6 @@ fn cells_under(quad: &Quad) -> impl Iterator<Item = [usize; 3]> {
 /// Whether the water in a coarse cell is the overlay's: water that moved.
 fn moved(overlay: &ChunkOverlay, [x, y, z]: [usize; 3]) -> bool {
     overlay.get(x, y, z).fluid.is_some()
-}
-
-/// Replaces each quad `quads` names with one quad per cell under it, the lake's moved to
-/// `at`, keeping the quad's light. Each cell's texture restarts at the cell, which the
-/// texture's repeat per Voxel draws the same.
-fn split_quads(layer: &mut MeshLayer, quads: &[usize], at: i32, overlay: &ChunkOverlay) {
-    let sub = SUBDIV as u16;
-    let mut out = Vec::with_capacity(layer.quads.len());
-    let mut next = quads.iter().copied().peekable();
-    for (q, quad) in layer.quads.iter().enumerate() {
-        if next.peek() != Some(&q) {
-            out.push(*quad);
-            continue;
-        }
-        next.next();
-        let plane = quad.plane().expect("a face");
-        for cell in cells_under(quad) {
-            let y = if moved(overlay, cell) { plane } else { at };
-            let span = |c: usize| [c as u16 * sub, (c as u16 + 1) * sub];
-            out.push(Quad::face(
-                POS_Y,
-                y,
-                span(cell[2]),
-                span(cell[0]),
-                quad.material,
-                quad.light,
-            ));
-        }
-    }
-    layer.quads = out;
 }
 
 struct Plan {
@@ -5119,18 +5187,19 @@ mod tests {
                 bottoms.iter().all(|&y| y == 0.0),
                 "the bottom is left where it is"
             );
-            // A side quad is split by row, each row's underwater light being its own, so its
-            // top is its row's and not the Chunk's: the highest of them is the Chunk's top.
+            // A side quad is split by row, each row's underwater light being its own: the
+            // surface row's ends at the surface, the rows under it at their own tops.
             let sides = heights_facing(&mesh.blended, [1.0, 0.0, 0.0], level);
             let highest = sides.iter().copied().fold(f32::MIN, f32::max);
-            assert_eq!(
-                highest,
-                rows as f32 * voxel_m,
-                "level {level}, {rows} rows: the sides still reach the water's own top"
+            assert!(
+                (highest - 45.0).abs() < 1e-4,
+                "level {level}, {rows} rows: the sides end at the surface, not {highest}"
             );
             assert!(
-                sides.iter().all(|&y| (y / voxel_m).fract() == 0.0),
-                "level {level}, {rows} rows: no side left its row boundary: {sides:?}"
+                sides
+                    .iter()
+                    .all(|&y| (y / voxel_m).fract() == 0.0 || (y - 45.0).abs() < 1e-4),
+                "level {level}, {rows} rows: a side under the surface left its row: {sides:?}"
             );
         }
         let dry = coarse_water(2, 12, None);
@@ -5140,6 +5209,85 @@ mod tests {
                 .all(|&y| y == 48.0),
             "without a water level there is nothing to snap to"
         );
+    }
+
+    /// A generator whose sea is at 24 m and whose columns hold a lake at `lake_m`, on the
+    /// fixture's ground.
+    struct Lake {
+        ground: Worldgen,
+        lake_m: f32,
+    }
+
+    impl tesserae_core::Surface for Lake {
+        fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
+            self.ground.height_m(x_m, z_m)
+        }
+
+        fn bounds_m(&self) -> (f32, f32) {
+            self.ground.bounds_m()
+        }
+    }
+
+    impl MeshGenerator for Lake {
+        fn water(&self) -> Option<WaterParams> {
+            Some(WaterParams {
+                level_m: 24.0,
+                material: tesserae_core::testgen::fixtures().water,
+            })
+        }
+
+        fn water_level_m(&self, _: f32, _: f32) -> Option<f32> {
+            Some(self.lake_m)
+        }
+    }
+
+    /// A lake stands above the sea, at its own level: its coarse surface is drawn where level 0
+    /// draws its own, as the sea's is, or a coarse water box stands out of the finer water.
+    #[test]
+    fn a_lake_surface_above_the_sea_is_drawn_at_level_zeros_height() {
+        let water = tesserae_core::testgen::fixtures().water;
+        for (level, rows) in [(1, 23), (2, 12), (2, 11), (3, 6), (3, 5)] {
+            let mut center = Chunk::air();
+            for x in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    for y in 0..rows {
+                        center.set(x, y, z, Voxel::cube(water));
+                    }
+                }
+            }
+            let air = shown(packed(Chunk::air()));
+            let mesh = mesh_coarse(
+                &Lake {
+                    ground: source_of(world().seed, 0),
+                    lake_m: 44.5,
+                },
+                level,
+                world().voxel_size * 2f32.powi(level as i32),
+                ChunkCoord::new(0, 0, 0),
+                &shown(packed(center)),
+                &std::array::from_fn(|_| air.clone()),
+                &crate::server::fixture_tables(),
+            );
+            let tops = heights_facing(&mesh.blended, [0.0, 1.0, 0.0], level);
+            assert!(!tops.is_empty(), "level {level}, {rows} rows");
+            assert!(
+                tops.iter().all(|&y| (y - 45.0).abs() < 1e-4),
+                "level {level}, {rows} rows: tops at {tops:?}"
+            );
+            for normal in [
+                [1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, -1.0],
+            ] {
+                let sides = heights_facing(&mesh.blended, normal, level);
+                assert!(
+                    sides.iter().all(|&y| y <= 45.0 + 1e-4),
+                    "level {level}, {rows} rows: a side facing {normal:?} stands out of the \
+                     water: {sides:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -5189,6 +5337,7 @@ mod tests {
                     0.0,
                     1.0,
                     &overlay,
+                    |_, _| Some(row as f32 + 0.25),
                 );
                 assert_eq!(
                     layer.soup().positions,
@@ -5227,6 +5376,7 @@ mod tests {
             0.0,
             1.0,
             &ChunkOverlay::none(),
+            |_, _| Some(-0.15),
         );
         // The surface is at -0.1 m, 1.6 sixteenths below the floor.
         assert_eq!(layer.quads[0].plane(), Some(-2));
@@ -5266,6 +5416,7 @@ mod tests {
             0.0,
             1.0,
             &overlay,
+            |_, _| Some(0.5),
         );
         let layer = layer.soup();
         assert_eq!(layer.positions.len(), 8);
