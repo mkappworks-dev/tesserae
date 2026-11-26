@@ -41,13 +41,16 @@ const DETAILED_OCTAVES: u32 = 2u;
 const DITHER_FROM_M: f32 = 40.0;
 const DITHER_TO_M: f32 = 160.0;
 
-// Samples along the ray inside the slab: enough for a sense of thickness, few enough to stay
-// within the Cloud layer's 0.2 ms.
-const SAMPLES: u32 = 4u;
+// Samples along the ray inside the slab: one per this many metres of it, at least the first count
+// for a sense of thickness and at most the second. Only rays near level reach the cap, a thin band
+// round the horizon, which stays within the Cloud layer's 0.2 ms.
+const SAMPLE_EVERY_M: f32 = 25.0;
+const MIN_SAMPLES: u32 = 4u;
+const MAX_SAMPLES: u32 = 16u;
 // Past this much cloud a ray is opaque anyway, and the samples would spread too thin to see.
-const MAX_MARCH_M: f32 = 1500.0;
-// Light lost per metre through the densest cloud: 30 m of it hides nearly all behind it.
-const EXTINCTION_PER_M: f32 = 0.1;
+const MAX_MARCH_M: f32 = 600.0;
+// Light lost per metre through the densest cloud: 50 m of it hides nearly all behind it.
+const EXTINCTION_PER_M: f32 = 0.06;
 // How far round the Eye the cloud it stands in fogs the view.
 const IN_CLOUD_M: f32 = 60.0;
 // How far past the cover's threshold the field climbs, in its spreads, before a column reaches
@@ -228,7 +231,8 @@ fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
     // From where the ray enters the slab, or the Eye inside it, to where it leaves.
     let enter = max(min(to_base, to_top), 0.0);
     let leave = min(max(to_base, to_top), enter + MAX_MARCH_M);
-    let spacing = max(leave - enter, 0.0) / f32(SAMPLES);
+    let samples = clamp(u32(ceil(max(leave - enter, 0.0) / SAMPLE_EVERY_M)), MIN_SAMPLES, MAX_SAMPLES);
+    let spacing = max(leave - enter, 0.0) / f32(samples);
 
     let span = face_span(eye);
     let across = length(in.world.xz - eye.xz);
@@ -245,7 +249,7 @@ fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
     var depth_m = 0.0;
     var height = 0.0;
     var along = 0.0;
-    for (var i: u32 = 0u; i < SAMPLES; i = i + 1u) {
+    for (var i: u32 = 0u; i < samples; i = i + 1u) {
         let t = enter + (f32(i) + jitter) * spacing;
         let h = clamp((eye.y + direction.y * t - base) / thickness, 0.0, 1.0);
         let m = density(field(under_eye + bend + direction.xz * t, detail), h, at) * spacing * edge;

@@ -101,7 +101,7 @@ pub(crate) fn sky() -> SkyParams {
         clouds: Some(CloudLayer {
             // Above the terrain band's top: Sea level 24 m, 192 m of landforms and 12 m of overhang.
             altitude_m: 300.0,
-            thickness_m: 30.0,
+            thickness_m: 80.0,
             cover: 0.4,
             wind_direction_deg: 70.0,
             wind_speed_m_per_s: 3.0,

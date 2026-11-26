@@ -137,3 +137,10 @@ normal curve), so a cover of 0.3 leaves about 70% of the sky clear. Clouds sit
 on a flat base with rounded tops. The two finest octaves fade from 600 m to
 2.5 km along the ray, and samples more than 40 m apart are dithered per pixel,
 so grazing rays grain instead of banding.
+
+2026-11-26, later: Terra's layer is 80 m thick (was 30), so clouds show height
+from the side. Light is lost at 0.06 per metre (was 0.1). A ray takes one
+sample per 25 m of slab, from 4 to 16, and marches at most 600 m, so level
+rays are sampled densely enough that the dither, which showed as dots at cloud
+level, no longer applies. The extra samples fall only on rays near level, a
+band round the horizon; the GPU time is still to be measured on `flight`.
