@@ -158,6 +158,10 @@ fn change(
 }
 
 /// Starts each track the scheduler begins, and tells it of each that ended.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system takes what it reads"
+)]
 fn schedule_music(
     focus: Res<super::sound::PlaybackFocus>,
     time: Res<Time>,

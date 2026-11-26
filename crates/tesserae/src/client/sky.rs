@@ -141,8 +141,11 @@ fn present(
     let fogged = FogSettings {
         sky: state.sky,
         color: state.fog,
-        // None with no sky, so a World without one keeps today's fog to the bit.
-        glow: clock.sky().map(|_| state.light.colour),
+        // None with no sky, so a World without one keeps its fog to the bit; gone in a cave,
+        // whose fog does not change with the hour.
+        glow: clock
+            .sky()
+            .map(|_| state.light.colour.map(|c| c * (1.0 - eased.0.underground))),
         ..*settings
     };
     settings.set_if_neq(fogged);
@@ -502,6 +505,7 @@ mod tests {
                 settle(&mut app);
                 let fog = settings(&app);
                 assert_eq!((fog.sky, fog.color), (cave.sky, cave.fog), "{when}");
+                assert_eq!(fog.glow, Some([0.0; 3]), "{when}");
             }
         }
 

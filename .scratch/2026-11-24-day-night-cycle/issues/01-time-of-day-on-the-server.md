@@ -1,6 +1,6 @@
 # 01: Time of day on the Server
 
-Status: ready-for-agent
+Status: done
 Blocked by: None (can start immediately)
 
 Spec: [Day and night cycle](../spec.md).
@@ -27,13 +27,13 @@ can pin, before anything in the sky moves.
 
 ## Acceptance
 
-- [ ] Clock tests: hours fixed to the sun under any day share, a night hour
+- [x] Clock tests: hours fixed to the sun under any day share, a night hour
       faster than a day hour at 0.7, a day wraps, Daylight's band, the Moon
       phase changes at noon only.
-- [ ] A save and reopen keeps the hour; a World saved without it opens at the
+- [x] A save and reopen keeps the hour; a World saved without it opens at the
       start hour; a Game with no `sky` is at noon.
-- [ ] `TESSERAE_TIME_OF_DAY` holds the clock at the hour and night given.
-- [ ] Each validation rule (Day length at least 60 s, start hour in [0, 24),
+- [x] `TESSERAE_TIME_OF_DAY` holds the clock at the hour and night given.
+- [x] Each validation rule (Day length at least 60 s, start hour in [0, 24),
       day share in (0, 1)) is a load error naming the field; a Declaration
       without `sky` loads as today; only the Game may set `sky`.
 
@@ -66,3 +66,5 @@ spec), so the boxes stay unticked until then.
 - Contract: `world-params.sky: option<sky-params>`, data-only `[world.sky]`,
   Game-only (`world.sky` in `beyond_character`); errors are
   `what: "world"`, fields `sky.day_length_s`, `sky.start_hour`, `sky.day_share`.
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.

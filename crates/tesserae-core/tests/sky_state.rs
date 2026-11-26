@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test's own maths is not generation"
+)]
+
 use tesserae_core::flow::STEP_S;
 use tesserae_core::sky::{
     Air, CAVE_FLOOR, CLOUD_PERIOD_M, Clock, CloudLayer, DEFAULT_DAY_CURVE, DayKey, Light,
@@ -627,7 +632,8 @@ fn each_cloud_rule_names_its_field_and_the_edges_pass() {
             ..TERRA
         }
     };
-    let cases: [(fn(&mut CloudLayer), &str); 8] = [
+    type Break = fn(&mut CloudLayer);
+    let cases: [(Break, &str); 8] = [
         (|c| c.altitude_m = f32::NAN, "sky.clouds.altitude_m"),
         (|c| c.thickness_m = 0.9, "sky.clouds.thickness_m"),
         (|c| c.thickness_m = 200.5, "sky.clouds.thickness_m"),

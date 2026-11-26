@@ -18,8 +18,8 @@ The Client knows the hour and shows it.
 
 ## Acceptance
 
-- [ ] Server tests: the message on open, on a rate change and every 5 s.
-- [ ] Client tests: a small correction eases, a large one snaps, the clock runs
+- [x] Server tests: the message on open, on a rate change and every 5 s.
+- [x] Client tests: a small correction eases, a large one snaps, the clock runs
       between messages at the sent rate.
 - [ ] The mockup line approved by the user; the Menu shows it on Terra.
 
@@ -53,3 +53,5 @@ user's approval: view it in `mockup/app.js` (`pause()`, the in-game Menu) and
 - Menu: "Day N, HH:MM" sits between the Biome and the Game line; only that
   text updates while the Menu is open. A Game with no `sky` shows no line,
   since it has no day to tell (the spec left this open).
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.

@@ -32,11 +32,11 @@ The light moves through the day and night on Terra, from the Sky state.
 
 ## Acceptance
 
-- [ ] Sky state tests: sunrise and sunset at 06:00 and 18:00, the noon sun the
+- [x] Sky state tests: sunrise and sunset at 06:00 and 18:00, the noon sun the
       tilt toward the south, zero light on both sides of the swap whatever the
       curve, full moon brighter than new, cave air untinted, no `sky` is
       today's noon.
-- [ ] One shadow caster still lights every level (the one-sun test holds).
+- [x] One shadow caster still lights every level (the one-sun test holds).
 - [ ] Captures at the baseline Eyes at noon, dusk, full-moon and new-moon
       midnight, approved by the user; the `cave` fixture's captures at noon and
       midnight match; the map at midnight is the map at noon.
@@ -126,3 +126,5 @@ spec), and no captures taken, so the boxes stay unticked until then.
   `client/underwater.rs` (night water, lava), `render/sky.rs` (the sun from
   the state while the light is the moon), `render/fog.rs` (glow), and
   `server/sky.rs` (the cave flag).
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.

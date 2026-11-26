@@ -22,10 +22,10 @@ and night look the way the Game wants.
 
 ## Acceptance
 
-- [ ] Each rule (1 to 16 keys, hours ascending in [0, 24), strengths, amounts
+- [x] Each rule (1 to 16 keys, hours ascending in [0, 24), strengths, amounts
       and colours in [0, 1], ambient at every key at least the cave floor) is a
       load error naming the field.
-- [ ] A key with amount 0 returns a Biome pair unchanged; a `sky` without a
+- [x] A key with amount 0 returns a Biome pair unchanged; a `sky` without a
       curve uses the engine's default.
 - [ ] Terra's curve approved by the user on captures at noon, dusk, full-moon
       and new-moon midnight.
@@ -74,3 +74,5 @@ spec), and no captures taken, so the boxes stay unticked until then.
   `tests/declare.rs` (a curve is kept, no curve is the default, bad keys name
   the key and field through `ModError::Sky`) and `tests/data.rs` (`full.toml`
   carries two keys; a bad `stars`, a descending hour and an unknown field).
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.

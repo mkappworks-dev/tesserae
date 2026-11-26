@@ -71,3 +71,5 @@ spec), and no captures or frame times taken, so the boxes stay unticked.
   face; the sun keeps its place among the stars all day; the material follows
   `SkyNow`'s moon and stars. No shader validation test or naga tool exists in
   the repo, so `sky.wesl` is read, not compiled, until the first run.
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.

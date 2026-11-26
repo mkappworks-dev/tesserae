@@ -65,12 +65,8 @@ pub struct Sidecar {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sky: bool,
     /// Mirrors the commit's, for Edit World; absent in Worlds that predate it, which run.
-    #[serde(default = "daylight_cycle_on")]
+    #[serde(default = "super::daylight_cycle_on")]
     pub daylight_cycle: bool,
-}
-
-fn daylight_cycle_on() -> bool {
-    true
 }
 
 /// Game mode and Daylight cycle changes waiting for the World to open. No one

@@ -29,10 +29,10 @@ Clouds drift across the sky at the Game's altitude.
 
 ## Acceptance
 
-- [ ] Each rule (base above the terrain band, thickness 1 to 200 m, cover in
+- [x] Each rule (base above the terrain band, thickness 1 to 200 m, cover in
       [0, 1], scale in [0, 4], wind at most 50 m/s) is a load error naming the
       field; no Cloud layer draws no clouds.
-- [ ] The same Time of day gives the same clouds after a reopen, and the same
+- [x] The same Time of day gives the same clouds after a reopen, and the same
       cloud field at another Voxel size.
 - [ ] Captures from under the clouds, from above, from inside, at dusk and at
       night, approved by the user.
@@ -116,3 +116,5 @@ spec), and no captures or frame times taken, so the boxes stay unticked.
   (no layer and a cover of 0 draw nothing, which face draws below, inside and
   above, the material from the Sky state, the same material at 1 m and 0.25 m
   Voxels). `clouds.wesl` is read, not compiled, until the first run.
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.

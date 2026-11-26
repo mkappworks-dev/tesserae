@@ -155,13 +155,15 @@ impl SkyParams {
     /// ([`crate::WorldgenParams::terrain_band_m`]), so no ground ever rises into the clouds.
     pub fn validate_cloud_base(&self, terrain_top_m: f32) -> Result<(), SkyError> {
         match self.clouds {
-            Some(clouds) if !(clouds.altitude_m > terrain_top_m) => Err(SkyError {
-                key: None,
-                source: ParamError {
-                    field: "sky.clouds.altitude_m",
-                    rule: "must be above the top of the Game's terrain band",
-                },
-            }),
+            Some(clouds) if clouds.altitude_m.is_nan() || clouds.altitude_m <= terrain_top_m => {
+                Err(SkyError {
+                    key: None,
+                    source: ParamError {
+                        field: "sky.clouds.altitude_m",
+                        rule: "must be above the top of the Game's terrain band",
+                    },
+                })
+            }
             _ => Ok(()),
         }
     }

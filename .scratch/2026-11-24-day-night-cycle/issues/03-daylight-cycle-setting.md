@@ -22,11 +22,11 @@ beside Game mode.
 ## Acceptance
 
 - [ ] The mockup shows the toggle on both screens and the user approved it.
-- [ ] A World created with the cycle off opens at the start hour and stays
+- [x] A World created with the cycle off opens at the start hour and stays
       there.
-- [ ] Turning it off in Edit World holds the hour from the next open; on
+- [x] Turning it off in Edit World holds the hour from the next open; on
       resumes it; both survive a save and reopen.
-- [ ] No toggle for a Game without `sky`.
+- [x] No toggle for a Game without `sky`.
 
 ## Comments
 
@@ -66,3 +66,5 @@ mock Game with a sky).
   World off then on, across saves and reopens) and `client/worlds/tests.rs`
   (Create records it, Left/Right, no toggle without a sky, Edit World's pending
   change and note).
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.

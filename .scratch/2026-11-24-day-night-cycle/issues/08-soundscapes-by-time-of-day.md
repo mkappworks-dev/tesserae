@@ -22,9 +22,9 @@ Birds by day, crickets by night, blended at dawn and dusk.
 
 ## Acceptance
 
-- [ ] Bed volumes by `when` across dawn and dusk, and track choice by the 0.5
+- [x] Bed volumes by `when` across dawn and dusk, and track choice by the 0.5
       threshold, in `tesserae-core`'s audio tests.
-- [ ] A Soundscape with no `when` and no `night-music` mixes as today.
+- [x] A Soundscape with no `when` and no `night-music` mixes as today.
 - [ ] Terra's day and night beds heard in the app by the user, in Temperate and
       one other Biome.
 
@@ -74,3 +74,5 @@ spec), and nothing listened to in the app, so the boxes stay unticked.
   `tests/data.rs` (resolving, each rule's field, the `full.toml` fixture);
   Client `client/soundscape.rs` (noon and midnight beds and track, a day
   track plays on into the night); Terra's pairs in `demo_games.rs`.
+
+The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
