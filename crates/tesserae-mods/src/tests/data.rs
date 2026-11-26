@@ -889,7 +889,7 @@ fn shared_validation_bounds_apply_to_data() {
         ),
         (
             "night-music = [\"full:tune\"]",
-            "night-music = [\"full:crack\"]",
+            "night-music = [\"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\"]",
             "night-music",
         ),
     ] {
