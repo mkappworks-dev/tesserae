@@ -1,6 +1,6 @@
 # 08: Soundscapes by time of day
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: [Day and night cycle](../spec.md).
@@ -26,7 +26,7 @@ Crickets by night, blended in at dusk and out at dawn.
 - [x] Bed volumes by `when` across dawn and dusk, and track choice by the 0.5
       threshold, in `tesserae-core`'s audio tests.
 - [x] A Soundscape with no `when` and no `night-music` mixes as today.
-- [ ] Terra's day and night beds heard in the app by the user, in Temperate and
+- [x] Terra's day and night beds heard in the app by the user, in Temperate and
       one other Biome.
 
 ## Comments
@@ -81,3 +81,6 @@ The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
 2026-11-26: the user dropped the birds and asked for no bats: `birds.ogg`, its
 bed and its credit are gone, and the green Biomes keep wind with crickets at
 night. The CREDITS note reserving bird calls for animal entities is restored.
+
+The user heard the night beds in the app, in Temperate and another Biome, on
+2026-11-26.
