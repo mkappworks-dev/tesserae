@@ -1219,7 +1219,7 @@ fn a_data_mods_summary_is_counted_from_its_declaration() {
         (summary.materials, summary.shapes, summary.fluids),
         (2, 2, 0)
     );
-    assert_eq!(summary.swatches, [[176, 132, 78, 255], [196, 170, 92, 255]]);
+    assert_eq!(summary.swatches, [[168, 124, 70, 255], [194, 168, 91, 255]]);
 }
 
 #[test]

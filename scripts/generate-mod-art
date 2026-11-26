@@ -7,6 +7,8 @@ is 48 by 16: three 16 by 16 faces side by side, in the order top, side, bottom. 
 anywhere; output is deterministic, so a re-run changes no file.
 """
 
+import colorsys
+import math
 import pathlib
 import struct
 import zlib
@@ -29,22 +31,124 @@ def speckle(base, spread=7):
     return lambda face, x, y: tint(base, (noise(x, y, face + 3) - 128) // spread)
 
 
-def stone(face, x, y):
-    n = noise(x, y, face + 3)
-    if (x + 2 * y) % 13 == 0 and noise(x // 3, y // 3, 19) > 145:
-        return tint((96, 97, 106), 0)
-    return tint((140, 141, 148), (n - 128) // 9)
+CLEAR = (0, 0, 0, 0)
 
 
-def basalt(face, x, y):
-    n = noise(x, y, face + 5)
-    column = 14 if x % 5 == 0 else 0
-    return tint((58, 60, 68), (n - 128) // 12 - column)
+def linear(level):
+    v = level / 255
+    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
 
 
-def clay(face, x, y):
-    band = -10 if (y + face) % 6 == 0 else 0
-    return tint((166, 112, 92), (noise(x, y, face + 7) - 128) // 11 + band)
+def srgb(value):
+    v = min(1.0, max(0.0, value))
+    return round(255 * (v * 12.92 if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055))
+
+
+def luminance(rgb):
+    r, g, b = (linear(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def scale(rgb, factor):
+    """`rgb` times `factor` in linear light, held at or below white."""
+    lin = [linear(c) for c in rgb]
+    top = max(lin)
+    if top > 0:
+        factor = min(factor, 1.0 / top)
+    return tuple(srgb(c * factor) for c in lin)
+
+
+def shade(rgb, amount):
+    """Unlike `tint`, keeps the hue: scales in linear light until the brightest channel moves
+    `amount` levels."""
+    top = max(rgb)
+    if top == 0:
+        return tuple(rgb)
+    return scale(rgb, linear(max(0, min(255, top + amount))) / linear(top))
+
+
+LOW, HIGH = linear(50), linear(243)
+
+
+def albedo(rgb):
+    """The colour spec's albedo range: every drawn texel within 50 to 243 sRGB luminance."""
+    y = luminance(rgb)
+    if 0 < y < LOW:
+        return scale(rgb, LOW / y)
+    if y > HIGH:
+        return scale(rgb, HIGH / y)
+    return tuple(rgb)
+
+
+def drawn(texel):
+    """A tile from `texel(face, x, y)`, an RGB colour or None for clear, held to the albedo range."""
+
+    def paint(face, x, y):
+        c = texel(face, x, y)
+        return CLEAR if c is None else (*albedo(c), 255)
+
+    return paint
+
+
+def variant(paint, value, hue):
+    """A canopy variant of a leaves tile: each texel's HSV value times `value` and its hue turned by
+    `hue` degrees, its alpha kept."""
+
+    def texel(face, x, y):
+        r, g, b, a = paint(face, x, y)
+        if not a:
+            return None
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        return tuple(round(c * 255) for c in colorsys.hsv_to_rgb((h + hue / 360) % 1, s, min(1.0, v * value)))
+
+    return drawn(texel)
+
+
+def canopies(name, paint):
+    """A tree's other two canopies beside its leaves `paint`: 8% darker and 4 degrees one way, 8%
+    lighter and 4 degrees the other."""
+    return {f"{name}_dark": variant(paint, 0.92, -4.0), f"{name}_light": variant(paint, 1.08, 4.0)}
+
+
+def cells(x, y, size, salt, size_y=None):
+    """Noise constant over `size` by `size_y` texel cells, tiling across the 16-texel face."""
+    size_y = size_y or size
+    return noise(x // size % (EDGE // size), y // size_y % (EDGE // size_y), salt)
+
+
+def div(a, b):
+    """Integer division toward zero, as in Terra's painters in Rust."""
+    return int(a / b)
+
+
+def spread(x, y, face, size, salt, k, size_y=None):
+    """Two octaves: `size`-texel cells at 1/k and single texels at 1/2k."""
+    coarse = div(cells(x, y, size, salt, size_y) - 128, k)
+    return coarse + div(cells(x, y, 1, face + 3 + salt) - 128, 2 * k)
+
+
+FLECK = 1.3
+
+
+def surface(base, salt, k, size, joints=None, bands=False, darks=False):
+    """A natural surface: two thirds of the spread in `size`-texel cells, flecks as 2x2 clumps."""
+
+    def texel(face, x, y):
+        c = shade(base, spread(x, y, face, size, salt + face, k, 1 if bands else None))
+        if joints and joints(face, x, y):
+            c = shade(c, -20)
+        if cells(x, y, 2, salt + 31 + face) > 243:
+            c = scale(c, FLECK)
+        elif darks and cells(x, y, 2, salt + 37 + face) > 245:
+            c = scale(c, 1 / FLECK)
+        return c
+
+    return drawn(texel)
+
+
+def basalt_joints(face, x, y):
+    # Columns 4 texels across; their tops on the top and bottom faces.
+    return x % 4 == 0 if face == 1 else (x % 4 == 0 or y % 4 == 0)
 
 
 def sand(face, x, y):
@@ -64,22 +168,6 @@ def turf(face, x, y):
         return soil(face, x, y)
     patch = noise(x // 2, y // 2, 71)
     return tint((80, 144, 49), (patch - 128) // 5 + (noise(x, y, face + 13) - 128) // 16)
-
-
-def wood(face, x, y):
-    n = noise(x, y, face + 17)
-    if face != 1:
-        ring = max(abs(x - 7), abs(y - 7))
-        return tint((150, 104, 60), (-37 if ring % 3 == 0 else 16) + (n - 128) // 18)
-    return tint((120, 82, 48), (-24 if (x + noise(0, y // 4, 23)) % 4 == 0 else 8) + (n - 128) // 20)
-
-
-def leaves(face, x, y):
-    n = noise(x, y, face + 29)
-    dx, dy = abs(x % 5 - 2), abs(y % 5 - 2)
-    if dx + dy <= 2:
-        return tint((60, 136, 44), (n - 128) // 12 - (19 if dx == 0 else 0))
-    return tint((25, 75, 29), (n - 128) // 14, 0 if n > 150 else 255)
 
 
 def grass(face, x, y):
@@ -146,37 +234,88 @@ def lantern(face, x, y):
     return tint((255, 226, 140) if centre < 3.5 else (250, 196, 96), (noise(x, y, 63) - 128) // 18)
 
 
-def planks(face, x, y):
-    n = noise(x, y, face + 67)
-    seam = y % 5 == 0 or (x + 7 * (y // 5)) % 16 == 0
-    return tint((176, 132, 78), (-30 if seam else 0) + (n - 128) // 16)
+def fnv(values):
+    h = 2_166_136_261
+    for v in values:
+        h = ((h ^ (v & 0xFFFF)) * 16_777_619) & 0xFFFFFFFF
+    return (h % 1000) / 1000
 
 
-def thatch(face, x, y):
-    n = noise(x, y, face + 71)
-    strand = (x + y // 2) % 3 == 0
-    return tint((196, 170, 92), (-22 if strand else 8) + (n - 128) // 14)
+def building(salt, pattern):
+    """Terra's building painter: `pattern(x, y, top, n)` gives a colour and a factor for it, `n`
+    the painter's two noise octaves."""
+
+    def texel(face, x, y):
+        coarse = cells(x, y, 2, salt + face + 3) / 255 * 0.08
+        fine = noise(x, y, salt + face) / 255 * 0.04
+        colour, k = pattern(x, y, face != 1, coarse - 0.04 + fine - 0.02)
+        return tuple(int(max(0.0, min(255.0, c * k))) for c in colour)
+
+    return drawn(texel)
 
 
-def bricks(base, mortar):
-    def paint(face, x, y):
-        row = y // 4
-        joint = y % 4 == 3 or (x + 8 * (row % 2)) % 8 == 7
-        n = noise(x // 2, y // 2, face + 73)
-        return tint(mortar if joint else base, (n - 128) // (30 if joint else 14))
+def planks(base, salt):
+    def pattern(x, y, top, n):
+        row = (y >> 2) & 3
+        grain = (cells(x, y, 4, salt + 21, 1) - 128) / 255 * 0.08
+        if y % 4 == 3:
+            return base, 0.62
+        if x & 15 == (row * 5 + 3) % 16:
+            return base, 0.7
+        return base, 0.9 + fnv([row, 7]) * 0.16 + n + grain
 
-    return paint
-
-
-def cobble(face, x, y):
-    cell = noise(x // 5, y // 5, face + 79)
-    edge = x % 5 == 4 or y % 5 == 4
-    return tint((120, 118, 112), -34 if edge else (cell - 128) // 8)
+    return building(salt, pattern)
 
 
-def tile(face, x, y):
-    grout = x % 8 == 7 or y % 8 == 7
-    return tint((190, 120, 70), -50 if grout else (noise(x // 8, y // 8, face + 83) - 128) // 10)
+def thatch(base, salt):
+    def pattern(x, y, top, n):
+        if not top and y % 8 == 7:
+            return base, 0.68
+        course = (y >> 1) & 7 if top else 1
+        return base, 0.78 + fnv([x & 15, course]) * 0.3 + n * 2
+
+    return building(salt, pattern)
+
+
+def bricks(base, mortar, salt):
+    def pattern(x, y, top, n):
+        row = y >> 2
+        shifted = x + (row % 2) * 4
+        if y % 4 == 3 or shifted % 8 == 7:
+            return mortar, 0.95 + n
+        return base, 0.84 + fnv([(shifted >> 3) & 1, row & 3]) * 0.22 + n
+
+    return building(salt, pattern)
+
+
+COBBLES = [(2, 3), (9, 1), (14, 5), (5, 9), (11, 10), (1, 14), (8, 15), (15, 13), (4, 5)]
+
+
+def around(v, p):
+    d = (v % 16) - p
+    return d - 16 * round(d / 16)
+
+
+def cobble(base, joint, salt):
+    def pattern(x, y, top, n):
+        ds = sorted((math.hypot(around(x, px), around(y, py)), i) for i, (px, py) in enumerate(COBBLES))
+        if ds[1][0] - ds[0][0] < 1.1:
+            return joint, 0.85
+        return base, 0.82 + fnv([ds[0][1], 11]) * 0.3 + n
+
+    return building(salt, pattern)
+
+
+def roof_tiles(base, grout, salt):
+    """Square tiles of 8 texels, one grout line on each tile edge, lighter toward each tile's lower
+    edge, where it overlaps the next."""
+
+    def pattern(x, y, top, n):
+        if x % 8 == 7 or y % 8 == 7:
+            return grout, 1.0 + n * 0.5
+        return base, 0.9 + fnv([x // 8 & 1, y // 8 & 1, 5]) * 0.16 + (y % 8) * 0.012 + n
+
+    return building(salt, pattern)
 
 
 def glow(base, hot):
@@ -228,12 +367,14 @@ def peat(face, x, y):
     return tint((70, 52, 36), (24 if fibre else 0) + (n - 128) // 10)
 
 
-CLEAR = (0, 0, 0, 0)
-
-
 def sprite(draw):
     """A flat plant drawn on all three tiles, so a cross shows it from any side."""
     return lambda face, x, y: draw(x, y) or CLEAR
+
+
+def drawn_sprite(draw):
+    """`sprite` from `draw(x, y)`, an RGB colour or None for clear, held to the albedo range."""
+    return drawn(lambda face, x, y: draw(x, y))
 
 
 def tuft(x, y):
@@ -247,14 +388,14 @@ def tuft(x, y):
 def flower(petal, centre):
     def draw(x, y):
         if x in (7, 8) and 8 <= y < EDGE:
-            return tint((60, 124, 44), (noise(x, y, 137) - 128) // 14)
+            return shade((60, 124, 44), (noise(x, y, 137) - 128) // 14)
         if x in (5, 10) and y in (11, 12):
-            return tint((60, 124, 44), -10)
+            return shade((60, 124, 44), -10)
         dx, dy = abs(x - 7.5), abs(y - 5.5)
         if dx + dy < 1.5:
-            return (*centre, 255)
+            return centre
         if dx + dy < 4:
-            return tint(petal, (noise(x, y, 139) - 128) // 12)
+            return shade(petal, (noise(x, y, 139) - 128) // 12)
         return None
 
     return draw
@@ -262,10 +403,10 @@ def flower(petal, centre):
 
 def oak_sapling(x, y):
     if x in (7, 8) and 9 <= y < EDGE:
-        return tint((110, 78, 44), (noise(x, y, 141) - 128) // 14)
+        return shade((110, 78, 44), (noise(x, y, 141) - 128) // 14)
     dx, dy = abs(x - 7.5), abs(y - 5.5)
     if dx + dy * 1.2 < 5 and noise(x, y, 143) > 60:
-        return tint((62, 138, 44), (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+        return shade((62, 138, 44), (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
     return None
 
 
@@ -278,44 +419,79 @@ def frond(x, y):
     return None
 
 
-def bark(side, end, mark=None):
-    """A trunk: rings on the cut ends, streaks (and optional dark scars) on the sides."""
-
+def end_grain(end):
     def paint(face, x, y):
-        n = noise(x, y, face + 17)
+        ring = max(abs(x - 7), abs(y - 7))
+        return tint(end, (-37 if ring % 3 == 0 else 16) + (noise(x, y, face + 17) - 128) // 18)[:3]
+
+    return paint
+
+
+def log(end, bark, crack, salt, moss=None):
+    """A trunk: rings on the cut ends; on the sides, furrows on a 4-texel period that shift sideways
+    by a random step every 4 rows, short dark scars in 1x2 runs, and moss in 1x2 flecks over about
+    half `moss`'s count of the 256 texels. A regular step reads as the same stamp on every block of a
+    trunk."""
+    ends = end_grain(end)
+
+    def texel(face, x, y):
         if face != 1:
-            ring = max(abs(x - 7), abs(y - 7))
-            return tint(end, (-37 if ring % 3 == 0 else 16) + (n - 128) // 18)
-        if mark and noise(x, y // 2, 307) > 214:
-            return tint(mark, (n - 128) // 20)
-        return tint(side, (-24 if (x + noise(0, y // 4, 23)) % 4 == 0 else 8) + (n - 128) // 20)
+            return ends(face, x, y)
+        if moss and noise(x, y // 2 % (EDGE // 2), salt + 1) < moss[1] // 2:
+            return shade(moss[0], spread(x, y, 1, 2, salt + 2, 14))
+        if noise(x, y // 2 % (EDGE // 2), salt + 9) > 240:
+            return shade(crack, div(noise(x, y, salt + 10) - 128, 18) + 4)
+        if (x + noise(0, y // 4 % (EDGE // 4), salt + 7)) % 4 == 0:
+            return shade(crack, div(noise(x, y, salt) - 128, 18) + 10)
+        column = div(cells(x, 0, 1, salt + 5) - 128, 14)
+        return shade(bark, column + spread(x, y, 1, 2, salt + 6, 12, 4))
 
-    return paint
-
-
-def foliage(light, shadow, salt=29):
-    """Leaves as a cutout lattice of light blobs on clear ground."""
-
-    def paint(face, x, y):
-        n = noise(x, y, face + salt)
-        dx, dy = abs(x % 5 - 2), abs(y % 5 - 2)
-        if dx + dy <= 2:
-            return tint(light, (n - 128) // 12 - (19 if dx == 0 else 0))
-        return tint(shadow, (n - 128) // 14, 0 if n > 150 else 255)
-
-    return paint
+    return drawn(texel)
 
 
-def needles(light, shadow):
-    """Conifer needles: short diagonal strokes."""
+def birch_log(end, bark, lenticel, salt):
+    """Birch's lenticels as 2-texel-thick dashes, staggered every 4 rows."""
+    ends = end_grain(end)
 
-    def paint(face, x, y):
-        n = noise(x, y, face + 313)
-        if (x + y) % 3 != 0 or n > 225:
-            return tint(light, (n - 128) // 14 - (12 if y % 4 == 0 else 0))
-        return tint(shadow, (n - 128) // 14, 0 if n > 120 else 255)
+    def texel(face, x, y):
+        if face != 1:
+            return ends(face, x, y)
+        if y % 4 in (1, 2) and (x + 5 * (y // 4)) % 8 < 4 and cells(x, y, 4, salt + 3, 4) > 90:
+            return shade(lenticel, div(noise(x, y, salt) - 128, 20))
+        return shade(bark, spread(x, y, 1, 2, salt + 4, 16))
 
-    return paint
+    return drawn(texel)
+
+
+def foliage(dark, leaf, light, salt, gap):
+    """Leaves 4 texels across, every other row of them shifted by half a leaf; gaps in 2x2 clumps,
+    where the clump's noise is under `gap`."""
+
+    def texel(face, x, y):
+        c = cells(x, y, 2, salt + face)
+        if c < gap:
+            return None
+        if c < gap + 40:
+            return shade(dark, spread(x, y, face, 2, salt + 9, 14))
+        lx = (x + 2 * (y // 4 % 2)) % 4
+        between = lx in (0, 3) and y % 4 in (0, 3)
+        lit = cells(x, y, 2, salt + 11 + face) > 170
+        return shade(light if lit else leaf, spread(x, y, face, 2, salt + 13, 12) - (14 if between else 0))
+
+    return drawn(texel)
+
+
+def needles(dark, leaf, light, salt, gap):
+    """Conifer needles on a 4-texel diagonal, gaps in 2x2 clumps."""
+
+    def texel(face, x, y):
+        if cells(x, y, 2, salt + face) < gap:
+            return None
+        d = (x + y) % 4
+        base = dark if d == 0 else light if d == 2 else leaf
+        return shade(base, spread(x, y, face, 2, salt + 7, 14))
+
+    return drawn(texel)
 
 
 def disc(x, y, cx, cy, rx, ry=None):
@@ -323,7 +499,7 @@ def disc(x, y, cx, cy, rx, ry=None):
 
 
 def grain(colour, x, y, salt, spread=40):
-    return tint(colour, (noise(x, y, salt) - 128) // spread)
+    return shade(colour, (noise(x, y, salt) - 128) // spread)
 
 
 def positional(top, side, bottom):
@@ -332,12 +508,12 @@ def positional(top, side, bottom):
     of a small Shape can have its own colour, stem and leaf, by painting that spot. `side` takes the
     height up from the Voxel's floor, so its row is flipped from the image's."""
 
-    def paint(face, x, y):
+    def texel(face, x, y):
         if face == 1:
-            return side(x, EDGE - 1 - y) or CLEAR
-        return (top if face == 0 else bottom)(x, y) or CLEAR
+            return side(x, EDGE - 1 - y)
+        return (top if face == 0 else bottom)(x, y)
 
-    return paint
+    return drawn(texel)
 
 
 def stacked_fruit(palette, rows, ring, stem, leaf=None):
@@ -458,14 +634,14 @@ def mushroom_cap(cap, rim, dots):
             return grain(rim, x, h, 103, 28)
         if 5 <= x < 11 and 7 <= h < 9:
             if dots and (x, h) in ((6, 8), (9, 7)):
-                return (240, 238, 226, 255)
+                return (240, 238, 226)
             return grain(cap, x, h, 105, 40)
         return None
 
     def top(x, z):
         if 5 <= x < 11 and 5 <= z < 11:
             if dots and (x, z) in ((6, 6), (9, 7), (7, 9)):
-                return (240, 238, 226, 255)
+                return (240, 238, 226)
             return grain(cap, x, z, 107, 40)
         if 4 <= x < 12 and 4 <= z < 12 or (10 <= x < 13 and 10 <= z < 13):
             return grain(rim, x, z, 109, 28)
@@ -506,7 +682,7 @@ def berry_bush(stage):
     stem_colour = (70, 104, 44)
 
     def leafy(x, h, shift=0):
-        return tint(BERRY_LEAF, (noise(x, h, 385) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8) + shift)
+        return shade(BERRY_LEAF, (noise(x, h, 385) - 128) // 9 + (12 if (x // 2 + h // 2) % 2 else -8) + shift)
 
     if stage == 1:
         leaves, stem = sides_of(SPROUT_LEAVES), sides_of([SPROUT_STEM])
@@ -527,7 +703,7 @@ def berry_bush(stage):
                 return leafy(x, z, 18)
             return None
 
-        return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
+        return positional(top, side, lambda x, z: shade(BERRY_LEAF, -30) if top(x, z) else None)
 
     tiers = BUSH_TIERS if stage == 2 else RIPE_TIERS
     mound, dark = sides_of(tiers), sides_of(RIPE_DARK) if stage == 3 else []
@@ -547,10 +723,10 @@ def berry_bush(stage):
             return grain(BERRY_RED, x, z, 393, 24)
         for x0, _, z0, x1, _, z1 in reversed(tiers):
             if x0 <= x < x1 and z0 <= z < z1:
-                return tint(BERRY_LEAF, (noise(x, z, 395) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
+                return shade(BERRY_LEAF, (noise(x, z, 395) - 128) // 9 + (22 if (x // 2 + z // 2) % 2 else 4))
         return None
 
-    return positional(top, side, lambda x, z: tint(BERRY_LEAF, -30) if top(x, z) else None)
+    return positional(top, side, lambda x, z: shade(BERRY_LEAF, -30) if top(x, z) else None)
 
 
 # The boxes of the `watermelon` and `pumpkin` Shapes (and their small unripe ones) in
@@ -606,29 +782,29 @@ def sapling(leaf, form="round"):
         if form == "cone":
             half = (y - 1) * 0.42
             if 1 <= y < 12 and abs(x - 7.5) <= half and n > 50:
-                return tint(leaf, (n - 128) // 10 - (12 if y % 3 == 0 else 0))
+                return shade(leaf, (n - 128) // 10 - (12 if y % 3 == 0 else 0))
             if x in (7, 8) and 12 <= y < EDGE:
-                return tint(trunk, (n - 128) // 14)
+                return shade(trunk, (n - 128) // 14)
             return None
         if form == "palm":
             if x in (7, 8) and 6 <= y < EDGE:
-                return tint(trunk, (n - 128) // 14)
+                return shade(trunk, (n - 128) // 14)
             for tx, ty in ((2, 6), (13, 6), (4, 3), (11, 3), (7, 1)):
                 if abs((x - 7.5) * (ty - 6) - (y - 6) * (tx - 7.5)) < 0.9 * max(1, abs(tx - 7.5)) and (
                     min(tx, 7.5) - 1 <= x <= max(tx, 7.5) + 1 and ty - 1 <= y <= 7
                 ):
-                    return tint(leaf, (n - 128) // 12)
+                    return shade(leaf, (n - 128) // 12)
             return None
         if x in (7, 8) and 9 <= y < EDGE:
-            return tint(trunk, (n - 128) // 14)
+            return shade(trunk, (n - 128) // 14)
         dx, dy = abs(x - 7.5), abs(y - 5.5)
         if form == "flat":
             dx, dy = dx / 1.6, dy * 1.8
         if dx + dy * 1.2 < 5 and n > 60:
-            return tint(leaf, (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
+            return shade(leaf, (noise(x, y, 145) - 128) // 10 - (14 if y > 6 else 0))
         return None
 
-    return sprite(draw)
+    return drawn_sprite(draw)
 
 
 def blades(base, tall, salt=331, gap=5):
@@ -654,21 +830,103 @@ def fern(x, y):
     return None
 
 
-def cane(x, y):
-    for cx, top in ((4, 4), (8, 1), (12, 5)):
-        if x == cx and y >= top:
-            return tint((140, 190, 90), -26 if y % 4 == 0 else (noise(x, y, 351) - 128) // 14)
-        if y in (top + 1, top + 2) and abs(x - cx) in (1, 2) and y >= top:
-            return tint((92, 150, 64), (noise(x, y, 353) - 128) // 14)
-    return None
-
-
 def vine(x, y):
     if x in (3, 8, 12) and noise(x, y // 4, 357) > 40:
         return tint((56, 118, 44), (noise(x, y, 359) - 128) // 12)
     if (x + y) % 3 == 0 and abs(x % 5 - 2) + abs(y % 4 - 1) <= 2 and noise(x, y, 361) > 90:
         return tint((72, 146, 56), (noise(x, y, 363) - 128) // 12)
     return None
+
+
+def cane(face, x, y):
+    """Stalks 2 texels wide with darker nodes, and a 2-texel-thick leaf off every other node."""
+    stem, leaf = (147, 155, 93), (100, 127, 75)
+    for i, (sx, h) in enumerate(((2, 16), (7, 12), (12, 14))):
+        sx = (sx + 3 * face) % 14
+        top = EDGE - h
+        if y < top:
+            continue
+        if x in (sx, sx + 1):
+            node = (y - top) % 4 == 3
+            c = shade(stem, -16 if node else (0 if x == sx else -10))
+            return shade(c, div(noise(x, y, 61 + face) - 128, 24))
+        for k, ny in enumerate(range(top + 3, EDGE - 2, 4)):
+            side = 1 if (k + i + face) % 2 == 0 else -1
+            for d in range(1, 4):
+                lx = sx + 1 + d if side > 0 else sx - d
+                ly = ny - (d - 1) // 2
+                if x == lx and y in (ly, ly + 1):
+                    return shade(leaf, (-10 if y == ly + 1 else 0) + div(noise(x, y, 67 + face) - 128, 24))
+    return None
+
+
+XYZ = ((0.4124, 0.3576, 0.1805), (0.2126, 0.7152, 0.0722), (0.0193, 0.1192, 0.9505))
+WHITE = (0.95047, 1.0, 1.08883)
+DELTA = 6 / 29
+
+
+def inverse(m):
+    (a, b, c), (d, e, f), (g, h, i) = m
+    det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+    cofactors = (
+        (e * i - f * h, c * h - b * i, b * f - c * e),
+        (f * g - d * i, a * i - c * g, c * d - a * f),
+        (d * h - e * g, b * g - a * h, a * e - b * d),
+    )
+    return tuple(tuple(v / det for v in row) for row in cofactors)
+
+
+RGB = inverse(XYZ)
+
+
+def lch(rgb):
+    lin = [linear(c) for c in rgb]
+    f = []
+    for row, w in zip(XYZ, WHITE):
+        t = (lin[0] * row[0] + lin[1] * row[1] + lin[2] * row[2]) / w
+        f.append(t ** (1 / 3) if t > DELTA**3 else t / (3 * DELTA**2) + 4 / 29)
+    a, b = 500 * (f[0] - f[1]), 200 * (f[1] - f[2])
+    return 116 * f[1] - 16, math.hypot(a, b), math.degrees(math.atan2(b, a)) % 360
+
+
+def from_lch(lightness, chroma, hue):
+    h = math.radians(hue)
+    fy = (lightness + 16) / 116
+    f = (fy + chroma * math.cos(h) / 500, fy, fy - chroma * math.sin(h) / 200)
+    xyz = [(t**3 if t > DELTA else 3 * DELTA**2 * (t - 4 / 29)) * w for t, w in zip(f, WHITE)]
+    return tuple(srgb(row[0] * xyz[0] + row[1] * xyz[1] + row[2] * xyz[2]) for row in RGB)
+
+
+def green_target(rgb):
+    """The colour spec's green target for grass and ground cover: grass's C* 57 to about 48, its
+    lightness and hue kept."""
+    lightness, chroma, hue = lch(rgb)
+    return from_lch(lightness, chroma * 0.85, hue)
+
+
+def grown(paint, green=False):
+    """`paint` with every 1-texel-wide run, across and then down, grown to 2 into its clear side,
+    and shaded; then, if `green`, moved to the green target."""
+    faces = []
+    for face in range(3):
+        t = [[paint(face, x, y) for x in range(EDGE)] for y in range(EDGE)]
+        for y in range(EDGE):
+            for x in range(EDGE):
+                if t[y][x][3] and not (x > 0 and t[y][x - 1][3]) and not (x < EDGE - 1 and t[y][x + 1][3]):
+                    t[y][x + 1 if x < EDGE - 1 else x - 1] = (*shade(t[y][x][:3], -12), 255)
+        for x in range(EDGE):
+            for y in range(EDGE):
+                if t[y][x][3] and not (y > 0 and t[y - 1][x][3]) and not (y < EDGE - 1 and t[y + 1][x][3]):
+                    t[y + 1 if y < EDGE - 1 else y - 1][x] = (*shade(t[y][x][:3], -8), 255)
+        faces.append(t)
+
+    def texel(face, x, y):
+        c = faces[face][y][x]
+        if not c[3]:
+            return None
+        return green_target(c[:3]) if green else c[:3]
+
+    return drawn(texel)
 
 
 def cactus(face, x, y):
@@ -707,7 +965,7 @@ def lily_pad(face, x, y):
     return tint((56, 142, 64), (n - 128) // 12)
 
 
-def crop_stage(n, leaf, ripe, head=None, root=None):
+def crop_stage(n, leaf, ripe, root=None):
     """Four growth Stages of a field plant: a seedling, then taller, then ripe."""
 
     def draw(x, y):
@@ -715,14 +973,39 @@ def crop_stage(n, leaf, ripe, head=None, root=None):
         h = noise(x, 0, 373) % 3
         if x % 3 == 2 or y < EDGE - rise + h:
             return None
-        shade = (noise(x, y, 375) - 128) // 12 + (EDGE - y) * 2
-        if n == 4 and head and y < EDGE - rise + 4 + h:
-            return tint(head, shade // 2)
+        light = (noise(x, y, 375) - 128) // 12 + (EDGE - y) * 2
         if n == 4 and root and y > EDGE - 3:
-            return tint(root, shade // 2)
-        return tint(ripe if n == 4 and not head and not root else leaf, shade)
+            return tint(root, light // 2)
+        return tint(ripe if n == 4 and not root else leaf, light)
 
     return sprite(draw)
+
+
+WHEAT_STALKS = (
+    ((1, 0), (5, 2), (9, 1), (13, 3)),
+    ((0, 1), (4, 3), (8, 0), (12, 2)),
+    ((2, 2), (6, 0), (10, 3), (14, 1)),
+)
+
+
+def wheat(tall, stem, ear=None):
+    """Four stalks a face, 2 texels wide and two-tone, `tall` texels less each stalk's dip; a ripe
+    or green Stage's top 4 texels are its ear."""
+
+    def texel(face, x, y):
+        for sx, dip in WHEAT_STALKS[face]:
+            if x not in (sx, sx + 1):
+                continue
+            top = EDGE - tall + (dip if tall > 6 else dip // 2)
+            if y < top:
+                return None
+            side = 0 if x == sx else -14
+            if ear and y < top + 4:
+                return shade(ear, side + (8 if (y - top) % 2 == 0 else -4))
+            return shade(stem, side + div(noise(x, y, 71 + face) - 128, 20))
+        return None
+
+    return drawn(texel)
 
 
 def item_icon(draw):
@@ -832,51 +1115,76 @@ def potato_item(x, y):
     return None
 
 
+# A log and its wood block share their art.
+OAK_LOG = log((150, 104, 60), (127, 89, 55), (90, 52, 18), 2000)
+JUNGLE_LOG = log((140, 112, 70), (111, 91, 59), (74, 54, 22), 2023, ((61, 94, 45), 40))
+SWAMP_LOG = log((112, 98, 70), (81, 73, 57), (44, 36, 20), 2069, ((55, 84, 53), 40))
+PINE_LOG = log((150, 110, 70), (99, 69, 47), (62, 32, 10), 2092)
+ACACIA_LOG = log((160, 126, 92), (135, 107, 83), (98, 70, 46), 2138)
+BIRCH_LOG = birch_log((196, 172, 120), (219, 217, 205), (42, 42, 46), 2184)
+PALM_LOG = log((182, 150, 100), (164, 134, 90), (108, 80, 48), 2230)
+CHERRY_LOG = log((150, 104, 84), (126, 82, 68), (70, 40, 32), 2276)
+ORANGE_LOG = log((150, 108, 66), (145, 105, 67), (108, 68, 30), 2299)
+APPLE_LOG = log((150, 104, 60), (157, 111, 67), (120, 74, 30), 2322)
+
+OAK_LEAVES = foliage((20, 65, 23), (49, 118, 35), (66, 133, 49), 1000, 72)
+JUNGLE_LEAVES = foliage((14, 71, 29), (34, 130, 45), (46, 146, 60), 1017, 69)
+SWAMP_LEAVES = foliage((40, 52, 31), (82, 98, 52), (98, 114, 68), 1034, 70)
+APPLE_LEAVES = foliage((20, 65, 23), (48, 117, 34), (64, 132, 48), 1085, 47)
+ORANGE_LEAVES = foliage((18, 61, 26), (41, 109, 37), (58, 126, 52), 1068, 55)
+CHERRY_LEAVES = foliage((33, 75, 29), (73, 131, 44), (88, 145, 61), 1051, 55)
+
 TEXTURES = {
     "strata": {
-        "stone": stone,
-        "basalt": basalt,
-        "clay": clay,
+        "stone": surface((139, 140, 147), 3001, 9, 4, darks=True),
+        "basalt": surface((58, 60, 68), 3101, 10, 2, joints=basalt_joints),
+        "clay": surface((163, 110, 90), 3201, 10, 4, bands=True),
         "sand": sand,
         "soil": soil,
         "turf": turf,
     },
     "flora": {
-        "wood": wood,
-        "leaves": leaves,
-        "grass": grass,
+        "wood": OAK_LOG,
+        "leaves": OAK_LEAVES,
+        **canopies("oak_leaves", OAK_LEAVES),
+        "grass": grown(grass, green=True),
         "kelp": kelp,
-        "tuft": sprite(tuft),
-        "poppy": sprite(flower((206, 48, 40), (250, 214, 60))),
-        "daisy": sprite(flower((240, 238, 226), (236, 190, 40))),
-        "oak_sapling": sprite(oak_sapling),
-        "frond": sprite(frond),
-        "birch_log": bark((226, 224, 212), (196, 172, 120), (46, 46, 50)),
-        "birch_leaves": foliage((124, 176, 60), (60, 104, 36), 401),
+        "tuft": grown(sprite(tuft), green=True),
+        "poppy": drawn_sprite(flower((206, 48, 40), (250, 214, 60))),
+        "daisy": drawn_sprite(flower((240, 238, 226), (236, 190, 40))),
+        "oak_sapling": drawn_sprite(oak_sapling),
+        "frond": grown(sprite(frond), green=True),
+        "birch_log": BIRCH_LOG,
+        "birch_leaves": foliage((53, 97, 29), (111, 163, 47), (128, 180, 64), 1136, 44),
         "birch_sapling": sapling((124, 176, 60)),
-        "pine_log": bark((92, 62, 40), (150, 110, 70)),
-        "pine_leaves": needles((34, 92, 56), (16, 56, 36)),
+        "pine_log": PINE_LOG,
+        "pine_leaves": needles((11, 54, 31), (32, 90, 54), (41, 99, 63), 1102, 30),
         "pine_sapling": sapling((34, 92, 56), "cone"),
-        "palm_log": bark((158, 128, 84), (182, 150, 100), (112, 84, 52)),
-        "palm_leaves": foliage((76, 160, 58), (30, 86, 40), 403),
+        "palm_log": PALM_LOG,
+        "palm_leaves": foliage((23, 79, 33), (63, 147, 45), (81, 165, 63), 1153, 57),
         "palm_sapling": sapling((76, 160, 58), "palm"),
-        "acacia_log": bark((128, 100, 76), (160, 126, 92)),
-        "acacia_leaves": foliage((140, 160, 56), (70, 92, 32), 405),
+        "acacia_log": ACACIA_LOG,
+        "acacia_leaves": foliage((63, 85, 25), (127, 147, 43), (145, 165, 61), 1119, 45),
         "acacia_sapling": sapling((140, 160, 56), "flat"),
-        "jungle_log": bark((104, 84, 52), (140, 112, 70), (60, 94, 44)),
-        "jungle_leaves": foliage((38, 150, 56), (14, 82, 36), 407),
+        "jungle_log": JUNGLE_LOG,
+        "jungle_leaves": JUNGLE_LEAVES,
+        **canopies("jungle_leaves", JUNGLE_LEAVES),
         "jungle_sapling": sapling((38, 150, 56)),
-        "swamp_log": bark((74, 66, 50), (112, 98, 70), (54, 84, 52)),
-        "swamp_leaves": foliage((84, 120, 52), (40, 64, 34), 409),
+        "swamp_log": SWAMP_LOG,
+        "swamp_leaves": SWAMP_LEAVES,
+        **canopies("swamp_leaves", SWAMP_LEAVES),
         "swamp_sapling": sapling((84, 120, 52), "flat"),
-        "apple_log": bark((150, 104, 60), (150, 104, 60)),
-        "apple_leaves": foliage((60, 136, 44), (25, 75, 29), 411),
+        "apple_log": APPLE_LOG,
+        "apple_leaves": APPLE_LEAVES,
+        **canopies("apple_leaves", APPLE_LEAVES),
         "apple_sapling": sapling((90, 140, 56)),
-        "orange_log": bark((138, 98, 60), (150, 108, 66)),
-        "orange_leaves": foliage((52, 128, 48), (22, 72, 32), 413),
+        "orange_log": ORANGE_LOG,
+        "orange_leaves": ORANGE_LEAVES,
+        **canopies("orange_leaves", ORANGE_LEAVES),
         "orange_sapling": sapling((70, 140, 52)),
-        "cherry_log": bark((120, 76, 62), (150, 104, 84), (74, 44, 36)),
-        "cherry_leaves": foliage((86, 150, 56), (40, 86, 36), 415),
+        "cherry_log": CHERRY_LOG,
+        "cherry_leaves": CHERRY_LEAVES,
+        **canopies("cherry_leaves", CHERRY_LEAVES),
         "cherry_sapling": sapling((100, 156, 64)),
         "apple_unripe": apple(False),
         "apple_ripe": apple(True),
@@ -886,27 +1194,27 @@ TEXTURES = {
         "cherry_ripe": cherries(True),
         "coconut_unripe": coconut(False),
         "coconut_ripe": coconut(True),
-        "birch_wood": bark((226, 224, 212), (196, 172, 120), (46, 46, 50)),
-        "pine_wood": bark((92, 62, 40), (150, 110, 70)),
-        "palm_wood": bark((158, 128, 84), (182, 150, 100), (112, 84, 52)),
-        "acacia_wood": bark((128, 100, 76), (160, 126, 92)),
-        "jungle_wood": bark((104, 84, 52), (140, 112, 70), (60, 94, 44)),
-        "dandelion": sprite(flower((244, 204, 40), (252, 236, 130))),
-        "orchid": sprite(flower((156, 92, 206), (246, 240, 250))),
-        "tall_grass": blades((72, 150, 52), 14, 331, 6),
-        "dry_grass": blades((196, 170, 90), 9, 337, 4),
-        "fern": sprite(fern),
+        "birch_wood": BIRCH_LOG,
+        "pine_wood": PINE_LOG,
+        "palm_wood": PALM_LOG,
+        "acacia_wood": ACACIA_LOG,
+        "jungle_wood": JUNGLE_LOG,
+        "dandelion": drawn_sprite(flower((244, 204, 40), (252, 236, 130))),
+        "orchid": drawn_sprite(flower((156, 92, 206), (246, 240, 250))),
+        "tall_grass": grown(blades((72, 150, 52), 14, 331, 6), green=True),
+        "dry_grass": grown(blades((196, 170, 90), 9, 337, 4)),
+        "fern": grown(sprite(fern), green=True),
         "mushroom_red": mushroom_cap((200, 44, 40), (140, 28, 30), True),
         "mushroom_brown": mushroom_cap((142, 98, 64), (100, 66, 42), False),
         "cactus": cactus,
-        "cane": sprite(cane),
-        "vine": sprite(vine),
+        "cane": drawn(cane),
+        "vine": grown(sprite(vine), green=True),
     },
     "crops": {
-        "wheat_sprout": crop_stage(1, (110, 170, 60), (110, 170, 60)),
-        "wheat_young": crop_stage(2, (128, 170, 56), (128, 170, 56)),
-        "wheat_green": crop_stage(3, (146, 170, 52), (146, 170, 52)),
-        "wheat_ripe": crop_stage(4, (146, 170, 52), (214, 178, 70), head=(226, 190, 76)),
+        "wheat_sprout": wheat(4, (108, 168, 58)),
+        "wheat_young": wheat(7, (130, 172, 58)),
+        "wheat_green": wheat(11, (151, 175, 57), (165, 189, 71)),
+        "wheat_ripe": wheat(11, (150, 174, 56), (238, 202, 88)),
         "carrot_sprout": crop_stage(1, (96, 168, 64), (96, 168, 64)),
         "carrot_young": crop_stage(2, (84, 164, 60), (84, 164, 60)),
         "carrot_green": crop_stage(3, (74, 156, 56), (74, 156, 56)),
@@ -942,11 +1250,11 @@ TEXTURES = {
         "frosted_glass": frosted,
         "lantern": lantern,
     },
-    "timber": {"planks": planks, "thatch": thatch},
+    "timber": {"planks": planks((190, 141, 80), 101), "thatch": thatch((210, 182, 99), 211)},
     "brickwork": {
-        "brick": bricks((168, 74, 52), (206, 200, 190)),
-        "cobble": cobble,
-        "tile": tile,
+        "brick": bricks((173, 97, 82), (208, 202, 192), 307),
+        "cobble": cobble((132, 130, 123), (86, 84, 78), 409),
+        "tile": roof_tiles((190, 121, 73), (140, 70, 20), 503),
     },
     "lamps": {
         "glowstone": glow((226, 196, 90), (255, 244, 180)),

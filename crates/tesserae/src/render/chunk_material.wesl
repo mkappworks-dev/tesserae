@@ -11,13 +11,18 @@ import bevy_pbr::render::{
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::{
         STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK, STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
-        STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
+        STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT, STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
     },
+    mesh_view_bindings as view_bindings,
 };
+@if(SCREEN_SPACE_AMBIENT_OCCLUSION)
+import bevy_pbr::render::mesh_view_bindings::{screen_space_ambient_occlusion_texture, view};
+@if(SCREEN_SPACE_AMBIENT_OCCLUSION)
+import bevy_pbr::ssao::utils::ssao_multibounce;
 import super::{
     leaf_hole::leaf_hole,
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
-    material_texture::{material_slot, has_texture, sample_texture, uv_gradient},
+    material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
 };
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
@@ -110,13 +115,16 @@ const LIGHT_FALLOFF: f32 = 0.8;
 const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 
 // How bright a full-strength block light is, in the same units bevy_pbr's
-// exposure works in.
-const BLOCK_LIGHT_STRENGTH: f32 = 4.0;
+// exposure works in: 4.0 on screen at Bevy's default Exposure (EV100 9.7).
+const BLOCK_LIGHT_STRENGTH: f32 = 3992.0;
 
-// The ambient dome a face no sky light reaches still gets: light level 5's, so a sealed cave's
-// walls read as shapes and not a void, while a torch is still what lights it. Level 1's was too
-// faint to show rock at all. The sun gets none.
-const UNLIT_AMBIENT: f32 = 0.107;
+// The ambient dome a face no sky light reaches still gets, as a share of `SKY_AMBIENT` in
+// chunk_view.rs: about 96 of it, so a sealed cave's walls read as shapes and not a void, while a
+// torch is still what lights it. The sun gets none.
+const UNLIT_AMBIENT: f32 = 0.0642;
+
+// The share of screen-space occlusion the sun's light takes as well as the sky's.
+const SUN_OCCLUSION: f32 = 0.5;
 
 // Flat, like the Material index: every vertex of a greedy quad carries the same
 // level because light is part of the merge key, so interpolating would only
@@ -141,6 +149,20 @@ fn level_tint(level: u32) -> vec3<f32> {
         vec3<f32>(0.6, 0.3, 1.0),
     );
     return tints[min(level, TINT_LEVELS - 1u)];
+}
+
+// `render::fog::Haze::opacity_at`: aerial perspective in metres toward the
+// fog colour, before Bevy's reach-sized fade, which then fades it in turn.
+fn apply_haze(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
+    let distance = length(world_position - view_bindings::view.world_position.xyz);
+    let rate = vec3<f32>(
+        bitcast<f32>(constants::CHUNK_HAZE_RATE_R),
+        bitcast<f32>(constants::CHUNK_HAZE_RATE_G),
+        bitcast<f32>(constants::CHUNK_HAZE_RATE_B),
+    );
+    let fog = view_bindings::fog.base_color;
+    let haze = bitcast<f32>(constants::CHUNK_HAZE_MOST) * (1.0 - exp(-distance * rate)) * fog.a;
+    return vec4<f32>(mix(color.rgb, fog.rgb, haze), color.a);
 }
 
 @vertex
@@ -173,7 +195,13 @@ fn fragment(
     // works as a whole-chunk tint.
     let slot = material_slot(in.material);
     if has_texture(slot) {
-        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal);
+        pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal, in.voxel);
+        if patched(slot, in.world_normal) {
+            pbr_input.material.base_color = vec4<f32>(
+                patch_colour(pbr_input.material.base_color.rgb, in.world_position.xyz),
+                pbr_input.material.base_color.a,
+            );
+        }
     } else {
         pbr_input.material.base_color *= palette[slot];
     }
@@ -183,6 +211,28 @@ fn fragment(
             mix(pbr_input.material.base_color.rgb, level_tint(in.level), TINT_STRENGTH),
             pbr_input.material.base_color.a,
         );
+    }
+
+    let sky = light_level(in.light, 4u);
+
+    // bevy_pbr bounces the occlusion off StandardMaterial's white base_color, before the Material's
+    // colour is multiplied in, which lifts it to almost nothing; bounce it off the real albedo.
+    @if(SCREEN_SPACE_AMBIENT_OCCLUSION) {
+    if in.level == 0u {
+        let ssao_at = vec2<i32>(in.clip_position.xy - view.viewport.xy);
+        let ssao = textureLoad(screen_space_ambient_occlusion_texture, ssao_at, 0i).r;
+        // Faded by sky light, which already darkens what cannot see the sky: a shaded floor is
+        // not occluded twice.
+        let bounced = ssao_multibounce(ssao, pbr_input.material.base_color.rgb);
+        pbr_input.diffuse_occlusion = mix(vec3<f32>(1.0), bounced, sky);
+        // A look choice, not physics: sunlit faces are lit almost wholly by the sun, so occlusion
+        // on the ambient term alone would leave a canopy's creases as flat as before.
+        pbr_input.directional_shadow_factor *= mix(1.0, ssao, SUN_OCCLUSION);
+    } else {
+        // Only level 0 is in the prepass AO reads: bevy_pbr read an empty texel for this face.
+        pbr_input.diffuse_occlusion = vec3<f32>(1.0);
+        pbr_input.specular_occlusion = 1.0;
+    }
     }
 
     // Sky light is how much of the sky dome and the sun this face can see, so it
@@ -196,22 +246,21 @@ fn fragment(
     // directional_shadow_factor alone would leave the ambient dome lighting a
     // cave past its faint floor. pbr_types.wesl's own doc on that field says "use this for custom
     // shadow maps", which is exactly what a sky-light flood-fill is.
-    let sky = light_level(in.light, 4u);
-    pbr_input.diffuse_occlusion *= vec3<f32>(max(sky, UNLIT_AMBIENT));
+    // The dome share scales the sky only, so a cave's faint floor stays as it was.
+    pbr_input.diffuse_occlusion *= vec3<f32>(max(sky * in.sky_view, UNLIT_AMBIENT));
     pbr_input.directional_shadow_factor *= sky;
 
     // Block light is a local source, so it is emissive: tinted by the Voxel's
     // own palette colour, so a face a lantern reaches still shows its Material
-    // instead of turning into a flat glow. The material's emissive_exposure_weight
-    // is Bevy's default 0, so block light skips exposure: BLOCK_LIGHT_STRENGTH is
-    // in display units and does not move with the camera's Exposure.
+    // instead of turning into a flat glow. Its exposure weight is 1, so it goes
+    // through the camera's Exposure as the sun and the sky do, and a change of
+    // Exposure keeps lanterns and daylight in step.
     let block = light_level(in.light, 0u);
-    // rgb only: emissive.a selects whether exposure applies, and adding to it
-    // would push it past 1.0, where bevy_pbr's mix() extrapolates.
+    // emissive.a is that weight; past 1.0 bevy_pbr's mix() would extrapolate.
     pbr_input.material.emissive = vec4<f32>(
         pbr_input.material.emissive.rgb
             + pbr_input.material.base_color.rgb * BLOCK_LIGHT_TINT * block * BLOCK_LIGHT_STRENGTH,
-        pbr_input.material.emissive.a,
+        1.0,
     );
 
     let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
@@ -230,6 +279,10 @@ fn fragment(
         out.color = apply_pbr_lighting(pbr_input);
     } else {
         out.color = pbr_input.material.base_color;
+    }
+    @if(DISTANCE_FOG)
+    if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u {
+        out.color = apply_haze(out.color, in.world_position.xyz);
     }
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;

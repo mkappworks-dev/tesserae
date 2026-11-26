@@ -201,6 +201,18 @@ pub(in crate::client) enum Switch {
     Curve(QualityCurve),
 }
 
+/// The Quality tier in force: a switch's own curve counts as Custom.
+pub(in crate::client) fn tier(
+    preferences: &Preferences,
+    switch: Option<&Switch>,
+) -> DistancePreset {
+    match switch {
+        Some(Switch::Preset(preset)) => *preset,
+        Some(Switch::Curve(_)) => DistancePreset::Custom,
+        None => preferences.distance.preset,
+    }
+}
+
 /// The Server inserts the settings as a World opens, which is when a request is first due; an
 /// applied preference that asks for another curve sends it again.
 pub(in crate::client) fn request(

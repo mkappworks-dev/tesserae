@@ -148,7 +148,9 @@ distance, so it does not scale with Voxel size the way everything physical does.
 
 **Sky light** — the light a Voxel receives from the sky. At full strength it
 falls straight down undimmed, so open ground is lit the same however tall the
-air column above it is.
+air column above it is. A face takes a share of it by which way it faces, as a
+wall sees less of the sky than a top: all of it on a top, less on a side, least
+on an underside.
 
 **Block light** — the light a Voxel receives from Materials that emit. Dims by
 one level per Voxel in every direction, downwards included.
@@ -191,9 +193,12 @@ Impostors.
 Material, as level 0 does at that column's centre in metres.
 
 **Distance fog** — how much of a surface's colour is replaced by the fog colour,
-as a function of its distance from the Eye in metres. Sized from the full-detail
-radius and the reach, so it is the same fog at any Voxel size. The fog colour
-and the colour of the sky behind the terrain are two values, not one.
+as a function of its distance from the Eye in metres. Two parts: a haze in
+metres that fades blue first and stops short of hiding anything, so 100 m reads
+farther off than 2 m at any reach; and a fade sized from the full-detail radius
+and the reach, complete at the reach. Neither takes a Voxel size, so it is the
+same fog at any Voxel size. The fog colour is the sky's at the horizon; the
+sky's own colour is its zenith.
 
 **Downsample** — producing a coarse Chunk's Voxels from the eight finer Chunks
 it covers: the dominant Material by volume, solid if half the volume is. At
@@ -522,6 +527,16 @@ the trunk or a leader, so it is felled and cut like any trunk Voxel. A
 
 **Lobe** — an ellipsoid of a tree's canopy Material around a limb or leader tip;
 the crown on the trunk's top is the largest lobe.
+
+**Storey** — one height band a tree row may declare: a share of its trees, their
+trunk height and their crown's size. Each tree belongs to one, fixed by the
+World seed and where it stands, so a forest has trees above and below its
+canopy. Where crowns meet, the taller storey's Voxel wins. A tree row with no
+storeys is one band.
+
+**Canopy variant** — one of several canopy Materials a tree row may declare,
+alike but for colour. Each tree grows one, fixed by the World seed and where it
+stands, so neighbouring crowns read as separate trees.
 
 **Vines** (generated) — climbers that worldgen hangs from a tree's canopy. A
 growing sapling never makes them.

@@ -12,8 +12,8 @@ use tesserae_core::{
     CombustionDef, FluidDef, GroundParams, Heat, MAX_BIOME_SETTLEMENTS, MAX_BIOME_STRUCTURES,
     MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable, ParamError, Phase, Reactant,
     ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant,
-    SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables, Voxel, VoxelUse,
-    WaterParams, WorldgenParams,
+    SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables, TreeVariety, Voxel,
+    VoxelUse, WaterParams, WorldgenParams,
 };
 
 use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
@@ -656,6 +656,7 @@ fn surface_feature(
     tables: &Tables,
     registry: &Registry,
     lake: Option<MaterialId>,
+    variety: &mut TreeVariety,
 ) -> Result<SurfaceFeature, ModError> {
     let bad = |field, rule| ModError::Params {
         id: b.mod_id.clone(),
@@ -833,16 +834,23 @@ fn surface_feature(
                     })
                 })
                 .transpose()?;
-            SurfacePlantKind::Tree(SurfaceTree {
+            let row = SurfaceTree {
                 vines,
                 trunk: tree.trunk,
-                canopy: tree.canopy,
+                canopy: tree.canopy.first(),
+                canopies_index: 0,
+                storeys_index: 0,
                 trunk_height_m: tree.trunk_height_m,
                 canopy_radius_m: tree.canopy_radius_m,
                 branching: tree.branching,
                 crowding_m: tree.crowding_m,
                 fruit,
-            })
+            };
+            SurfacePlantKind::Tree(
+                variety
+                    .freeze(row, &tree.canopy, &tree.storeys)
+                    .map_err(|e| bad(e.field, e.rule))?,
+            )
         }
     };
     let shape = match &kind {
@@ -1025,6 +1033,7 @@ pub fn resolve_biomes(
     let mut biomes: Vec<Biome> = Vec::new();
     let mut selectors: Vec<tesserae_core::BiomeSelectors> = Vec::new();
     let mut strata: Vec<tesserae_core::Strata> = Vec::new();
+    let mut variety = TreeVariety::NONE;
     for b in behaviours {
         for (row, def) in b.biomes.iter().enumerate() {
             let bad = |source| ModError::Params {
@@ -1098,7 +1107,7 @@ pub fn resolve_biomes(
             let mut groups: Vec<&str> = Vec::new();
             let mut features = Vec::new();
             for (feature, f) in def.surface_features.iter().enumerate() {
-                let mut made = surface_feature(b, row, f, tables, registry, lake)?;
+                let mut made = surface_feature(b, row, f, tables, registry, lake, &mut variety)?;
                 made.field = f
                     .field
                     .as_ref()
@@ -1236,7 +1245,7 @@ pub fn resolve_biomes(
     };
     let last = behaviours.last().map_or("", |b| b.mod_id.as_str());
     Ok((
-        BiomeTable::new(&biomes)
+        BiomeTable::new_with_variety(&biomes, &variety)
             .and_then(|t| t.with_selectors(&selectors))
             .and_then(|t| t.with_strata(&strata))
             .map_err(|e| table(e, last, "biome"))?,

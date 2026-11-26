@@ -35,8 +35,11 @@ pub(super) fn obtainable(loaded: &LoadedMods, items: &Items) -> HashSet<Material
                     .as_slice()
                     .iter()
                     .flat_map(|f| {
-                        std::iter::once(f.material)
-                            .chain(f.plant.iter().flat_map(|p| p.materials()))
+                        std::iter::once(f.material).chain(
+                            f.plant
+                                .iter()
+                                .flat_map(|p| p.materials(world.biomes.variety())),
+                        )
                     })
                     .collect();
                 all.extend(features.crop_fields().iter().flat_map(|f| f.materials()));

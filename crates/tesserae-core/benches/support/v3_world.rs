@@ -41,6 +41,8 @@ fn tree() -> SurfaceFeature {
         plant: Some(SurfacePlant {
             shape: 0,
             kind: SurfacePlantKind::Tree(SurfaceTree {
+                storeys_index: 0,
+                canopies_index: 0,
                 branching: Some(Branching {
                     limbs: CountRange { min: 3, max: 4 },
                     start: 0.3,

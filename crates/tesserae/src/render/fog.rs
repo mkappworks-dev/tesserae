@@ -1,4 +1,5 @@
-//! Distance fog: two plain numbers, and the density they imply.
+//! Distance fog: two plain numbers, the density they imply, and a haze in
+//! metres beside them ([`HAZE`]).
 //!
 //! What a Look pack sets is a colour and an opacity at the reach: the share of a
 //! surface's colour that fog replaces at the farthest drawn terrain. Neither is
@@ -12,6 +13,7 @@
 
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
+use bevy::shader::ShaderDefVal;
 
 use tesserae_core::SkyFog;
 
@@ -134,7 +136,7 @@ fn density(settings: &FogSettings, reach_m: f32) -> f32 {
 /// No Voxel size is taken, deliberately: the fog is the same at any Voxel size
 /// (ADR-0003). The falloff is exponential squared, which is under 2% out to
 /// the join of levels 1 and 2 at the default distances, so the full-detail
-/// rings are not hazed. An opacity of 0 gives a density of 0 and no fog.
+/// rings are left to [`HAZE`]. An opacity of 0 gives a density of 0 and no fog.
 pub fn distance_fog(
     settings: &FogSettings,
     view_distance_m: f32,
@@ -171,6 +173,38 @@ pub fn streamed_fog(
         streaming.view_distance_m,
         streaming.lod_distance_m,
     )
+}
+
+/// Aerial perspective: a haze in metres, beside the reach-sized fade, so a
+/// surface at 100 m reads farther off than one at 2 m whatever the reach. It
+/// fades toward the same fog colour, blue first, which cools what it fades. It
+/// stops at [`Haze::most`], so the far terrain is still seen until the
+/// reach-sized fade takes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Haze {
+    /// The share of a surface's colour the haze replaces, however far.
+    pub most: f32,
+    /// Per channel (red, green, blue), the distance in metres at which the
+    /// haze is `1 - 1/e` of [`Haze::most`].
+    pub scale_m: [f32; 3],
+}
+
+pub const HAZE: Haze = Haze {
+    most: 0.2,
+    scale_m: [460.0, 330.0, 230.0],
+};
+
+/// The haze as the chunk shader's `constants::CHUNK_HAZE_*`: a shader def holds
+/// no float, so each is its bit pattern, which the shader bitcasts back.
+pub fn haze_shader_defs() -> Vec<ShaderDefVal> {
+    let bits = |name: &'static str, value: f32| ShaderDefVal::UInt(name.into(), value.to_bits());
+    let [r, g, b] = HAZE.scale_m.map(|scale_m| 1.0 / scale_m);
+    vec![
+        bits("CHUNK_HAZE_MOST", HAZE.most),
+        bits("CHUNK_HAZE_RATE_R", r),
+        bits("CHUNK_HAZE_RATE_G", g),
+        bits("CHUNK_HAZE_RATE_B", b),
+    ]
 }
 
 /// What the shader fogs toward so that a surface fully fogged comes out as
@@ -234,6 +268,16 @@ fn built_settings() -> FogSettings {
 mod tests {
     use super::*;
 
+    /// The haze's formula, `most * (1 - exp(-d / scale))` per channel, as
+    /// `chunk_material.wesl` applies it before Bevy's fade.
+    impl Haze {
+        fn opacity_at(&self, distance_m: f32) -> [f32; 3] {
+            let d = distance_m.max(0.0);
+            self.scale_m
+                .map(|scale_m| self.most * (1.0 - (-d / scale_m).exp()))
+        }
+    }
+
     const DEFAULT_VIEW_M: f32 = 192.0;
     const DEFAULT_LOD_M: f32 = 4096.0;
 
@@ -284,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn default_fog_leaves_the_full_detail_rings_unhazed() {
+    fn the_reach_sized_fade_leaves_the_full_detail_rings_alone() {
         let reach_m = crate::server::quality::QualityCurve::MEDIUM.reach_m;
         let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, reach_m);
         // Edit these with the reason if a default changes: they are the spec's figures.
@@ -518,6 +562,93 @@ mod tests {
         assert_eq!(overridden.sky, default.sky);
         for ignored in [None, Some(""), Some("dense"), Some("0.5f")] {
             assert_eq!(with_opacity_override(default, ignored), default);
+        }
+    }
+
+    #[test]
+    fn the_haze_is_nothing_at_the_eye_and_fades_blue_first() {
+        assert_eq!(HAZE.opacity_at(0.0), [0.0; 3]);
+        for step in 1..=60 {
+            let [r, g, b] = HAZE.opacity_at(step as f32 * 10.0);
+            assert!(b > g && g > r && r > 0.0, "{} m: {r} {g} {b}", step * 10);
+        }
+    }
+
+    #[test]
+    fn the_haze_shows_by_a_hundred_metres_and_never_hides_the_terrain() {
+        // Edit these with the reason if the haze changes: a surface at 110 m must
+        // read farther than one at 2 m, and the far terrain must still be seen.
+        let [_, _, near] = HAZE.opacity_at(2.0);
+        assert!(near < 0.01, "2 m: {near}");
+        let [_, _, clearing] = HAZE.opacity_at(30.0);
+        assert!(
+            clearing < 0.04,
+            "a tree across a clearing is not in fog: {clearing}"
+        );
+        let [r, _, b] = HAZE.opacity_at(110.0);
+        assert!(b > 0.07 && r > 0.04, "110 m: {r} {b}");
+        for channel in HAZE.opacity_at(100_000.0) {
+            assert!(channel <= HAZE.most && channel > 0.95 * HAZE.most);
+        }
+        const { assert!(HAZE.most < 0.5) };
+    }
+
+    #[test]
+    fn the_haze_is_in_metres_whatever_the_reach_or_the_voxel_size() {
+        // Pinning the signature is the test: neither a reach nor a Voxel size can
+        // reach it, so 110 m is as hazy at 0.25 m Voxels and at Low as at Ultra.
+        let _: fn(&Haze, f32) -> [f32; 3] = Haze::opacity_at;
+        let haze = HAZE.opacity_at(110.0);
+        for (view_m, reach_m) in [(48.0, 1024.0), (192.0, 6144.0), (384.0, 30_000.0)] {
+            let fog = distance_fog(&FogSettings::default(), view_m, reach_m);
+            let seen = seen_opacity_at(&fog, 110.0);
+            assert!((0..3).all(|c| seen[c] >= haze[c]), "{reach_m}: {seen:?}");
+        }
+        let reach_m = crate::server::quality::QualityCurve::MEDIUM.reach_m;
+        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, reach_m);
+        let seen = seen_opacity_at(&fog, 110.0);
+        assert!(
+            seen[2] - haze[2] < 0.01,
+            "at Medium 110 m is the haze's alone"
+        );
+    }
+
+    #[test]
+    fn haze_and_fade_together_reach_the_reach_opacity_and_no_further() {
+        let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, DEFAULT_LOD_M);
+        let reach = f64::from(FogSettings::default().reach_opacity);
+        for channel in seen_opacity_at(&fog, DEFAULT_LOD_M) {
+            assert!(f64::from(channel) > reach && channel < 1.0, "{channel}");
+        }
+    }
+
+    /// The shader's order: the haze, then Bevy's reach-sized fade over it.
+    fn seen_opacity_at(fog: &DistanceFog, distance_m: f32) -> [f32; 3] {
+        let fade = opacity_at(fog, distance_m) as f32;
+        HAZE.opacity_at(distance_m)
+            .map(|haze| 1.0 - (1.0 - haze) * (1.0 - fade))
+    }
+
+    #[test]
+    fn the_shader_reads_the_haze_it_is_given() {
+        let defs = haze_shader_defs();
+        let read = |name: &str| {
+            defs.iter()
+                .find_map(|def| match def {
+                    ShaderDefVal::UInt(key, bits) if key == name => Some(f32::from_bits(*bits)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{name} missing"))
+        };
+        assert_eq!(read("CHUNK_HAZE_MOST"), HAZE.most);
+        let rates = [
+            "CHUNK_HAZE_RATE_R",
+            "CHUNK_HAZE_RATE_G",
+            "CHUNK_HAZE_RATE_B",
+        ]
+        .map(read);
+        for (rate, scale_m) in rates.into_iter().zip(HAZE.scale_m) {
+            assert!((rate * scale_m - 1.0).abs() < 1e-6);
         }
     }
 

@@ -119,10 +119,212 @@ pub struct VineFruit {
     pub max_fruit: u32,
 }
 
+/// Most canopy variants and storeys one tree row declares.
+pub const MAX_CANOPIES: usize = 4;
+pub const MAX_STOREYS: usize = 4;
+
+/// A tree row's canopy Materials: one, or up to [`MAX_CANOPIES`] alike but for colour, of which
+/// each tree grows one. Held `Copy` because a Biome freezes it inline.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Canopies {
+    materials: [MaterialId; MAX_CANOPIES],
+    len: u8,
+}
+
+impl Canopies {
+    pub const fn one(material: MaterialId) -> Self {
+        Self {
+            materials: [material; MAX_CANOPIES],
+            len: 1,
+        }
+    }
+
+    /// `None` unless `list` holds 1 to [`MAX_CANOPIES`] Materials.
+    pub fn new(list: &[MaterialId]) -> Option<Self> {
+        let first = *list.first()?;
+        if list.len() > MAX_CANOPIES {
+            return None;
+        }
+        let mut materials = [first; MAX_CANOPIES];
+        materials[..list.len()].copy_from_slice(list);
+        Some(Self {
+            materials,
+            len: list.len() as u8,
+        })
+    }
+
+    pub fn first(&self) -> MaterialId {
+        self.materials[0]
+    }
+
+    pub fn as_slice(&self) -> &[MaterialId] {
+        &self.materials[..usize::from(self.len)]
+    }
+
+    pub fn contains(&self, material: MaterialId) -> bool {
+        self.as_slice().contains(&material)
+    }
+
+    /// The variant a draw of `roll` grows.
+    pub fn pick(&self, roll: u64) -> MaterialId {
+        self.materials[(roll % u64::from(self.len)) as usize]
+    }
+}
+
+/// One height band of a tree row: a share of its trees, their trunk height and their crown.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Storey {
+    /// Relative to the row's other storeys; above 0.
+    pub weight: f32,
+    pub trunk_height_m: (f32, f32),
+    pub canopy_radius_m: f32,
+}
+
+/// A tree row's storeys; none is the row's own trunk height and crown, one band.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Storeys {
+    list: [Storey; MAX_STOREYS],
+    len: u8,
+}
+
+impl Storeys {
+    pub const NONE: Self = Self {
+        list: [Storey {
+            weight: 0.0,
+            trunk_height_m: (0.0, 0.0),
+            canopy_radius_m: 0.0,
+        }; MAX_STOREYS],
+        len: 0,
+    };
+
+    /// `None` when `list` holds more than [`MAX_STOREYS`].
+    pub fn new(list: &[Storey]) -> Option<Self> {
+        if list.len() > MAX_STOREYS {
+            return None;
+        }
+        let mut storeys = Self::NONE;
+        storeys.list[..list.len()].copy_from_slice(list);
+        storeys.len = list.len() as u8;
+        Some(storeys)
+    }
+
+    pub fn as_slice(&self) -> &[Storey] {
+        &self.list[..usize::from(self.len)]
+    }
+
+    /// Every band a tree of the row can grow: each storey, or `own` when there are none.
+    pub fn bands(&self, own: Band) -> impl Iterator<Item = Band> + '_ {
+        let storeys = self.as_slice();
+        storeys
+            .is_empty()
+            .then_some(own)
+            .into_iter()
+            .chain(storeys.iter().map(move |s| s.band(own)))
+    }
+
+    /// The band a draw of `roll` grows: each storey wins a share of draws in proportion to its
+    /// weight.
+    pub fn pick(&self, own: Band, roll: u64) -> Band {
+        let storeys = self.as_slice();
+        let total: f64 = storeys.iter().map(|s| f64::from(s.weight)).sum();
+        let mut at = (roll >> 11) as f64 / (1u64 << 53) as f64 * total;
+        for s in storeys {
+            at -= f64::from(s.weight);
+            if at < 0.0 {
+                return s.band(own);
+            }
+        }
+        storeys.last().map_or(own, |s| s.band(own))
+    }
+
+    /// The crown radius of the row's trees on average, by weight: `own`'s when there are none.
+    pub fn mean_canopy_radius_m(&self, own: Band) -> f32 {
+        let storeys = self.as_slice();
+        if storeys.is_empty() {
+            return own.canopy_radius_m;
+        }
+        let total: f32 = storeys.iter().map(|s| s.weight).sum();
+        storeys
+            .iter()
+            .map(|s| s.weight * s.canopy_radius_m)
+            .sum::<f32>()
+            / total
+    }
+
+    /// Why these storeys are not ones the generator can draw for a row whose own band is `own`.
+    pub fn check(&self, own: Band) -> Result<(), &'static str> {
+        for s in self.as_slice() {
+            if !(s.weight.is_finite() && s.weight > 0.0) {
+                return Err("a storey's weight must be above 0");
+            }
+            let (low, high) = s.trunk_height_m;
+            if !(low.is_finite() && high.is_finite() && 0.0 < low && low <= high)
+                || high > MAX_PLANT_HEIGHT_M
+            {
+                return Err("a storey's trunk-height-m is a range above 0 and at most 32");
+            }
+            if !(s.canopy_radius_m.is_finite()
+                && s.canopy_radius_m > 0.0
+                && s.canopy_radius_m <= MAX_CANOPY_RADIUS_M)
+            {
+                return Err("a storey's canopy-radius-m must be above 0 and at most 8");
+            }
+            let band = s.band(own);
+            if let Some(b) = band.branching {
+                b.check(band.canopy_radius_m, low)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Storey {
+    /// This storey's band: its height and crown, with the row's branching scaled by its crown
+    /// over the row's, so a lower storey is the same tree in small and not a short trunk under
+    /// full-length limbs.
+    pub fn band(&self, own: Band) -> Band {
+        let scale = self.canopy_radius_m / own.canopy_radius_m;
+        Band {
+            trunk_height_m: self.trunk_height_m,
+            canopy_radius_m: self.canopy_radius_m,
+            branching: own.branching.map(|b| Branching {
+                reach_m: b.reach_m * scale,
+                lean_m: b.lean_m * scale,
+                lobe_radius_m: b.lobe_radius_m * scale,
+                ..b
+            }),
+        }
+    }
+}
+
+/// The shape one tree of a row grows: its storey's, or the row's own.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Band {
+    pub trunk_height_m: (f32, f32),
+    pub canopy_radius_m: f32,
+    pub branching: Option<Branching>,
+}
+
+impl Band {
+    /// How far a tree of this band reaches from its column, in metres.
+    pub fn reach_m(&self) -> f32 {
+        self.branching
+            .map_or(self.canopy_radius_m, |b| b.extent_m(self.canopy_radius_m))
+    }
+
+    /// How far it rises above its trunk's top, in metres.
+    pub fn crown_rise_m(&self) -> f32 {
+        self.canopy_radius_m
+            .max(self.branching.map_or(0.0, |b| b.lobe_radius_m))
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct Tree {
     pub trunk: MaterialId,
-    pub canopy: MaterialId,
+    pub canopy: Canopies,
+    pub storeys: Storeys,
+    /// The row's own band, and what a storey's crown scales the branching against.
     pub trunk_height_m: (f32, f32),
     pub canopy_radius_m: f32,
     pub mean_seconds: f32,
@@ -226,16 +428,32 @@ impl Branching {
 pub const FORK_SPREAD: f32 = 0.5;
 
 impl Tree {
-    /// How far the tree reaches from its column, in metres; at most [`MAX_CANOPY_RADIUS_M`].
-    pub fn reach_m(&self) -> f32 {
-        self.branching
-            .map_or(self.canopy_radius_m, |b| b.extent_m(self.canopy_radius_m))
+    /// The row's own trunk height, crown and branching: its one band when it has no storeys.
+    pub fn own_band(&self) -> Band {
+        Band {
+            trunk_height_m: self.trunk_height_m,
+            canopy_radius_m: self.canopy_radius_m,
+            branching: self.branching,
+        }
     }
 
-    /// How far the tree rises above its trunk's top, in metres.
+    /// How far its widest band reaches from the column, in metres; at most
+    /// [`MAX_CANOPY_RADIUS_M`].
+    pub fn reach_m(&self) -> f32 {
+        let bands = self.storeys.bands(self.own_band());
+        bands.map(|b| b.reach_m()).fold(0.0, f32::max)
+    }
+
+    /// How far its highest-crowned band rises above its trunk's top, in metres.
     pub fn crown_rise_m(&self) -> f32 {
-        self.canopy_radius_m
-            .max(self.branching.map_or(0.0, |b| b.lobe_radius_m))
+        let bands = self.storeys.bands(self.own_band());
+        bands.map(|b| b.crown_rise_m()).fold(0.0, f32::max)
+    }
+
+    /// The tallest trunk any band grows, in metres.
+    pub fn tallest_trunk_m(&self) -> f32 {
+        let bands = self.storeys.bands(self.own_band());
+        bands.map(|b| b.trunk_height_m.1).fold(0.0, f32::max)
     }
 }
 
@@ -583,7 +801,7 @@ impl PlantTable {
     pub fn canopy_of_fruit(&self, material: MaterialId) -> Option<MaterialId> {
         let PlantRef { plant, role } = self.of(material)?;
         match (&self.plants.get(plant)?.kind, role) {
-            (Kind::Tree(tree), Role::Fruit(_)) => Some(tree.canopy),
+            (Kind::Tree(tree), Role::Fruit(_)) => Some(tree.canopy.first()),
             _ => None,
         }
     }
@@ -643,7 +861,8 @@ impl PlantTable {
                 .bits();
         }
         Ok(crate::SurfaceVines {
-            material: plant.first,
+            material: std::num::NonZeroU16::new(plant.first)
+                .ok_or_else(|| format!("vines name `{}`, which grows Air", vines.plant))?,
             shape,
             orientations,
             density: vines.density,
@@ -832,7 +1051,7 @@ impl PlantTable {
             Kind::Tree(tree) => {
                 claimed.push((plant.first, Role::Sapling));
                 claimed.push((tree.trunk, Role::Trunk));
-                claimed.push((tree.canopy, Role::Canopy));
+                claimed.extend(tree.canopy.as_slice().iter().map(|&m| (m, Role::Canopy)));
                 if let Some(fruit) = &tree.fruit {
                     claimed.extend(
                         fruit
@@ -1006,6 +1225,9 @@ fn check(plant: &Plant) -> Result<(), PlantError> {
                 b.check(tree.canopy_radius_m, low)
                     .map_err(PlantError::Size)?;
             }
+            tree.storeys
+                .check(tree.own_band())
+                .map_err(PlantError::Size)?;
             if tree
                 .crowding_m
                 .is_some_and(|m| !(m.is_finite() && m > 0.0 && m <= MAX_CROWDING_M))

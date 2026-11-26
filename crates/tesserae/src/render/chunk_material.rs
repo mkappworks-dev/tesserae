@@ -33,6 +33,35 @@ pub const FACE_WORD_VECS: usize = (PALETTE_LEN + 1).div_ceil(4);
 /// quad is drawn in, so no Material's appearance row can recolour flames.
 pub const FLAME_SLOT: usize = PALETTE_LEN;
 
+/// The share of the sky's ambient light a block face gets by which way it faces, a top's being 1.
+/// Bevy's ambient is the same from every direction, which lit a shaded step's side as brightly as a
+/// tree's shadow on a top, so terraces read flat. The sun and cast shadows are left as they are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SkyView {
+    /// A wall.
+    pub side: f32,
+    /// An underside.
+    pub bottom: f32,
+}
+
+pub const SKY_VIEW: SkyView = SkyView {
+    side: 0.45,
+    bottom: 0.4,
+};
+
+const _: () =
+    assert!(0.0 < SKY_VIEW.bottom && SKY_VIEW.bottom <= SKY_VIEW.side && SKY_VIEW.side < 1.0);
+
+/// [`SKY_VIEW`] as the chunk shader's `constants::CHUNK_SKY_VIEW_*`: a shader def holds no float, so
+/// each is its bit pattern, which the shader bitcasts back.
+fn sky_view_shader_defs() -> Vec<ShaderDefVal> {
+    let bits = |name: &'static str, value: f32| ShaderDefVal::UInt(name.into(), value.to_bits());
+    vec![
+        bits("CHUNK_SKY_VIEW_SIDE", SKY_VIEW.side),
+        bits("CHUNK_SKY_VIEW_BOTTOM", SKY_VIEW.bottom),
+    ]
+}
+
 /// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
 #[derive(Reflect, ShaderType, Debug, Clone, Copy, Default)]
 pub struct LodParams {
@@ -147,7 +176,7 @@ impl MaterialExtension for ChunkMaterialExtension {
         read_no_vertex_attribute(&mut descriptor.vertex);
 
         // Reach the shader as `constants::*`, so neither the uniform's length,
-        // the light scale nor the quad layout can drift from the Rust side.
+        // the light scale, the face words nor the quad layout can drift from the Rust side.
         let mut defs = vec![
             ShaderDefVal::UInt("CHUNK_PALETTE_LEN".into(), PALETTE_LEN as u32),
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
@@ -157,25 +186,42 @@ impl MaterialExtension for ChunkMaterialExtension {
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,
             ),
-            ShaderDefVal::UInt(
-                "CHUNK_FACE_LAYER_BITS".into(),
-                super::texture_atlas::FACE_LAYER_BITS,
-            ),
         ];
+        defs.extend(super::texture_atlas::face_word_shader_defs());
         defs.extend(quad_layout_defs());
+        defs.extend(super::fog::haze_shader_defs());
+        defs.extend(sky_view_shader_defs());
         #[cfg(feature = "profiling")]
         let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
         #[cfg(not(feature = "profiling"))]
         let switched = false;
+        if casts_the_suns_shadow(descriptor) {
+            defs.push(ShaderDefVal::Bool("CHUNK_SUN_SHADOW".into(), true));
+        }
         if !key.bind_group_data.coverage_test || switched {
             defs.push(ShaderDefVal::Bool("CHUNK_NO_COVERAGE_DISCARD".into(), true));
         }
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
             fragment.shader_defs.extend_from_slice(&defs);
+            // AO's prepass draws level 0 only, and water is not in it, so its normal would be
+            // empty or the floor's; a Voxel face's own normal is exact.
+            fragment
+                .shader_defs
+                .retain(|def| def != &ShaderDefVal::from("LOAD_PREPASS_NORMALS"));
         }
         Ok(())
     }
+}
+
+/// Bevy draws a directional light's cascades with unclipped depth, natively or
+/// emulated; no other pass does.
+fn casts_the_suns_shadow(descriptor: &RenderPipelineDescriptor) -> bool {
+    descriptor.primitive.unclipped_depth
+        || descriptor
+            .vertex
+            .shader_defs
+            .contains(&ShaderDefVal::from("UNCLIPPED_DEPTH_ORTHO_EMULATION"))
 }
 
 /// What `chunk_vertex.wesl` decodes a layer's words by.
@@ -245,6 +291,21 @@ fn embedded(file: &str) -> ShaderRef {
 mod tests {
     use super::*;
     use bevy::render::render_resource::VertexFormat;
+
+    #[test]
+    fn the_shader_reads_the_sky_view_it_is_given() {
+        let defs = sky_view_shader_defs();
+        let read = |name: &str| {
+            defs.iter()
+                .find_map(|def| match def {
+                    ShaderDefVal::UInt(key, bits) if key == name => Some(f32::from_bits(*bits)),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{name} missing"))
+        };
+        assert_eq!(read("CHUNK_SKY_VIEW_SIDE"), SKY_VIEW.side);
+        assert_eq!(read("CHUNK_SKY_VIEW_BOTTOM"), SKY_VIEW.bottom);
+    }
 
     #[test]
     fn the_pipeline_keeps_the_vertex_buffer_bevy_reads_but_no_attribute() {

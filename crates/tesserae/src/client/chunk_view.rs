@@ -824,6 +824,7 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
     commands.spawn((
         DirectionalLight {
             shadow_maps_enabled: shadows_enabled(),
+            illuminance: SUN_LUX,
             ..default()
         },
         bevy::light::CascadeShadowConfig {
@@ -834,12 +835,21 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
         RenderLayers::layer(NEAR_LAYER),
     ));
 
-    // The sky dome's radiance, no longer a flat fill: the chunk shader gates it
-    // per face by the flood-fill's sky channel, so a face that cannot see the
-    // sky does not receive it. The sun's own occlusion is the shadow map plus
+    // The sky dome's radiance: the chunk shader gates it per face by the
+    // flood-fill's sky channel, so a face that cannot see the sky does not
+    // receive it. The sun's own occlusion is the shadow map plus
     // the same sky channel; see `render/chunk_material.wesl`.
-    ambient.brightness = 900.0;
+    ambient.brightness = SKY_AMBIENT;
 }
+
+/// Under Bevy's 10 000 lux: a sunlit sand or snow top lands in the tonemapper's
+/// flat shoulder, so only less light brings it under about 85% value on screen.
+const SUN_LUX: f32 = 3600.0;
+
+/// Beside [`SUN_LUX`], enough that a floor lit by the sky alone, such as under a
+/// canopy, reads instead of going black. `UNLIT_AMBIENT` in
+/// `chunk_material.wesl` is a share of it, which keeps a cave as dim.
+const SKY_AMBIENT: f32 = 1500.0;
 
 /// How far the view tips down. Framing is a Client decision; where the Eye
 /// starts is the Server's, so the Client's camera starts where the Player does.
@@ -1098,6 +1108,37 @@ mod tests {
         assert_eq!(cascades.bounds, SUN_CASCADE_BOUNDS);
     }
 
+    /// Bevy's diffuse terms at its default Exposure, per unit albedo: the sun's
+    /// Lambert on a top face, and the ambient's `EnvBRDFApprox` at roughness 1.
+    fn top_face_light(app: &mut App) -> (f32, f32) {
+        let exposure = bevy::camera::Exposure::default().exposure();
+        let (sun, place) = app
+            .world_mut()
+            .query::<(&DirectionalLight, &Transform)>()
+            .single(app.world())
+            .unwrap();
+        let n_dot_l = place.back().dot(Vec3::Y);
+        let sun = sun.illuminance * exposure * n_dot_l / std::f32::consts::PI;
+        let sky = app.world().resource::<GlobalAmbientLight>().brightness * exposure * 0.45;
+        (sun, sky)
+    }
+
+    #[test]
+    fn sun_and_sky_keep_a_sunlit_snow_top_under_the_tonemappers_shoulder() {
+        let mut app = App::new();
+        app.init_resource::<GlobalAmbientLight>();
+        app.world_mut().run_system_once(spawn_light).unwrap();
+        let (sun, sky) = top_face_light(&mut app);
+        // Snow is about 90% value, 0.79 in linear albedo; measured on `cold-ground`,
+        // 1.3 before the tonemapper is about 85% value after it.
+        assert!(0.79 * (sun + sky) < 1.35, "snow top {}", 0.79 * (sun + sky));
+        assert!(sun > sky, "the sun still casts a shadow you can see");
+        assert!(
+            sky > 0.5 * sun,
+            "shade under a canopy is not black: {sky} of {sun}"
+        );
+    }
+
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
     /// assets and messages, and `DefaultPlugins` wants a window.
     fn app() -> App {
@@ -1137,13 +1178,14 @@ mod tests {
             edit::Holding,
             material_textures::{self, Textures},
         };
-        use crate::content::MaterialTextures;
+        use crate::content::{MaterialTexture, MaterialTextures};
+        use tesserae_mods::TileVariation::Fixed;
         let mut app = app();
         app.init_asset::<Image>()
             .add_plugins(material_textures::plugin);
         app.world_mut().write_message(MaterialTextures(vec![
-            (23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
-            (63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
+            MaterialTexture::new(23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
+            MaterialTexture::new(63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES], Fixed),
         ]));
         app.update();
         let held = Holding::solid(23, 0);
@@ -1159,9 +1201,9 @@ mod tests {
             let extension = &materials.get(handle).unwrap().extension;
             assert_eq!(extension.texture.as_ref(), Some(&faces));
             // Slot order: each slot's three identical faces share one layer.
-            assert_eq!(word(extension, 23), face_word([0; 3]));
-            assert_eq!(word(extension, 63), face_word([1; 3]));
-            assert_eq!(word(extension, FLAME_SLOT), face_word([2; 3]));
+            assert_eq!(word(extension, 23), face_word([0; 3], Fixed));
+            assert_eq!(word(extension, 63), face_word([1; 3], Fixed));
+            assert_eq!(word(extension, FLAME_SLOT), face_word([2; 3], Fixed));
             assert_eq!(word(extension, 24), 0);
         }
         let item = app
@@ -1181,7 +1223,7 @@ mod tests {
         for handle in terrain.all() {
             let extension = &materials.get(handle).unwrap().extension;
             assert_eq!(word(extension, 23), 0);
-            assert_eq!(word(extension, FLAME_SLOT), face_word([0; 3]));
+            assert_eq!(word(extension, FLAME_SLOT), face_word([0; 3], Fixed));
         }
     }
 

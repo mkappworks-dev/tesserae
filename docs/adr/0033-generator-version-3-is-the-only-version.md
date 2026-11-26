@@ -16,6 +16,12 @@ which kept versions 1 and 2's terrain for their Worlds.
 stamp keeps its meaning and the next revision is 4; after the first release a
 fix to a Generator version is a new version, as ADR-0022 says.
 
+**Until the first release, version 3 changes in place.** Amended 2026-11-24,
+from the colour, art and light spec. Its tree storeys, canopy variants and
+spacing change what version 3 generates; with nothing released there is still no
+World to keep, so the version stays 3 and its recorded digests are recorded
+again. The first release ends this.
+
 **Older Worlds refuse to open** with a message naming their version, through the
 save's existing refusal of an unsupported generator version. Opening them under
 version 3 was rejected: every unsaved Chunk would regenerate as different

@@ -179,7 +179,7 @@ impl<'a> PlantCeiling<'a> {
         };
         let reach_m = plants()
             .filter_map(|p| match p.kind {
-                SurfacePlantKind::Tree(t) => Some(t.reach_m()),
+                SurfacePlantKind::Tree(t) => Some(t.reach_m(params.biomes.variety())),
                 SurfacePlantKind::Vine(v) => Some(v.reach_m),
                 _ => None,
             })
@@ -189,7 +189,9 @@ impl<'a> PlantCeiling<'a> {
             reach_m <= CHUNK_SIZE as f32 * generator.voxel_size(),
             "a crown reaches {reach_m} m, past the next Chunk column"
         );
-        let rise_m = plants().map(|p| p.rise_m()).fold(0.0, f32::max);
+        let rise_m = plants()
+            .map(|p| p.rise_m(params.biomes.variety()))
+            .fold(0.0, f32::max);
         Self {
             generator,
             lift_m: params.landforms.overhang_m + rise_m + slack_m,
@@ -251,7 +253,7 @@ fn surface_census(
                 || name.starts_with("crops:")
                 || name.starts_with("aquatic:")
                 || is_standalone_wood(name);
-            tracked && !name.ends_with("_leaves")
+            tracked && !name.contains("_leaves")
         })
         .map(|(id, name)| (id as u16, name.to_owned()))
         .collect();
@@ -411,7 +413,7 @@ fn beach_grown_by_accident(mut loaded: super::LoadedMods) -> super::LoadedMods {
     let temperate = super::biome(world, "terra:temperate").surface_features;
     let beach = biomes.iter_mut().find(|b| b.name.as_str() == "terra:beach");
     beach.unwrap().surface_features = temperate;
-    world.biomes = tesserae_core::BiomeTable::new(&biomes)
+    world.biomes = tesserae_core::BiomeTable::new_with_variety(&biomes, world.biomes.variety())
         .and_then(|t| t.with_selectors(world.biomes.selectors()))
         .and_then(|t| t.with_strata(world.biomes.strata()))
         .unwrap();
@@ -663,7 +665,9 @@ fn mean_spacing_m(per_hectare: f64) -> f64 {
 }
 
 /// The approved mockup's density classes, by Terra's Biome name: a jungle or swamp packs trees
-/// about 4 m apart, a temperate or cold forest 6 to 10 m, a savanna or desert 12 m or more.
+/// 4 to 6 m apart (the colour spec widened them from 4 m so a forest reads as separate trees;
+/// the swamp's clumping measures its 5 m at 6.4), a temperate or cold forest 6 to 10 m, a savanna
+/// or desert 12 m or more.
 const DENSE: [&str; 2] = ["jungle", "swamp"];
 const MODERATE: [&str; 2] = ["temperate", "cold"];
 const SPARSE: [&str; 4] = [
@@ -682,7 +686,7 @@ fn each_terra_biome_scatters_its_trees_at_its_density_class() {
         let full = format!("{}:{name}", game.name);
         if DENSE.contains(&name.as_str()) {
             assert!(
-                (2.5..=6.0).contains(&spacing),
+                (2.5..=6.5).contains(&spacing),
                 "{full}: dense, {spacing:.1} m"
             );
         } else if MODERATE.contains(&name.as_str()) {
@@ -1119,9 +1123,11 @@ fn ground_cover_grows_in_patches_at_each_terra_biomes_class_and_flowers_stay_rar
 /// Headroom a Player walks under: nothing of a tree but its trunk hangs lower.
 const TREE_CLEAR_M: f32 = 4.0;
 
+/// An understory, the lowest storey of a row with more than one, stands below the canopy by
+/// design, so its crown is exempt.
 #[test]
-fn under_every_tree_nothing_but_its_trunk_is_lower_than_four_metres() {
-    use tesserae_core::plant::tree::{tree_voxels, vine_voxels};
+fn under_every_tree_above_the_understory_nothing_but_its_trunk_is_lower_than_four_metres() {
+    use tesserae_core::plant::tree::{band_of, tree_voxels, vine_voxels};
     for size in [1.0, 0.5, 0.25] {
         let (_install, loaded) = loaded("terra", size);
         let plants = &loaded.tables.plants;
@@ -1134,15 +1140,23 @@ fn under_every_tree_nothing_but_its_trunk_is_lower_than_four_metres() {
                 .vines
                 .as_ref()
                 .map(|v| plants.vines(&loaded.tables.shapes, v).unwrap());
+            let storeys = row.storeys.as_slice();
+            let understory = (storeys.len() > 1).then(|| {
+                storeys
+                    .iter()
+                    .map(|s| s.trunk_height_m.1)
+                    .fold(f32::MAX, f32::min)
+            });
             let mut lowest_m = f32::MAX;
             for i in 0..200 {
                 let base = [i % 20 * 37, 0, i / 20 * 41];
                 let grown = tree_voxels(row, 7, base, size);
+                let band = band_of(row, 7, base, size);
                 // The trunk stands in its own column, leaning by at most `lean-m` as it rises.
-                let lean = row.branching.as_ref().map_or(0.0, |b| b.lean_m);
+                let lean = band.branching.as_ref().map_or(0.0, |b| b.lean_m);
                 let trunk = |at: [i32; 3]| {
                     let off = ((at[0] - base[0]) as f32).hypot((at[2] - base[2]) as f32) * size;
-                    off <= lean * (at[1] as f32 * size) / row.trunk_height_m.0 + size
+                    off <= lean * (at[1] as f32 * size) / band.trunk_height_m.0 + size
                 };
                 let hung: Vec<[i32; 3]> = vines
                     .as_ref()
@@ -1161,7 +1175,9 @@ fn under_every_tree_nothing_but_its_trunk_is_lower_than_four_metres() {
                     .chain(hung)
                     .map(|at| at[1] as f32 * size)
                     .fold(f32::MAX, f32::min);
-                lowest_m = lowest_m.min(low_m);
+                if understory != Some(band.trunk_height_m.1) {
+                    lowest_m = lowest_m.min(low_m);
+                }
                 let top_m = grown.iter().map(|v| v.at[1] + 1).max().unwrap() as f32 * size;
                 assert!(
                     top_m <= tesserae_core::plant::MAX_PLANT_HEIGHT_M,

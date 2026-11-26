@@ -25,7 +25,7 @@ use tesserae_mods::{
 
 use crate::content::{
     CatalogueMaterial, CatalogueShape, CatalogueTemplate, CatalogueTool, CharacterModel,
-    ContentCatalogue, MaterialPalette, MaterialTextures,
+    ContentCatalogue, MaterialPalette, MaterialTexture, MaterialTextures,
 };
 use crate::world::WorldSettings;
 
@@ -123,7 +123,7 @@ pub struct LoadedMods {
     pub world_biome_loot: Option<Vec<Option<LootTable>>>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
-    pub textures: Vec<(MaterialId, Vec<u8>)>,
+    pub textures: Vec<MaterialTexture>,
     pub remove_times: Vec<(MaterialId, std::time::Duration)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
@@ -686,7 +686,11 @@ pub(crate) async fn declare_all(
                 .id_of(Kind::Material, &format!("{id}:{}", row.material))
             {
                 if let Some(pixels) = row.texture {
-                    loaded.textures.push((index as MaterialId, pixels));
+                    loaded.textures.push(MaterialTexture::new(
+                        index as MaterialId,
+                        pixels,
+                        row.variation,
+                    ));
                 }
                 let c = row.color;
                 loaded
@@ -2371,12 +2375,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         art_game(&s);
         let loaded = s.load(TrustMode::All).unwrap();
         let rock = loaded.registry.id_of(Kind::Material, "plain:rock").unwrap();
-        let [(id, atlas)] = &loaded.textures[..] else {
+        let [texture] = &loaded.textures[..] else {
             panic!("one texture expected");
         };
-        assert_eq!(*id as u32, rock as u32);
-        assert_eq!(atlas.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
-        assert_eq!(atlas[..8], [0, 1, 0, 0, 1, 1, 0, 255]);
+        assert_eq!(texture.material as u32, rock as u32);
+        assert_eq!(texture.pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
+        assert_eq!(texture.pixels[..8], [0, 1, 0, 0, 1, 1, 0, 255]);
         let skin = &loaded.character.as_ref().unwrap().skin;
         assert_eq!(skin.len(), tesserae_mods::SKIN_BYTES);
         assert_eq!(skin[..8], [0, 2, 0, 0, 1, 2, 0, 255]);
@@ -3205,11 +3209,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .iter()
             .filter(|m| m.name.starts_with("terra:"))
         {
-            let (_, pixels) = textures
+            let pixels = &textures
                 .0
                 .iter()
-                .find(|(id, _)| *id == material.id)
-                .unwrap_or_else(|| panic!("{} needs a preview", material.name));
+                .find(|t| t.material == material.id)
+                .unwrap_or_else(|| panic!("{} needs a preview", material.name))
+                .pixels;
             assert_eq!(pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
@@ -3221,11 +3226,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
             }
             assert_eq!(
-                textures
-                    .0
-                    .iter()
-                    .filter(|(_, other)| other == pixels)
-                    .count(),
+                textures.0.iter().filter(|t| &t.pixels == pixels).count(),
                 // An open Door or Gate is the same panel turned.
                 if material.name.starts_with("terra:door")
                     || material.name.starts_with("terra:gate")
@@ -3237,6 +3238,143 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 "{} has distinct artwork",
                 material.name
             );
+        }
+    }
+
+    /// The map and untextured draws show the appearance colour, so it must be what the textured
+    /// surface averages to from afar: the linear mean of a block's drawn texels. A sprite's is its
+    /// edge colour, the linear mean of its drawn texels with a clear one beside them (left, right,
+    /// above or below on the same face), so a cutout's filtered rim shows no fringe.
+    #[test]
+    fn terra_appearance_colours_are_a_blocks_tile_mean_and_a_sprites_edge_colour() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let linear = |c: u8| {
+            let c = c as f64 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let srgb = |l: f64| {
+            255.0
+                * if l <= 0.003_130_8 {
+                    l * 12.92
+                } else {
+                    1.055 * l.powf(1.0 / 2.4) - 0.055
+                }
+        };
+        let sprites = sprite_materials(&loaded.tables);
+        let (mut blocks, mut drawn_sprites) = (0, 0);
+        for (id, name) in loaded.registry.names(Kind::Material) {
+            let sprite = sprites.contains(&(id as MaterialId));
+            // The other Mods' blocks keep the colours they were declared with.
+            let measured = ["terra:", "flora:", "strata:", "crops:"]
+                .iter()
+                .any(|m| name.starts_with(m));
+            if !sprite && !measured {
+                continue;
+            }
+            let Some(texture) = loaded.textures.iter().find(|t| t.material as usize == id) else {
+                continue;
+            };
+            let (_, colour) = loaded
+                .appearance
+                .iter()
+                .find(|(m, _)| *m as usize == id)
+                .unwrap();
+            let texels = texture.pixels.as_chunks::<4>().0;
+            let clear = |i: usize| texels[i][3] == 0;
+            let edge = |i: usize| {
+                let (x, y) = (i % 16, i / 48);
+                (x > 0 && clear(i - 1))
+                    || (x < 15 && clear(i + 1))
+                    || (y > 0 && clear(i - 48))
+                    || (y < 15 && clear(i + 48))
+            };
+            // Grass and turf are seen from above.
+            let faces = if matches!(name, "terra:grass" | "strata:turf") {
+                0..1
+            } else {
+                0..3
+            };
+            let measure: Vec<&[u8; 4]> = (0..texels.len())
+                .filter(|&i| faces.contains(&(i / 16 % 3)) && !clear(i) && (!sprite || edge(i)))
+                .map(|i| &texels[i])
+                .collect();
+            for c in 0..3 {
+                let mean = measure.iter().map(|p| linear(p[c])).sum::<f64>() / measure.len() as f64;
+                assert!(
+                    (srgb(mean) - colour[c] as f64).abs() <= 1.0,
+                    "{name} channel {c}: appearance {} against {} {:.1}",
+                    colour[c],
+                    if sprite {
+                        "an edge colour of"
+                    } else {
+                        "a mean of"
+                    },
+                    srgb(mean)
+                );
+            }
+            if sprite {
+                drawn_sprites += 1;
+            } else {
+                blocks += 1;
+            }
+        }
+        assert!(blocks >= 100, "only {blocks} blocks checked");
+        assert!(drawn_sprites >= 40, "only {drawn_sprites} sprites checked");
+    }
+
+    /// The Materials a Plant places on a flat Shape, a cross or a plane: its sprites.
+    fn sprite_materials(tables: &Tables) -> HashSet<MaterialId> {
+        use tesserae_core::Voxel;
+        use tesserae_core::plant::Kind as PlantKind;
+        let flat = |shape: Option<ShapeId>| {
+            shape.is_some_and(|s| tables.shapes.form_of(Voxel::new(1, s, 0)).is_flat())
+        };
+        let mut sprites = HashSet::new();
+        for plant in tables.plants.plants() {
+            match &plant.kind {
+                PlantKind::Crop { stages, .. } => sprites.extend(
+                    stages
+                        .iter()
+                        .filter(|s| flat(s.shape.or(plant.shape)))
+                        .map(|s| s.material),
+                ),
+                _ if flat(plant.shape) => {
+                    sprites.insert(plant.first);
+                }
+                _ => {}
+            }
+        }
+        sprites
+    }
+
+    #[test]
+    fn terra_and_the_mods_it_ships_vary_natural_tiles_and_keep_built_ones() {
+        use tesserae_mods::TileVariation::{Fixed, Turned, TurnedAndPatched};
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let variation = |name: &str| {
+            let id = loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+            let texture = loaded.textures.iter().find(|t| t.material == id).unwrap();
+            texture.variation
+        };
+        for (name, expected) in [
+            ("terra:leaves", TurnedAndPatched),
+            ("terra:grass", TurnedAndPatched),
+            ("terra:stone", Turned),
+            ("terra:dirt", Turned),
+            ("terra:sand", Turned),
+            ("terra:wood", Fixed),
+            ("terra:brick", Fixed),
+            ("flora:jungle_leaves", TurnedAndPatched),
+            ("flora:oak_log", Fixed),
+            ("strata:stone", Turned),
+            ("strata:sand", Turned),
+            ("strata:turf", Fixed),
+        ] {
+            assert_eq!(variation(name), expected, "{name}");
         }
     }
 

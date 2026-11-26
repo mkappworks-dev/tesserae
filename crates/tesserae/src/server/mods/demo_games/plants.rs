@@ -128,7 +128,11 @@ fn a_new_terra_world_grows_oaks_apples_and_wheat_within_a_short_walk() {
     let (_install, loaded) = loaded("terra", 0.5);
     let generator = new_world(&loaded, 7, 0.5);
     let groups = [
-        &["flora:oak_leaves"][..],
+        &[
+            "flora:oak_leaves",
+            "flora:oak_leaves_dark",
+            "flora:oak_leaves_light",
+        ][..],
         &["flora:apple_unripe", "flora:apple_ripe"],
         &[
             "crops:wheat_sprout",

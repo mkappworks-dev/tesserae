@@ -43,6 +43,8 @@ fn block() -> Template {
 
 fn oak() -> SurfaceTree {
     SurfaceTree {
+        storeys_index: 0,
+        canopies_index: 0,
         branching: None,
         crowding_m: None,
         trunk: TRUNK,
@@ -179,11 +181,12 @@ fn under(pair: &Pair, cells: &HashMap<[i32; 3], Voxel>, materials: &[MaterialId]
 fn row() -> Tree {
     let o = oak();
     Tree {
+        storeys: tesserae_core::plant::Storeys::NONE,
         vines: None,
         branching: None,
         crowding_m: None,
         trunk: o.trunk,
-        canopy: o.canopy,
+        canopy: tesserae_core::plant::Canopies::one(o.canopy),
         trunk_height_m: o.trunk_height_m,
         canopy_radius_m: o.canopy_radius_m,
         mean_seconds: 0.0,

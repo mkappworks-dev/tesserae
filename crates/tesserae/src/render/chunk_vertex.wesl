@@ -31,6 +31,10 @@ struct ChunkVertexOutput {
     @location(12) @interpolate(flat) level: u32,
     @if(UNCLIPPED_DEPTH_ORTHO_EMULATION)
     @location(13) unclipped_depth: f32,
+    // The quad's first Voxel, as `voxel_key` packs it.
+    @location(14) @interpolate(flat) voxel: u32,
+    // The share of the sky dome the quad faces, by `sky_view`.
+    @location(15) @interpolate(flat) sky_view: f32,
 }
 
 // The record's fields, as tesserae_core::mesh::layout lays them out.
@@ -51,9 +55,12 @@ struct Expanded {
     position: vec3<f32>,
     normal: vec3<f32>,
     uv: vec2<f32>,
+    // The Voxel behind the quad's first Voxel, in the layer's cells.
+    voxel: vec3<i32>,
     material: u32,
     light: u32,
     level: u32,
+    cross: bool,
 }
 
 fn span(hi: u32, k: u32) -> u32 {
@@ -77,6 +84,7 @@ fn expand(at: u32, vertex: u32) -> Expanded {
     var out: Expanded;
     out.position = vec3<f32>(0.0);
     out.normal = vec3<f32>(0.0);
+    out.cross = false;
     let kind = lo & KIND_MASK;
     if kind < constants::CHUNK_FACES {
         let positive = (kind & 1u) == 1u;
@@ -100,10 +108,14 @@ fn expand(at: u32, vertex: u32) -> Expanded {
         out.normal[d] = select(-1.0, 1.0, positive);
         // From the Voxel the quad starts in, so a tiling sampler repeats per Voxel.
         out.uv = vec2<f32>(f32(cu - u0 / SUB * SUB), f32(cv - v0 / SUB * SUB)) * UNIT;
+        out.voxel[d] = i32(floor(f32(plane) * UNIT - out.normal[d] * 0.5));
+        out.voxel[u] = i32(u0 / SUB);
+        out.voxel[v] = i32(v0 / SUB);
     } else {
         let c = lo >> constants::CHUNK_CELL_SHIFT;
         let bits: u32 = constants::CHUNK_CELL_BITS;
         let cell = vec3<u32>(c & CELL_MASK, (c >> bits) & CELL_MASK, (c >> (2u * bits)) & CELL_MASK);
+        out.voxel = vec3<i32>(cell);
         let reversed = ((lo >> constants::CHUNK_REVERSED_SHIFT) & 1u) == 1u;
         let i = select(corner, 3u - corner, reversed);
         let high_u = i == 1u || i == 2u;
@@ -115,6 +127,7 @@ fn expand(at: u32, vertex: u32) -> Expanded {
             let x = select(!high_u, high_u, rising);
             out.position = vec3<f32>(cell + vec3<u32>(u32(x), u32(high_v), u32(high_u)));
             out.normal.z = side;
+            out.cross = true;
         } else {
             let d = (lo >> constants::CHUNK_AXIS_SHIFT) & AXIS_MASK;
             let u = (d + 1u) % 3u;
@@ -134,6 +147,52 @@ fn expand(at: u32, vertex: u32) -> Expanded {
     return out;
 }
 
+// The LOD level of the layer this vertex belongs to.
+fn vertex_level(in: ChunkVertex) -> u32 {
+    return quads[mesh_functions::get_tag(in.instance_index) + constants::CHUNK_HEADER_LEVEL];
+}
+
+// Ten bits of a cell coordinate: the turns repeat every 1024 cells, out of sight.
+const KEY_CELL_BITS: u32 = 10u;
+const KEY_CELL_MASK: u32 = (1u << KEY_CELL_BITS) - 1u;
+const KEY_V_SHIFT: u32 = KEY_CELL_BITS;
+const KEY_DEPTH_SHIFT: u32 = 2u * KEY_CELL_BITS;
+const KEY_AXIS_SHIFT: u32 = 3u * KEY_CELL_BITS;
+// The cell along the normal and the normal's axis, which a step across the face keeps.
+const KEY_PLANE_MASK: u32 = ~((1u << KEY_DEPTH_SHIFT) - 1u);
+
+// A Voxel in world cells as one word: its cells along the face's u and v axes,
+// then along the normal, then the normal's axis. A merged quad keys its first
+// Voxel; `voxel_at` steps from there by the face's UV, which counts whole
+// Voxels, so no fragment needs its world position to find its Voxel.
+fn voxel_key(cell: vec3<i32>, normal: vec3<f32>) -> u32 {
+    let d = select(select(2u, 1u, abs(normal.y) > 0.5), 0u, abs(normal.x) > 0.5);
+    let c = bitcast<vec3<u32>>(cell) & vec3<u32>(KEY_CELL_MASK);
+    return c[(d + 1u) % 3u] | (c[(d + 2u) % 3u] << KEY_V_SHIFT) | (c[d] << KEY_DEPTH_SHIFT) | (d << KEY_AXIS_SHIFT);
+}
+
+fn voxel_at(key: u32, uv: vec2<f32>) -> u32 {
+    let step = vec2<u32>(floor(uv));
+    let u = (key + step.x) & KEY_CELL_MASK;
+    let v = ((key >> KEY_V_SHIFT) + step.y) & KEY_CELL_MASK;
+    return u | (v << KEY_V_SHIFT) | (key & KEY_PLANE_MASK);
+}
+
+// `render::chunk_material::SKY_VIEW`: a top face sees the whole sky, a wall about half of it and
+// the ground, an underside little. A cross is exempt: its normal is one of its two planes', not the
+// plant's, and a grass tuft or a flower read as lit whichever way it stands.
+fn sky_view(normal: vec3<f32>, cross: bool) -> f32 {
+    if cross {
+        return 1.0;
+    }
+    let side = bitcast<f32>(constants::CHUNK_SKY_VIEW_SIDE);
+    let bottom = bitcast<f32>(constants::CHUNK_SKY_VIEW_BOTTOM);
+    return select(mix(side, bottom, -normal.y), mix(side, 1.0, normal.y), normal.y >= 0.0);
+}
+
+// No area and nothing rasterizes: every corner at one point outside the clip volume.
+const NO_AREA: vec4<f32> = vec4<f32>(2.0, 2.0, 0.5, 1.0);
+
 fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     // The tag is where the layer's words start; the vertex, less the mesh's
     // own first vertex, is the index the placeholder drew it by.
@@ -141,9 +200,8 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     let vertex = in.vertex_index - mesh[in.instance_index].first_vertex_index;
     var out: ChunkVertexOutput;
     if vertex / constants::CHUNK_VERTICES_PER_QUAD >= quads[at + constants::CHUNK_HEADER_QUADS] {
-        // The bucket's padding: every corner at one point outside the clip
-        // volume, so its triangles have no area and nothing rasterizes.
-        out.clip_position = vec4<f32>(2.0, 2.0, 0.5, 1.0);
+        // The bucket's padding.
+        out.clip_position = NO_AREA;
         return out;
     }
     let quad = expand(at, vertex);
@@ -165,8 +223,12 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     out.clip_position.z = min(out.clip_position.z, 1.0);
 }
     out.instance_index = in.instance_index;
+    // The mesh's scale is its level's Voxel in metres, and a Chunk starts on a whole cell.
+    let origin = vec3<i32>(round(world_from_local[3].xyz / length(world_from_local[0].xyz)));
+    out.voxel = voxel_key(quad.voxel + origin, quad.normal);
     out.material = quad.material;
     out.light = quad.light;
     out.level = quad.level;
+    out.sky_view = sky_view(quad.normal, quad.cross);
     return out;
 }

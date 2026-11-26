@@ -23,18 +23,18 @@ trunk and canopy have no Item, so nobody can place them: felling drops the
 placed `log` and `leaves`, and a sapling Item plants the next tree. Sizes are in
 metres.
 
-| Plant          | Trunk m    | Canopy radius m | Notes                          |
-| -------------- | ---------- | --------------- | ------------------------------ |
-| `flora:oak`    | 4 to 6     | 2.5             |                                |
-| `flora:birch`  | 5 to 7.5   | 1.5             | Tall, thin, pale trunk         |
-| `flora:pine`   | 7 to 10    | 1.2             | Narrow; see below              |
-| `flora:palm`   | 6 to 9     | 1.8             | Coconuts; sand or soil         |
-| `flora:acacia` | 3.5 to 5.5 | 3.5             | Wide crown                     |
-| `flora:jungle` | 10 to 16   | 5               | Hangs `flora:vine` (0.12, 6 m) |
-| `flora:swamp`  | 3 to 4.5   | 3.5             | Hangs `flora:vine` (0.2, 4 m)  |
-| `flora:apple`  | 4 to 6     | 2.5             | Apples, a 3D box Shape         |
-| `flora:orange` | 3 to 4.5   | 2.2             | Oranges                        |
-| `flora:cherry` | 4 to 6     | 2.5             | Cherries                       |
+| Plant          | Trunk m    | Canopy radius m | Notes                       |
+| -------------- | ---------- | --------------- | --------------------------- |
+| `flora:oak`    | 8 to 14    | 2.5             |                             |
+| `flora:birch`  | 5 to 7.5   | 1.5             | Tall, thin, pale trunk      |
+| `flora:pine`   | 7 to 10    | 1.2             | Narrow; see below           |
+| `flora:palm`   | 6 to 9     | 1.8             | Coconuts; sand or soil      |
+| `flora:acacia` | 3.5 to 5.5 | 3.5             | Wide crown                  |
+| `flora:jungle` | 8 to 27    | 3 to 6          | Storeys; hangs `flora:vine` |
+| `flora:swamp`  | 6 to 15    | 2.5 to 3.5      | Storeys; hangs `flora:vine` |
+| `flora:apple`  | 4 to 6     | 2.5             | Apples, a 3D box Shape      |
+| `flora:orange` | 3 to 4.5   | 2.2             | Oranges                     |
+| `flora:cherry` | 4 to 6     | 2.5             | Cherries                    |
 
 A tree's fruit ripens through two Stages (green, then red, orange, dark red or
 brown), is picked with Use and regrows. The food Items are `apple`, `orange`,
@@ -46,6 +46,14 @@ cone), the palm leans under its crown, the acacia forks low into a flat crown of
 lobes, the jungle tree spreads wide limbs, and the apple, orange and cherry have
 low spreading limbs with fruit on the lobes. The crown keeps `canopy-radius-m`;
 buttresses and curved limbs wait for Structures.
+
+The jungle tree grows in three storeys (15% emergent at 25 to 27 m under a 6 m
+crown, 60% at 18 to 24 m under 4.5 m, 25% understory at 8 to 12 m under 3 m) and
+the swamp tree in two (70% at 12 to 15 m, 30% at 6 to 9 m under 2.5 m), so a
+forest has crowns above and below its canopy. The jungle, oak, swamp, apple,
+orange and cherry trees each grow one of three canopy variants, the leaves and a
+`_dark` and `_light` copy about 8% darker or lighter and 4 degrees apart in hue,
+so neighbouring crowns read as separate trees. Picked fruit leaves the first.
 
 `birch_wood`, `pine_wood`, `palm_wood`, `acacia_wood` and `jungle_wood` are
 placed look-alikes for builders, made from a `log` by hand.

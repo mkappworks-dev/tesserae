@@ -650,6 +650,8 @@ fn a_tree_inside_the_ground_a_field_would_take_skips_that_place_whole() {
         plant: Some(tesserae_core::SurfacePlant {
             shape: 0,
             kind: tesserae_core::SurfacePlantKind::Tree(tesserae_core::SurfaceTree {
+                storeys_index: 0,
+                canopies_index: 0,
                 branching: None,
                 crowding_m: None,
                 trunk: TRUNK,
@@ -815,6 +817,8 @@ fn no_canopy_cover_stands_on_a_field() {
         plant: Some(tesserae_core::SurfacePlant {
             shape: 0,
             kind: tesserae_core::SurfacePlantKind::Tree(tesserae_core::SurfaceTree {
+                storeys_index: 0,
+                canopies_index: 0,
                 branching: None,
                 crowding_m: Some(1.0),
                 trunk: TRUNK,

@@ -4,6 +4,7 @@
 mod accessibility;
 mod actions;
 mod aim;
+mod ambient_occlusion;
 pub(crate) mod anti_alias;
 mod avatar;
 mod blend_order;
@@ -103,6 +104,7 @@ pub fn plugin(app: &mut App) {
         profile::plugin,
         presentation::plugin,
         anti_alias::plugin,
+        ambient_occlusion::plugin,
         render_scale::plugin,
         settings::plugin,
         menu_ui::plugin,
