@@ -131,6 +131,8 @@ impl Rig {
         }
     }
     fn settled_save(&mut self) {
+        // drive drops a checkpoint asked for while a save is in flight, such as the open's.
+        self.until(|r| !r.app.world().resource::<SaveStatus>().saving);
         self.app.world_mut().resource_mut::<ChunkStore>().checkpoint = true;
         self.until(|r| {
             !r.app.world().resource::<ChunkStore>().checkpoint
