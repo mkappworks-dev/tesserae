@@ -114,6 +114,11 @@ Weather (step 24) later adds itself to the **Sky state** as one more layer
     inputs, so that Weather adds an input instead of rewiring the sky.
 38. As a future multiplayer Client, I want the Time of day to arrive as a time
     and a rate, so that every Player sees the same sky with few messages.
+39. As a Player in Creative, I want to set the Time of day from the Menu, to
+    sunrise, noon, sunset, midnight or an hour I type, so that I can build and
+    look at my World in the light I want.
+40. As a Player in Survival, I want no way to set the time, so that the night
+    stays something to get through.
 
 ## Implementation Decisions
 
@@ -151,8 +156,24 @@ Weather (step 24) later adds itself to the **Sky state** as one more layer
 - Under `dev` and `profiling` builds the Server reads `TESSERAE_TIME_OF_DAY`, an
   hour and an optional night (`"19:30"`, `"4 00:00"`, the new-moon midnight),
   and holds the clock there, for captures.
-- Mods get no call to read or set the Time of day in this spec. Setting it is a
-  command (step 29); sleeping and Weather add a WIT call when they need one.
+- Mods get no call to read or set the Time of day in this spec. A chat command
+  to set it is step 29; sleeping and Weather add a WIT call when they need one.
+
+### Creative Time of day
+
+- In Creative, for a Game with a `sky`, the Menu has a "Time of day" item. It
+  opens a dialog of four tiles, Sunrise 06:00, Noon 12:00, Sunset 18:00 and
+  Midnight 00:00, each with a small scene of that sky, and a Custom row: ◀ and
+  ▶ step a quarter hour, and the field takes any `HH:MM`. Set time applies it.
+  Approved in `mockup/` (`timeDialog` in `app.js`).
+- The Client asks; the Server sets it. The Server refuses the request from a
+  Player not in Creative, or in a World with no `sky`, so no Client changes
+  World state ([ADR-0002](../../docs/adr/0002-client-server-from-day-one.md)).
+- The clock only moves forward: an hour already past today lands tomorrow, so
+  the day count and the Moon phase never run back. With the Daylight cycle off
+  the clock holds at the new hour.
+- The new time is World state: it is saved, and the Server sends it at once, so
+  the Client snaps to it as it does any correction of more than a quarter day.
 
 ### Daylight cycle
 
@@ -378,7 +399,8 @@ only.
 - Pausing the World while the Menu is open.
 - A darkness value gameplay reads, for spawning or crops: Mobs (step 25) defines
   it when it needs one.
-- A clock Item, a command to set the time (step 29), and any WIT call for time.
+- A clock Item, a chat command to set the time (step 29), and any WIT call for
+  time. Survival has no way to set it.
 - Seasons, latitude and a sun path that changes through a year.
 - Fireflies and other night particles.
 - Bevy's `Atmosphere`, auto-exposure, HDR and volumetric clouds: later Look-pack
