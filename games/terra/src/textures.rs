@@ -119,37 +119,6 @@ fn dirt(x: usize, y: usize, face: usize) -> [u8; 3] {
     }
 }
 
-/// Noise of a step of one in `k`, rounded to nearest.
-fn grain(base: [u8; 3], x: usize, y: usize, salt: usize, k: i16) -> [u8; 3] {
-    tint(base, (2 * (noise(x, y, salt) - 128) + k).div_euclid(2 * k))
-}
-
-const INK: [u8; 3] = [62, 46, 31];
-const WALNUT: [u8; 3] = [92, 62, 38];
-
-/// A saw laid diagonally across a Workbench's top and a hammer above it.
-fn saw_and_hammer(x: usize, y: usize) -> bool {
-    let blade = |x: usize| 12 - (x - 3) * 3 / 5;
-    ((3..=11).contains(&x) && y == blade(x))
-        || ((4..=10).contains(&x) && x % 2 == 0 && y == blade(x) + 1)
-        || (x == 12 && (3..=10).contains(&y))
-        || (y == 3 && (10..=14).contains(&x))
-}
-
-const GATE_STILE: [usize; 2] = [2, 13];
-
-/// A Gate's side is two stiles with three rails across them, the upper two at
-/// the edges of a fence's rail; the rest is open. Its top and bottom show only
-/// the stiles' ends, in a corner whichever edge of the cell the panel is on.
-fn gate_gap(face: usize, x: usize, y: usize) -> bool {
-    let stile = |c: usize| c <= GATE_STILE[0] || c >= GATE_STILE[1];
-    if face == 1 {
-        !stile(x) && !matches!(y, 3 | 4 | 7 | 8 | 11 | 12)
-    } else {
-        !(stile(x) && stile(y))
-    }
-}
-
 fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] {
     let n = cells(x, y, 1, face + 3);
     match name {
@@ -222,67 +191,6 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 )
             }
         }
-        "chest" => {
-            let frame = x < 2 || x > 13 || y < 2 || y > 13;
-            let rope = face == 1
-                && ((y == 8 && (6..=9).contains(&x))
-                    || ((x == 5 || x == 10) && (8..=10).contains(&y))
-                    || (y == 10 && (5..=10).contains(&x)));
-            if rope {
-                grain([196, 168, 112], x, y, 75, 16)
-            } else if frame {
-                grain(tint(base, -48), x, y, 71 + 2 * face, 18)
-            } else if face == 1 && y == 6 {
-                tint(base, -46)
-            } else {
-                grain(
-                    tint(base, if y % 4 == 0 { -18 } else { 0 }),
-                    x,
-                    y,
-                    72 + 2 * face,
-                    14,
-                )
-            }
-        }
-        "door" | "door_open" => {
-            let frame = x <= 1 || x >= 14 || y <= 1 || y >= 14;
-            let seam = x % 4 == 1;
-            tint(
-                base,
-                if frame {
-                    -34
-                } else if seam {
-                    -22
-                } else {
-                    (n - 128) / 14
-                },
-            )
-        }
-        "gate" | "gate_open" => {
-            let stile = x <= GATE_STILE[0] || x >= GATE_STILE[1];
-            let shadow = face == 1 && if stile { x == 0 || x == 15 } else { y % 4 == 0 };
-            let grain = if stile || face != 1 { x % 3 } else { y % 3 } == 1;
-            tint(
-                base,
-                if shadow {
-                    -36
-                } else if grain {
-                    -14
-                } else {
-                    (n - 128) / 14
-                },
-            )
-        }
-        "lamp" => {
-            if x < 2 || y < 2 || x > 13 || y > 13 {
-                tint([116, 86, 44], (n - 128) / 15)
-            } else if x == 2 || y == 2 || x == 13 || y == 13 {
-                [203, 163, 85]
-            } else {
-                let center = (x as i16 - 7).abs().max((y as i16 - 7).abs());
-                tint([255, 248, 204], -center * 3 + (n - 128) / 28)
-            }
-        }
         "water" => {
             let wave = (phase(y, 8) + phase(x, EDGE).sin() * 1.2).sin();
             let base = if face == 0 {
@@ -324,18 +232,6 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 ash
             }
         }
-        "brick" => {
-            let row = y / 4;
-            let seam = y % 4 == 0 || (x + (row % 2) * 4) % 8 == 0;
-            if seam {
-                [103, 83, 68]
-            } else {
-                tint(
-                    base,
-                    spread(x, y, face, 2, 67, 12) + if y % 4 == 1 { 15 } else { 0 },
-                )
-            }
-        }
         "melon" => {
             let stripe = if face == 1 { x } else { (x + y) / 2 };
             if face == 0 && (6..=9).contains(&x) && (6..=9).contains(&y) {
@@ -344,34 +240,6 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
                 tint([44, 98, 30], (n - 128) / 20)
             } else {
                 tint(base, (n - 128) / 14)
-            }
-        }
-        "workbench" => {
-            if face != 1 {
-                if x == 0 || y == 0 || x == 15 || y == 15 {
-                    WALNUT
-                } else if face == 0 && saw_and_hammer(x, y) {
-                    INK
-                } else {
-                    grain(tint(base, if y % 5 == 0 { -16 } else { 0 }), x, y, 11, 14)
-                }
-            } else if y < 3 {
-                grain(base, x, y, 12, 14)
-            } else if (1..=3).contains(&x) || (12..=14).contains(&x) {
-                grain(tint(base, -18), x, y, 13, 14)
-            } else if (6..=9).contains(&y) && (x + y) % 3 == 0 {
-                [176, 150, 108]
-            } else {
-                grain(WALNUT, x, y, 14, 14)
-            }
-        }
-        "glass" => {
-            if x == 0 || y == 0 || x == 15 || y == 15 {
-                [181, 216, 255]
-            } else if (8..=9).contains(&(x + y)) {
-                [224, 242, 255]
-            } else {
-                [151, 201, 246]
             }
         }
         _ => tint(base, spread(x, y, face, 4, 83, 12)),
@@ -384,23 +252,12 @@ pub fn texture(name: &str, [r, g, b, opacity]: [u8; 4]) -> Vec<u8> {
         for face in 0..3 {
             for x in 0..EDGE {
                 let colour = pixel(name, face, x, y, [r, g, b]);
-                let [r, g, b] = if matches!(name, "glass" | "lava" | "lamp") {
+                let [r, g, b] = if name == "lava" {
                     colour
                 } else {
                     albedo(colour)
                 };
-                let alpha = if name.starts_with("gate") {
-                    if gate_gap(face, x, y) { 0 } else { opacity }
-                } else if name != "glass" {
-                    opacity
-                } else if x == 0 || y == 0 || x == 15 || y == 15 {
-                    100
-                } else if (8..=9).contains(&(x + y)) {
-                    48
-                } else {
-                    8
-                };
-                pixels.extend_from_slice(&[r, g, b, alpha]);
+                pixels.extend_from_slice(&[r, g, b, opacity]);
             }
         }
     }
@@ -411,9 +268,9 @@ pub fn texture(name: &str, [r, g, b, opacity]: [u8; 4]) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// The faces of each pattern that repeat; a log's end grain, a melon's stem, a frame or a
-    /// lamp is drawn once per tile and is left out.
-    const PERIOD_BOUND: [(&str, &[usize]); 15] = [
+    /// The faces of each pattern that repeat; a log's end grain and a melon's stem are drawn once
+    /// per tile and are left out.
+    const PERIOD_BOUND: [(&str, &[usize]); 14] = [
         ("stone", &[0, 1, 2]),
         ("dirt", &[0, 1, 2]),
         ("crystal", &[0, 1, 2]),
@@ -425,7 +282,6 @@ mod tests {
         ("lava", &[0, 1, 2]),
         ("mud", &[0, 1, 2]),
         ("ash", &[0, 1, 2]),
-        ("brick", &[0, 1, 2]),
         ("melon", &[1, 2]),
         ("sand", &[0, 1, 2]),
         ("snow", &[0, 1, 2]),

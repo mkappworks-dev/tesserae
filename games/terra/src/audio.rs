@@ -249,16 +249,42 @@ pub fn sets() -> Vec<SoundSetDef> {
         })
         .collect()
 }
+/// The shared building Materials Terra's Structures are made of, by the set each sounds as.
+const BUILDING: [(&str, &str); 25] = [
+    ("timber:planks", "wood"),
+    ("timber:pine_planks", "wood"),
+    ("timber:dark_planks", "wood"),
+    ("timber:red_planks", "wood"),
+    ("timber:frame", "wood"),
+    ("timber:dark_frame", "wood"),
+    ("timber:shingles", "wood"),
+    ("timber:door", "wood"),
+    ("timber:gate", "wood"),
+    ("timber:thatch", "soft"),
+    ("timber:awning", "soft"),
+    ("workshop:workbench", "wood"),
+    ("workshop:chest", "wood"),
+    ("workshop:forge", "stone"),
+    ("workshop:oven", "stone"),
+    ("workshop:anvil", "metal"),
+    ("brickwork:cobble", "stone"),
+    ("brickwork:ashlar", "stone"),
+    ("brickwork:slate", "stone"),
+    ("brickwork:brick", "stone"),
+    ("brickwork:tile", "stone"),
+    ("brickwork:red_tile", "stone"),
+    ("brickwork:whitewash", "stone"),
+    ("glassworks:glass", "metal"),
+    ("glassworks:lantern", "metal"),
+];
+
 pub fn materials() -> Vec<MaterialSound> {
     [
-        ("lamp", "metal"),
-        ("glass", "metal"),
         ("leaves", "soft"),
         ("lava", "lava"),
         ("wood", "wood"),
         ("ash", "soft"),
         ("mud", "soft"),
-        ("brick", "stone"),
         ("water", "splash"),
         ("stone", "stone"),
         ("dirt", "soft"),
@@ -271,6 +297,7 @@ pub fn materials() -> Vec<MaterialSound> {
     ]
     .map(|(material, set)| (format!("terra:{material}"), set))
     .into_iter()
+    .chain(BUILDING.map(|(material, set)| (material.to_owned(), set)))
     .chain(crate::plants::sounds())
     .map(|(material, set)| MaterialSound {
         material,

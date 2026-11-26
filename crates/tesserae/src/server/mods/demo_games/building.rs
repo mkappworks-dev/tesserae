@@ -1,5 +1,5 @@
-//! Terra's building Materials and the Stations its buildings hold: declared, textured, in the
-//! Catalogue, and Obtainable from what its worldgen lays.
+//! The shared building Materials and Stations Terra's buildings hold: textured, in the Catalogue,
+//! and Obtainable from what Terra's worldgen lays, through Stations that are.
 
 use std::collections::HashSet;
 
@@ -15,41 +15,48 @@ use crate::server::mods::{LoadedMods, placeable};
 use crate::server::player::Player;
 use crate::server::station::AtStation;
 
-const STATIONS: [&str; 3] = ["anvil", "forge", "oven"];
+const STATIONS: [(&str, &str); 3] = [
+    ("workshop:anvil", "anvil"),
+    ("workshop:forge", "forge"),
+    ("workshop:oven", "oven"),
+];
 
-/// The Materials the approved mockup's Templates name in Terra, beyond what it already had.
-const BUILDING: [&str; 15] = [
-    "oak_planks",
-    "spruce_planks",
-    "dark_oak_planks",
-    "red_planks",
-    "oak_log",
-    "dark_log",
-    "whitewash",
-    "cobblestone",
-    "ashlar",
-    "clay_tiles",
-    "terracotta_tiles",
-    "thatch",
-    "slate",
-    "shingles",
-    "awning",
+/// The Materials Terra's Templates are built of, from the shared building Mods.
+const BUILDING: [&str; 22] = [
+    "timber:planks",
+    "timber:pine_planks",
+    "timber:dark_planks",
+    "timber:red_planks",
+    "timber:frame",
+    "timber:dark_frame",
+    "timber:shingles",
+    "timber:thatch",
+    "timber:awning",
+    "timber:door",
+    "brickwork:cobble",
+    "brickwork:ashlar",
+    "brickwork:slate",
+    "brickwork:brick",
+    "brickwork:tile",
+    "brickwork:red_tile",
+    "brickwork:whitewash",
+    "glassworks:glass",
+    "glassworks:lantern",
+    "workshop:workbench",
+    "workshop:chest",
+    "workshop:oven",
 ];
 
 #[test]
-fn terra_declares_its_building_materials_textured_and_in_the_catalogue() {
-    let game = "terra";
-    let (_install, loaded) = loaded(game, 0.5);
+fn terras_building_materials_are_textured_and_in_the_catalogue() {
+    let (_install, loaded) = loaded("terra", 0.5);
     for name in BUILDING {
-        let id = material(&loaded, &format!("{game}:{name}"));
+        let id = material(&loaded, name);
         assert!(
             loaded.textures.iter().any(|t| t.material == id),
-            "{game}:{name} has a texture"
+            "{name} has a texture"
         );
-        assert!(
-            placeable(&loaded.tables, id),
-            "{game}:{name} is in the Catalogue"
-        );
+        assert!(placeable(&loaded.tables, id), "{name} is in the Catalogue");
     }
 }
 
@@ -90,7 +97,8 @@ fn laid(loaded: &LoadedMods) -> HashSet<MaterialId> {
 }
 
 /// The Items a Player can come by in a World of `loaded`: what breaking a laid Voxel yields or
-/// drops, then every Recipe output whose inputs are already in hand, until nothing changes.
+/// drops, then every Recipe output whose inputs are already in hand at a Station whose Item is,
+/// until nothing changes.
 fn obtainable_items(loaded: &LoadedMods) -> HashSet<String> {
     let items = loaded.every_item(0.5);
     let mut held: HashSet<String> = HashSet::new();
@@ -108,11 +116,23 @@ fn obtainable_items(loaded: &LoadedMods) -> HashSet<String> {
     }
     loop {
         let before = held.len();
-        for recipe in &loaded.recipes {
-            if recipe.inputs.iter().all(|i| held.contains(&i.item)) {
-                held.insert(recipe.output.item.clone());
-            }
-        }
+        let stations: HashSet<&str> = held
+            .iter()
+            .filter_map(|name| items.named(name))
+            .filter_map(|at| items.0[at].material)
+            .filter_map(|m| loaded.tables.uses.station(m))
+            .collect();
+        let at_station = |station: &Station| match station {
+            Station::Hand => true,
+            Station::Tag(tag) => stations.contains(tag.as_str()),
+        };
+        let made: Vec<String> = loaded
+            .recipes
+            .iter()
+            .filter(|r| at_station(&r.station) && r.inputs.iter().all(|i| held.contains(&i.item)))
+            .map(|r| r.output.item.clone())
+            .collect();
+        held.extend(made);
         if held.len() == before {
             return held;
         }
@@ -121,12 +141,10 @@ fn obtainable_items(loaded: &LoadedMods) -> HashSet<String> {
 
 #[test]
 fn every_building_material_and_station_is_obtainable_from_what_terras_worldgen_lays() {
-    let game = "terra";
-    let (_install, loaded) = loaded(game, 0.5);
+    let (_install, loaded) = loaded("terra", 0.5);
     let held = obtainable_items(&loaded);
-    for name in BUILDING.iter().chain(&STATIONS) {
-        let name = format!("{game}:{name}");
-        assert!(held.contains(&name), "{name} is Obtainable; held {held:?}");
+    for name in BUILDING.into_iter().chain(STATIONS.map(|(name, _)| name)) {
+        assert!(held.contains(name), "{name} is Obtainable; held {held:?}");
     }
 }
 
@@ -136,9 +154,9 @@ fn every_building_material_and_station_is_obtainable_from_what_terras_worldgen_l
 fn the_anvil_forge_and_oven_are_stations_whose_recipes_craft_only_beside_them() {
     let game = "terra";
     let (_install, loaded) = loaded(game, 0.5);
-    let stations = STATIONS.map(|name| {
-        let id = material(&loaded, &format!("{game}:{name}"));
-        assert_eq!(loaded.tables.uses.station(id), Some(name), "{game}:{name}");
+    let stations = STATIONS.map(|(name, tag)| {
+        let id = material(&loaded, name);
+        assert_eq!(loaded.tables.uses.station(id), Some(tag), "{name}");
         id
     });
     let mut app = App::new();
@@ -151,7 +169,7 @@ fn the_anvil_forge_and_oven_are_stations_whose_recipes_craft_only_beside_them() 
         .next()
         .unwrap()
         .0;
-    for (name, id) in STATIONS.into_iter().zip(stations) {
+    for ((_, name), id) in STATIONS.into_iter().zip(stations) {
         let here: Vec<usize> = (0..book.len())
             .filter(|&at| book[at].station == Station::Tag(name.into()))
             .collect();

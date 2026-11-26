@@ -11,7 +11,7 @@
     11
    ],
    "ground_layer": 0,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -25,91 +25,91 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:oak_planks",
-     "shape": "terra:table",
+     "material": "timber:planks",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 6
     },
     {
      "symbol": "F",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "terra:workbench",
-     "shape": "terra:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:whitewash",
+     "material": "brickwork:whitewash",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:thatch",
+     "material": "timber:thatch",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:thatch",
+     "material": "timber:thatch",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "L",
-     "material": "terra:thatch",
+     "material": "timber:thatch",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "M",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "N",
-     "material": "terra:thatch",
+     "material": "timber:thatch",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "O",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -361,7 +361,7 @@
     13
    ],
    "ground_layer": 0,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -375,109 +375,109 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:spruce_planks",
+     "material": "timber:pine_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:dark_log",
+     "material": "timber:dark_frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:dark_oak_planks",
+     "material": "timber:dark_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:stair",
      "orientation": 1
     },
     {
      "symbol": "H",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:dark_oak_planks",
-     "shape": "terra:table",
+     "material": "timber:dark_planks",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:workbench",
-     "shape": "terra:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "L",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "M",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "N",
-     "material": "terra:whitewash",
+     "material": "brickwork:whitewash",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "O",
-     "material": "terra:clay_tiles",
+     "material": "brickwork:red_tile",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "P",
-     "material": "terra:clay_tiles",
+     "material": "brickwork:red_tile",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "Q",
-     "material": "terra:clay_tiles",
+     "material": "brickwork:red_tile",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "R",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -795,7 +795,7 @@
     12
    ],
    "ground_layer": 4,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -809,115 +809,115 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:spruce_planks",
+     "material": "timber:pine_planks",
      "shape": "core:stair",
      "orientation": 3
     },
     {
      "symbol": "D",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 6
     },
     {
      "symbol": "G",
-     "material": "terra:oak_planks",
-     "shape": "terra:table",
+     "material": "timber:planks",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:workbench",
-     "shape": "terra:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:spruce_planks",
+     "material": "timber:pine_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "L",
-     "material": "terra:shingles",
+     "material": "timber:shingles",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "M",
-     "material": "terra:dark_oak_planks",
+     "material": "timber:dark_planks",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "N",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:post",
      "orientation": 0
     },
     {
      "symbol": "O",
-     "material": "terra:shingles",
+     "material": "timber:shingles",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "P",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "Q",
-     "material": "terra:shingles",
+     "material": "timber:shingles",
      "shape": "core:stair",
      "orientation": 3
     },
     {
      "symbol": "R",
-     "material": "terra:shingles",
+     "material": "timber:shingles",
      "shape": "core:stair",
      "orientation": 1
     },
     {
      "symbol": "S",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -1145,7 +1145,7 @@
     11
    ],
    "ground_layer": 4,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -1159,121 +1159,121 @@
     },
     {
      "symbol": "A",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "C",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:dark_oak_planks",
+     "material": "timber:dark_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:dark_log",
+     "material": "timber:dark_frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "terra:dark_oak_planks",
-     "shape": "terra:table",
+     "material": "timber:dark_planks",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 6
     },
     {
      "symbol": "I",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:stair",
      "orientation": 1
     },
     {
      "symbol": "J",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:dark_oak_planks",
+     "material": "timber:dark_planks",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "L",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "M",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "N",
-     "material": "terra:whitewash",
+     "material": "brickwork:whitewash",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "O",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "P",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "Q",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:stair",
      "orientation": 1
     },
     {
      "symbol": "R",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:stair",
      "orientation": 3
     },
     {
      "symbol": "S",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "T",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -1590,7 +1590,7 @@
     10
    ],
    "ground_layer": 0,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -1604,73 +1604,73 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:spruce_planks",
+     "material": "timber:pine_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 6
     },
     {
      "symbol": "F",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "terra:dark_oak_planks",
+     "material": "timber:dark_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "L",
-     "material": "terra:dark_oak_planks",
+     "material": "timber:dark_planks",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -1844,7 +1844,7 @@
     8
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -1858,73 +1858,73 @@
     },
     {
      "symbol": "A",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:dark_log",
+     "material": "timber:dark_frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:workbench",
-     "shape": "terra:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:anvil",
+     "material": "workshop:anvil",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "terra:forge",
+     "material": "workshop:forge",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "L",
-     "material": "terra:slate",
+     "material": "brickwork:slate",
      "shape": "core:stair",
      "orientation": 2
     }
@@ -2032,7 +2032,7 @@
     10
    ],
    "ground_layer": 0,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -2046,103 +2046,103 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:workbench",
-     "shape": "terra:table",
+     "material": "workshop:workbench",
+     "shape": "workshop:table",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:oven",
+     "material": "workshop:oven",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:terracotta_tiles",
+     "material": "brickwork:tile",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "L",
-     "material": "terra:terracotta_tiles",
+     "material": "brickwork:tile",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "M",
-     "material": "terra:terracotta_tiles",
+     "material": "brickwork:tile",
      "shape": "core:stair",
      "orientation": 1
     },
     {
      "symbol": "N",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "O",
-     "material": "terra:terracotta_tiles",
+     "material": "brickwork:tile",
      "shape": "core:stair",
      "orientation": 3
     },
     {
      "symbol": "P",
-     "material": "terra:terracotta_tiles",
+     "material": "brickwork:tile",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "Q",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -2304,7 +2304,7 @@
     7
    ],
    "ground_layer": 0,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -2318,43 +2318,43 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:post",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:awning",
+     "material": "timber:awning",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:awning",
+     "material": "timber:awning",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "F",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "G",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -2426,7 +2426,7 @@
     11
    ],
    "ground_layer": 0,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -2440,79 +2440,79 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:spruce_planks",
+     "material": "timber:pine_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:whitewash",
+     "material": "brickwork:whitewash",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:chest",
+     "material": "workshop:chest",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:whitewash",
+     "material": "brickwork:whitewash",
      "shape": "core:post",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 6
     },
     {
      "symbol": "G",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:red_planks",
+     "material": "timber:red_planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:shingles",
+     "material": "timber:shingles",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:shingles",
+     "material": "timber:shingles",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "L",
-     "material": "terra:shingles",
+     "material": "timber:shingles",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "M",
-     "material": "terra:dark_oak_planks",
+     "material": "timber:dark_planks",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -2738,7 +2738,7 @@
     5
    ],
    "ground_layer": 4,
-   "foundation": "terra:cobblestone",
+   "foundation": "brickwork:cobble",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -2752,19 +2752,19 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:post",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:slab",
      "orientation": 0
     },
@@ -2776,25 +2776,25 @@
     },
     {
      "symbol": "E",
-     "material": "terra:clay_tiles",
+     "material": "brickwork:red_tile",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:clay_tiles",
+     "material": "brickwork:red_tile",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "G",
-     "material": "terra:clay_tiles",
+     "material": "brickwork:red_tile",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:clay_tiles",
+     "material": "brickwork:red_tile",
      "shape": "core:slab",
      "orientation": 0
     }
@@ -2889,7 +2889,7 @@
     7
    ],
    "ground_layer": 4,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": 2,
    "spans": false,
    "palette": [
@@ -2903,67 +2903,67 @@
     },
     {
      "symbol": "A",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:stair",
      "orientation": 2
     },
     {
      "symbol": "C",
-     "material": "terra:oak_log",
+     "material": "timber:frame",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:stair",
      "orientation": 1
     },
     {
      "symbol": "E",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:stair",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:stair",
      "orientation": 3
     },
     {
      "symbol": "G",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 0
     },
     {
      "symbol": "H",
-     "material": "terra:glass",
+     "material": "glassworks:glass",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "I",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "J",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "K",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3152,7 +3152,7 @@
     5
    ],
    "ground_layer": 2,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": 2,
    "spans": true,
    "palette": [
@@ -3166,37 +3166,37 @@
     },
     {
      "symbol": "A",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "E",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "F",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3270,7 +3270,7 @@
     9
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": 2,
    "spans": false,
    "palette": [
@@ -3284,19 +3284,19 @@
     },
     {
      "symbol": "A",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3391,7 +3391,7 @@
     11
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": 2,
    "spans": false,
    "palette": [
@@ -3405,25 +3405,25 @@
     },
     {
      "symbol": "A",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:slab",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "D",
-     "material": "terra:lamp",
+     "material": "glassworks:lantern",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3493,7 +3493,7 @@
     2
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": 2,
    "spans": false,
    "palette": [
@@ -3507,19 +3507,19 @@
     },
     {
      "symbol": "A",
-     "material": "terra:ashlar",
+     "material": "brickwork:ashlar",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "B",
-     "material": "terra:brick",
+     "material": "brickwork:brick",
      "shape": "core:cube",
      "orientation": 0
     },
     {
      "symbol": "C",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -3561,7 +3561,7 @@
     11
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -3631,7 +3631,7 @@
     13
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -3705,7 +3705,7 @@
     9
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -3771,7 +3771,7 @@
     9
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -3843,7 +3843,7 @@
     11
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -3925,7 +3925,7 @@
     9
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -3997,7 +3997,7 @@
     9
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4063,7 +4063,7 @@
     9
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4157,7 +4157,7 @@
     6
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4177,7 +4177,7 @@
     },
     {
      "symbol": "B",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "core:cube",
      "orientation": 0
     },
@@ -4195,8 +4195,8 @@
     },
     {
      "symbol": "E",
-     "material": "terra:door",
-     "shape": "terra:panel",
+     "material": "timber:door",
+     "shape": "timber:panel",
      "orientation": 6
     }
    ],
@@ -4253,7 +4253,7 @@
     5
    ],
    "ground_layer": 2,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4318,7 +4318,7 @@
     7
    ],
    "ground_layer": 2,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4404,7 +4404,7 @@
     13
    ],
    "ground_layer": 2,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4436,7 +4436,7 @@
     },
     {
      "symbol": "D",
-     "material": "terra:cobblestone",
+     "material": "brickwork:cobble",
      "shape": "core:cube",
      "orientation": 0
     }
@@ -4514,7 +4514,7 @@
     10
    ],
    "ground_layer": 2,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4684,7 +4684,7 @@
     5
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4742,7 +4742,7 @@
     13
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4810,7 +4810,7 @@
     12
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4830,7 +4830,7 @@
     },
     {
      "symbol": "B",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "terra:fence",
      "orientation": 0
     }
@@ -4876,7 +4876,7 @@
     6
    ],
    "ground_layer": 0,
-   "foundation": "terra:ashlar",
+   "foundation": "brickwork:ashlar",
    "level_tolerance_m": null,
    "spans": false,
    "palette": [
@@ -4896,7 +4896,7 @@
     },
     {
      "symbol": "B",
-     "material": "terra:oak_planks",
+     "material": "timber:planks",
      "shape": "terra:fence",
      "orientation": 0
     },

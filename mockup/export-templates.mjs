@@ -35,6 +35,8 @@ const SHAPES = {
   fence: "fence",
   cross: "flora:cross",
 };
+/* The shared Shapes Terra's Templates take in place of a Game's own. */
+const SHARED_SHAPES = { panel: "timber:panel", table: "workshop:table" };
 /* Wilderness Structures stand on rougher ground than the Settlement levels for its Plots. */
 const WILD_TOLERANCE_M = 2;
 const KEEP = ".",
@@ -79,7 +81,9 @@ function exportTemplate(t) {
       if (!shape) throw new Error(`${t.id}: no Shape for \`${c.shape}\``);
       const voxel = {
           material: materialOf(t, c),
-          shape: shape.includes(":") ? shape : `${game}:${shape}`,
+          shape: shape.includes(":")
+            ? shape
+            : (game === "terra" && SHARED_SHAPES[shape]) || `${game}:${shape}`,
           orientation: orientation(c.turn || 0, c.hinge),
         },
         key = JSON.stringify(voxel);

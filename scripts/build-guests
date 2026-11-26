@@ -36,7 +36,7 @@ cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/dist/games/terra
 cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/terra.wasm
 cp games/terra/mod.toml games/terra/thumbnail.png games/terra/dist/games/terra/
 # Terra's dependencies; a World with no record loads every Mod installed beside it.
-for dep in strata waters flora crops aquatic; do
+for dep in strata waters flora crops aquatic workshop timber brickwork glassworks; do
   rm -rf "games/terra/dist/mods/$dep"
   cp -R "mods/$dep" "games/terra/dist/mods/$dep"
 done

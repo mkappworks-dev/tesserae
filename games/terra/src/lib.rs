@@ -4,7 +4,6 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 mod audio;
-mod building;
 mod character;
 mod landforms;
 mod plants;
@@ -20,11 +19,6 @@ use tesserae::mods::content::{
     ViewParams, VoxelUse, VoxelUseKind, WaterParams,
 };
 use tesserae::mods::types::{Arm, CollisionBox, ConnectDef, NodeBox, Srgba};
-
-/// The door's size: whole Template cells, so a Template's opening fits it at every Voxel size, with
-/// room round a Player's 0.6 m by 1.8 m body.
-const DOOR_WIDTH_M: f32 = 2.0;
-const DOOR_HEIGHT_M: f32 = 3.0;
 
 /// Ground spans `SEA_LEVEL_M` to `SEA_LEVEL_M + RELIEF_M`; lakes stand at 5/12
 /// of the relief, the engine's default, so valleys hold water at any seed.
@@ -93,57 +87,22 @@ fn fence() -> ShapeDef {
     }
 }
 
-/// A Door's panel, 3/16 thick against its own +Z, which the engine turns to
-/// face the Player and Use turns about its hinge.
-fn panel() -> ShapeDef {
-    ShapeDef {
-        form: Default::default(),
-        name: "panel".into(),
-        boxes: vec![NodeBox {
-            min: (0, 0, 13),
-            max: (16, 16, 16),
-        }],
-        collision: None,
-        connect: None,
-    }
-}
-
-/// A Workbench's: four legs under a thick top. A body collides with the whole
-/// cell, so nothing snags between the legs.
-fn table() -> ShapeDef {
-    let leg = |x, z| NodeBox {
-        min: (x, 0, z),
-        max: (x + 3, 12, z + 3),
-    };
-    ShapeDef {
-        form: Default::default(),
-        name: "table".into(),
-        boxes: vec![
-            leg(1, 1),
-            leg(12, 1),
-            leg(1, 12),
-            leg(12, 12),
-            NodeBox {
-                min: (0, 12, 0),
-                max: (16, 16, 16),
+/// Terra's own rock and sand made into strata's, which the shared building Mods' Recipes take:
+/// strata lies only in Terra's bedding, too deep and sparse to build from.
+fn strata_bridges() -> Vec<RecipeDef> {
+    [("terra:rock", "strata:stone"), ("terra:sand", "strata:sand")]
+        .map(|(from, to)| RecipeDef {
+            inputs: vec![RecipeStack {
+                item: from.into(),
+                count: 1,
+            }],
+            output: RecipeStack {
+                item: to.into(),
+                count: 1,
             },
-        ],
-        collision: Some(vec![CollisionBox {
-            min: (0, 0, 0),
-            max: (16, 16, 16),
-        }]),
-        connect: None,
-    }
-}
-
-/// Cut out between its rails, so what stands behind a Gate shows through.
-fn gate(name: &str) -> MaterialDef {
-    MaterialDef {
-        dimming: 0,
-        occlusion: Occlusion::Never,
-        render: RenderClass::Cutout,
-        ..solid(name)
-    }
+            station: "hand".into(),
+        })
+        .into()
 }
 
 fn marker(name: &str, icon: MarkerIcon, [r, g, b]: [u8; 3]) -> MarkerKindDef {
@@ -212,17 +171,6 @@ impl Guest for Terra {
         Declaration {
             materials: vec![
                 MaterialDef {
-                    name: "lamp".into(),
-                    emission: 15,
-                    dimming: 15,
-                    occlusion: Occlusion::Opaque,
-                    render: RenderClass::Opaque,
-                    remove_time_s: None,
-                    contact_damage_per_s: None,
-                    tags: Vec::new(),
-                    solid: true,
-                },
-                MaterialDef {
                     name: "lava".into(),
                     emission: 15,
                     dimming: 15,
@@ -249,7 +197,6 @@ impl Guest for Terra {
                     tags: Vec::new(),
                     solid: false,
                 },
-                solid("brick"),
                 // Clear: sky light reaches the floor of a version 3 sea tens of metres down, and the
                 // underwater fog, which follows dimming, reaches its farthest.
                 MaterialDef {
@@ -267,12 +214,6 @@ impl Guest for Terra {
                 solid("dirt"),
                 solid("grass"),
                 MaterialDef {
-                    dimming: 0,
-                    occlusion: Occlusion::SameMaterial,
-                    render: RenderClass::Blend,
-                    ..solid("glass")
-                },
-                MaterialDef {
                     dimming: 1,
                     occlusion: Occlusion::Never,
                     render: RenderClass::Cutout,
@@ -287,45 +228,24 @@ impl Guest for Terra {
                     ..solid("crystal")
                 },
                 solid("melon"),
-                solid("workbench"),
-                solid("chest"),
-                solid("door"),
-                solid("door_open"),
-                gate("gate"),
-                gate("gate_open"),
             ]
-            .into_iter()
-            .chain(building::materials())
-            .collect(),
-            shapes: vec![fence(), panel(), table()],
+            shapes: vec![fence()],
             appearance: vec![
-                appearance("lamp", [245, 227, 184, 255]),
                 appearance("lava", [230, 72, 16, 255]),
                 appearance("wood", [150, 104, 60, 255]),
                 appearance("ash", [70, 66, 62, 255]),
                 appearance("mud", [92, 70, 44, 224]),
-                appearance("brick", [168, 74, 52, 255]),
                 appearance("water", [26, 82, 158, 166]),
                 appearance("stone", [133, 133, 140, 255]),
                 appearance("dirt", [109, 81, 60, 255]),
                 appearance("grass", [85, 143, 57, 255]),
-                appearance("glass", [164, 210, 250, 89]),
                 appearance("leaves", [61, 129, 47, 255]),
                 appearance("sand", [192, 175, 136, 255]),
                 appearance("snow", [220, 224, 230, 255]),
                 appearance("iron", [150, 120, 104, 255]),
                 appearance("crystal", [150, 110, 230, 255]),
                 appearance("melon", [84, 150, 56, 255]),
-                appearance("workbench", [214, 190, 140, 255]),
-                appearance("chest", [128, 62, 40, 255]),
-                appearance("door", [128, 88, 50, 255]),
-                appearance("door_open", [128, 88, 50, 255]),
-                appearance("gate", [140, 97, 55, 255]),
-                appearance("gate_open", [140, 97, 55, 255]),
-            ]
-            .into_iter()
-            .chain(building::appearance())
-            .collect(),
+            ],
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
@@ -400,7 +320,7 @@ impl Guest for Terra {
                         state: FluidState::Any,
                     },
                     consumed: ReactionSide::First,
-                    product: Some("terra:brick".into()),
+                    product: Some("brickwork:brick".into()),
                     receiving: None,
                 },
             ],
@@ -485,62 +405,6 @@ impl Guest for Terra {
                     material: Some("terra:melon".into()),
                     max_stack: None,
                     food: Some(6.0),
-                    texture: None,
-                },
-                ItemDef {
-                    name: "workbench".into(),
-                    size_m: 0.25,
-                    color: Srgba {
-                        r: 167,
-                        g: 116,
-                        b: 63,
-                        a: 255,
-                    },
-                    material: Some("terra:workbench".into()),
-                    max_stack: None,
-                    food: None,
-                    texture: None,
-                },
-                ItemDef {
-                    name: "chest".into(),
-                    size_m: 0.25,
-                    color: Srgba {
-                        r: 107,
-                        g: 68,
-                        b: 35,
-                        a: 255,
-                    },
-                    material: Some("terra:chest".into()),
-                    max_stack: None,
-                    food: None,
-                    texture: None,
-                },
-                ItemDef {
-                    name: "door".into(),
-                    size_m: 0.25,
-                    color: Srgba {
-                        r: 128,
-                        g: 88,
-                        b: 50,
-                        a: 255,
-                    },
-                    material: Some("terra:door".into()),
-                    max_stack: None,
-                    food: None,
-                    texture: None,
-                },
-                ItemDef {
-                    name: "gate".into(),
-                    size_m: 0.25,
-                    color: Srgba {
-                        r: 140,
-                        g: 97,
-                        b: 55,
-                        a: 255,
-                    },
-                    material: Some("terra:gate".into()),
-                    max_stack: None,
-                    food: None,
                     texture: None,
                 },
             ],
@@ -801,34 +665,6 @@ impl Guest for Terra {
             recipes: vec![
                 RecipeDef {
                     inputs: vec![RecipeStack {
-                        item: "flora:log".into(),
-                        count: 4,
-                    }],
-                    output: RecipeStack {
-                        item: "terra:workbench".into(),
-                        count: 1,
-                    },
-                    station: "hand".into(),
-                },
-                RecipeDef {
-                    inputs: vec![
-                        RecipeStack {
-                            item: "terra:rock".into(),
-                            count: 2,
-                        },
-                        RecipeStack {
-                            item: "terra:dirt".into(),
-                            count: 1,
-                        },
-                    ],
-                    output: RecipeStack {
-                        item: "terra:brick".into(),
-                        count: 2,
-                    },
-                    station: "hand".into(),
-                },
-                RecipeDef {
-                    inputs: vec![RecipeStack {
                         item: "terra:rock".into(),
                         count: 1,
                     }],
@@ -848,67 +684,6 @@ impl Guest for Terra {
                         count: 1,
                     },
                     station: "hand".into(),
-                },
-                RecipeDef {
-                    inputs: vec![RecipeStack {
-                        item: "flora:log".into(),
-                        count: 8,
-                    }],
-                    output: RecipeStack {
-                        item: "terra:chest".into(),
-                        count: 1,
-                    },
-                    station: "workbench".into(),
-                },
-                RecipeDef {
-                    inputs: vec![RecipeStack {
-                        item: "flora:log".into(),
-                        count: 3,
-                    }],
-                    output: RecipeStack {
-                        item: "terra:door".into(),
-                        count: 1,
-                    },
-                    station: "workbench".into(),
-                },
-                RecipeDef {
-                    inputs: vec![RecipeStack {
-                        item: "flora:log".into(),
-                        count: 2,
-                    }],
-                    output: RecipeStack {
-                        item: "terra:gate".into(),
-                        count: 1,
-                    },
-                    station: "workbench".into(),
-                },
-                RecipeDef {
-                    inputs: vec![RecipeStack {
-                        item: "terra:sand".into(),
-                        count: 2,
-                    }],
-                    output: RecipeStack {
-                        item: "terra:glass".into(),
-                        count: 1,
-                    },
-                    station: "workbench".into(),
-                },
-                RecipeDef {
-                    inputs: vec![
-                        RecipeStack {
-                            item: "terra:iron".into(),
-                            count: 1,
-                        },
-                        RecipeStack {
-                            item: "terra:glass".into(),
-                            count: 1,
-                        },
-                    ],
-                    output: RecipeStack {
-                        item: "terra:lamp".into(),
-                        count: 2,
-                    },
-                    station: "workbench".into(),
                 },
                 RecipeDef {
                     inputs: vec![RecipeStack {
@@ -934,7 +709,7 @@ impl Guest for Terra {
                 },
             ]
             .into_iter()
-            .chain(building::recipes())
+            .chain(strata_bridges())
             .collect(),
             plants: Vec::new(),
             marker_kinds: vec![
@@ -948,39 +723,7 @@ impl Guest for Terra {
             death_marker_kind: Some("terra:death".into()),
             templates: templates::templates(),
             settlements: structures::settlements(),
-            voxel_uses: vec![
-                VoxelUse {
-                    material: "terra:door".into(),
-                    kind: VoxelUseKind::Door(tesserae::mods::content::DoorDef {
-                        open: "terra:door_open".into(),
-                        width_m: Some(DOOR_WIDTH_M),
-                        height_m: Some(DOOR_HEIGHT_M),
-                    }),
-                    shape: Some("terra:panel".into()),
-                },
-                VoxelUse {
-                    material: "terra:gate".into(),
-                    kind: VoxelUseKind::Door(tesserae::mods::content::DoorDef {
-                        open: "terra:gate_open".into(),
-                        width_m: Some(1.0),
-                        height_m: Some(1.0),
-                    }),
-                    shape: Some("terra:panel".into()),
-                },
-                VoxelUse {
-                    material: "terra:chest".into(),
-                    kind: VoxelUseKind::Container(None),
-                    shape: None,
-                },
-                VoxelUse {
-                    material: "terra:workbench".into(),
-                    kind: VoxelUseKind::Station("workbench".into()),
-                    shape: Some("terra:table".into()),
-                },
-            ]
-            .into_iter()
-            .chain(building::voxel_uses())
-            .collect(),
+            voxel_uses: Vec::new(),
             ores: vec![
                 OreDef {
                     material: "terra:iron".into(),

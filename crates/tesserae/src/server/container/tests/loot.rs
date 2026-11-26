@@ -37,7 +37,7 @@ fn game_of(name: &'static str, size: f32, (install, loaded): (Install, LoadedMod
         .with_loot(&loaded.biome_loot);
     let chest = loaded
         .registry
-        .id_of(Kind::Material, &format!("{name}:chest"))
+        .id_of(Kind::Material, "workshop:chest")
         .unwrap() as MaterialId;
     Game {
         _install: install,
@@ -246,7 +246,7 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
     let cobble = terra
         .loaded
         .registry
-        .id_of(Kind::Material, "terra:cobblestone")
+        .id_of(Kind::Material, "brickwork:cobble")
         .unwrap() as MaterialId;
     let cobbled = (-30..30)
         .flat_map(|dz| (-30..30).map(move |dx| [well[0] + dx, well[2] + dz]))
@@ -385,7 +385,7 @@ fn a_chest_draws_alike_opened_or_broken_first_in_any_chunk_order_and_at_every_vo
     }
     remove(&mut broken, at);
     assert_eq!(
-        dropped_counts(&broken, "terra:chest"),
+        dropped_counts(&broken, "workshop:chest"),
         held_counts(&slots),
         "broken first, the same Items spill"
     );
@@ -406,7 +406,7 @@ fn a_chest_put_back_by_a_player_and_one_placed_anywhere_start_empty() {
     let mut app = terra.server(&terra.chunks_round(at));
     remove(&mut app, at);
     assert!(
-        !dropped_counts(&app, "terra:chest").is_empty(),
+        !dropped_counts(&app, "workshop:chest").is_empty(),
         "its loot spilt"
     );
     place_chest(&mut app, at);

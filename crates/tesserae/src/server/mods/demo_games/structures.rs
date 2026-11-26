@@ -742,7 +742,7 @@ fn terra_lays_out_a_town_of_cobbled_roads() {
         .with_settlements(&loaded.tables.settlements);
     let world = Generated::around_ground(&generator, terra_town_m(&loaded), 160.0);
     let found = standing(&world, templates, 1.0);
-    let cobble = material(&loaded, "terra:cobblestone");
+    let cobble = material(&loaded, "brickwork:cobble");
     let rects: Vec<[[i32; 2]; 2]> = found
         .iter()
         .map(|f| {
