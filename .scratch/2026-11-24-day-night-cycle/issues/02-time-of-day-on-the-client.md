@@ -1,6 +1,6 @@
 # 02: Time of day on the Client and in the Menu
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [Day and night cycle](../spec.md).
@@ -22,7 +22,7 @@ The Client knows the hour and shows it.
 - [x] Client tests: a small correction eases, a large one snaps, the clock runs
       between messages at the sent rate.
 - [x] The mockup line approved by the user.
-- [ ] The Menu shows it on Terra.
+- [x] The Menu shows it on Terra.
 
 ## Comments
 
@@ -61,3 +61,5 @@ The user approved the mockup line on 2026-11-26 and asked for a larger card:
 "You are here" 13 px, the Biome 32 px, the time 19 px and the Game line 15 px
 (`mockup/style.css`; `theme::TEXT_STATUS*` on the Client). The card is on every
 Game's Menu. Seeing it on Terra waits on the whole-day review (ticket 09).
+
+The user saw the line on Terra in the running game on 2026-11-26.

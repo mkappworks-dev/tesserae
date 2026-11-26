@@ -1,6 +1,6 @@
 # 10: Creative Time of day
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03
 
 Spec: [Day and night cycle](../spec.md).
@@ -30,7 +30,7 @@ A Player in Creative sets the Time of day from the Menu.
       holds there.
 - [x] Client: the Menu item shows only in Creative with a `sky`; tiles,
       Custom stepping and typing, and Set time send the request.
-- [ ] The Menu's "Day N, HH:MM" line shows the new time after Set.
+- [x] The Menu's "Day N, HH:MM" line shows the new time after Set.
 
 ## Comments
 
@@ -69,3 +69,5 @@ covers the line with the Server's answer stood in).
 - Not this ticket: `a_reopened_world_keeps_the_hour_it_was_saved_at` fails on
   `cba14878` without this change too: the commit it reads holds the start hour,
   likely the open-time save, which its settled save waits out without saving.
+
+The user saw it in the running game on 2026-11-26.
