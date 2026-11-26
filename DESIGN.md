@@ -554,7 +554,11 @@ multiplayer is a later transport swap, not a rewrite.
    Weather (step 24) adds itself to its Sky state as a later layer. The cycle is
    done: a Player turns it off per World, Creative sets the hour from the Menu,
    the night's light follows the Moon's phase down to starlight, and Terra's
-   clouds are an 80 m layer of warped gradient noise.
+   clouds are an 80 m layer of warped gradient noise, baked once into a
+   repeating texture. Measured against `main` on `flight` at 1080p, the sky and
+   the clouds together cost under 0.1 ms of GPU frame time, inside the 0.3 ms
+   budget; the terrain fogs itself, since bevy_pbr's fog glow samples the shadow
+   map a second time on every pixel.
 
 ### Steps 10 to 29: engine systems and game content
 

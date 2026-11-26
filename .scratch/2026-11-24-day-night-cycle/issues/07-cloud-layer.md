@@ -1,6 +1,6 @@
 # 07: Cloud layer
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 
 Blocked by 05 only because both amend the `sky` record.
@@ -36,7 +36,7 @@ Clouds drift across the sky at the Game's altitude.
       cloud field at another Voxel size.
 - [x] Captures from under the clouds, from above, from inside, at dusk and at
       night, approved by the user.
-- [ ] GPU frame time of the Cloud layer on `flight` at noon and midnight,
+- [x] GPU frame time of the Cloud layer on `flight` at noon and midnight,
       interleaved against `main`, at most 0.2 ms over it, recorded in Comments.
 
 ## Comments
@@ -146,3 +146,20 @@ level, no longer applies. The extra samples fall only on rays near level, a
 band round the horizon; the GPU time is still to be measured on `flight`.
 
 The user approved the look on the captures on 2026-11-26.
+
+2026-11-26, frame time. The first A/B put the Cloud layer at 0.68 ms on
+`flight` at noon: every sample worked out four octaves of gradient noise. The
+octaves are now baked once at startup (about 50 ms) into a 2048² Rg16Snorm
+texture that repeats with the period, one filtered fetch a sample, 16 MB
+(591ac51a); a side-by-side capture shows the same clouds. Measured 2026-11-26 at 1920×1080, release with `profiling`, Terra, rounds
+alternated with `main` (b6817a1b) under a load of 6 to 7; median of the
+per-run p50 GPU frame (`frame_start` to `frame_end`), 6 runs a cell.
+
+| `flight`, GPU frame        | Round 1 | Round 2 |
+| -------------------------- | ------- | ------- |
+| The sky, clouds off        | 4.466   | 4.517   |
+| The sky with the clouds    | 4.573   | 4.609   |
+| Before the bake            | 5.845   | 5.803   |
+
+The Cloud layer costs about 0.1 ms, within the 0.2 ms. Against `main` itself,
+see ticket 09.

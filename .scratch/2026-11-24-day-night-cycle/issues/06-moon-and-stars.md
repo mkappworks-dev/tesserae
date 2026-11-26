@@ -20,7 +20,7 @@ The night sky.
 - [x] Captures at dusk and at full-moon and new-moon midnight, approved by the
       user; the moon's phase reads at a glance.
 - [ ] The reach's edge stays hidden at every hour.
-- [ ] GPU frame time of the sky on `flight` at noon and midnight, interleaved
+- [x] GPU frame time of the sky on `flight` at noon and midnight, interleaved
       against `main`, at most 0.1 ms over it, recorded in Comments.
 
 ## Comments
@@ -82,3 +82,19 @@ bright ones dim. Captures: `far-full-midnight-v2`, `far-new-midnight-v2`,
 `sky-full-midnight`, `sky-new-midnight`.
 
 The user approved the look on the captures on 2026-11-26.
+
+2026-11-26, frame time. The first A/B put the sky without clouds 0.51 ms over
+no sky on `flight` at noon: bevy_pbr's fog samples the shadow map again for its
+sun glow, a second full shadow lookup on every terrain pixel. The chunk shader
+now fogs the terrain itself with the glow unshadowed, as the sky and the clouds
+do (45c1e246). Measured 2026-11-26 at 1920×1080, release with `profiling`, Terra, rounds
+alternated with `main` (b6817a1b) under a load of 6 to 7; median of the
+per-run p50 GPU frame (`frame_start` to `frame_end`), 6 runs a cell.
+
+| `flight`, GPU frame        | Round 1 | Round 2 |
+| -------------------------- | ------- | ------- |
+| Terra without its sky      | 4.545   | 4.494   |
+| The sky, clouds off        | 4.466   | 4.517   |
+
+The sky's share is level with none, within the 0.1 ms. The reach's edge is
+checked in ticket 09's captures.
