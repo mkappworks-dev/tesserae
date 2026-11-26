@@ -1,6 +1,6 @@
 # 03: Daylight cycle setting
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [Day and night cycle](../spec.md).
