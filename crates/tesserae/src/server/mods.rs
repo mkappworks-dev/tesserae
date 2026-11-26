@@ -2072,13 +2072,41 @@ layers = [["rp"]]
     /// field, so nothing but the shared Mods makes the rest.
     #[test]
     fn the_shared_building_mods_make_every_material_from_world_materials() {
-        let shared = ["strata", "flora", "crops", "workshop"];
+        let shared = [
+            "strata",
+            "flora",
+            "crops",
+            "workshop",
+            "timber",
+            "brickwork",
+            "glassworks",
+        ];
         let made = [
             "workshop:workbench",
             "workshop:forge",
             "workshop:anvil",
             "workshop:oven",
             "workshop:chest",
+            "timber:planks",
+            "timber:pine_planks",
+            "timber:dark_planks",
+            "timber:red_planks",
+            "timber:frame",
+            "timber:dark_frame",
+            "timber:shingles",
+            "timber:thatch",
+            "timber:awning",
+            "timber:door",
+            "timber:gate",
+            "brickwork:cobble",
+            "brickwork:ashlar",
+            "brickwork:slate",
+            "brickwork:brick",
+            "brickwork:tile",
+            "brickwork:red_tile",
+            "brickwork:whitewash",
+            "glassworks:glass",
+            "glassworks:lantern",
         ];
         let s = Scratch::new();
         let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods");

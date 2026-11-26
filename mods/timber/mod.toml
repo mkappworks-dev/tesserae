@@ -2,6 +2,7 @@ id = "timber"
 version = "0.1.0"
 api = "0.3"
 declaration = "content.toml"
+depends = ["flora", "crops", "workshop"]
 category = "Building"
 description = "Planks, thatch, beams and panels"
 thumbnail = "thumbnail.png"
