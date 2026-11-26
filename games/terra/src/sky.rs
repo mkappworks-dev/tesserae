@@ -16,8 +16,8 @@ const NO_TINT: CurveTint = tint((0.0, 0.0, 0.0), 0.0);
 // About 17% of a noon top face at full moon and 8% at new on open ground: the ambient carries
 // the new-moon floor and the moon adds the rest, by the engine's noon of 3600 lux sun and 1500
 // lux sky, weighted by each colour's luminance.
-const MOON: CurveLight = light((0.62, 0.74, 1.0), 0.19);
-const NIGHT_AMBIENT: CurveLight = light((0.55, 0.66, 1.0), 0.38);
+const MOON: CurveLight = light((0.62, 0.74, 1.0), 0.09);
+const NIGHT_AMBIENT: CurveLight = light((0.55, 0.66, 1.0), 0.18);
 
 fn night(hour: f32) -> DayKey {
     DayKey {

@@ -36,10 +36,13 @@ const WARP_M: f32 = 200.0;
 const DETAIL_FROM_M: f32 = 600.0;
 const DETAIL_TO_M: f32 = 2500.0;
 const DETAILED_OCTAVES: u32 = 2u;
-// Samples closer than the first apart resolve the cloud and are not dithered; from the second the
-// steps between them would band, and the dither spreads them fully.
-const DITHER_FROM_M: f32 = 40.0;
-const DITHER_TO_M: f32 = 160.0;
+// Samples further apart than the first step a far cloud's edge into combs; from the second the
+// dither spreads them fully. Only far from the Eye: near, the grain shows as dots, and the samples
+// are close enough.
+const DITHER_FROM_M: f32 = 22.0;
+const DITHER_TO_M: f32 = 37.5;
+const DITHER_NEAR_M: f32 = 150.0;
+const DITHER_FAR_M: f32 = 600.0;
 
 // Samples along the ray inside the slab: one per this many metres of it, at least the first count
 // for a sense of thickness and at most the second. Only rays near level reach the cap, a thin band
@@ -242,7 +245,8 @@ fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
     let under_eye = clouds.field.xy + (eye.xz - clouds.slab.xz);
     let at = threshold();
     let bend = warp(under_eye + direction.xz * 0.5 * (enter + leave));
-    let spread = smoothstep(DITHER_FROM_M, DITHER_TO_M, spacing);
+    let spread = smoothstep(DITHER_FROM_M, DITHER_TO_M, spacing)
+        * smoothstep(DITHER_NEAR_M, DITHER_FAR_M, enter);
     let jitter = 0.5 + spread * (dither(in.clip.xy) - 0.5);
     let detail = 1.0 - smoothstep(DETAIL_FROM_M, DETAIL_TO_M, enter);
     // Metres of the densest cloud the ray crosses, and what it sees weighted by them.

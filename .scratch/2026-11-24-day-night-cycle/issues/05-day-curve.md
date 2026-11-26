@@ -76,3 +76,9 @@ spec), and no captures taken, so the boxes stay unticked until then.
   carries two keys; a bad `stars`, a descending hour and an unknown field).
 
 The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
+
+2026-11-26: Terra's night is darker at the user's request: moonlight 0.09
+(was 0.19) and night ambient 0.18 (was 0.38). With the night ambient now
+following the Moon, full-moon midnight is about 12% of noon on the ground
+(`near-full-midnight-v4`) and new-moon midnight sits on the cave floor
+(`near-new-midnight-v4`).
