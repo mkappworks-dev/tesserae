@@ -5,10 +5,19 @@
 //! any day share; the share only decides how many logical steps an hour of day
 //! and an hour of night take.
 
+mod state;
+
+pub use state::{
+    Air, CAVE_FLOOR, DEFAULT_DAY_CURVE, DayKey, Light, LightSource, SkyInputs, SkyState, Tint,
+    day_curve_at, linear_to_srgb, sky_state, sky_state_on, srgb_to_linear,
+};
+
 use crate::flow::{STEP_S, Step};
 use crate::worldgen::ParamError;
 
 pub const MIN_DAY_LENGTH_S: f32 = 60.0;
+
+pub const MAX_TILT_DEG: f32 = 60.0;
 
 const SUNRISE: f64 = 6.0;
 const NOON: f32 = 12.0;
@@ -27,6 +36,9 @@ pub struct SkyParams {
     pub start_hour: f32,
     /// How much of the Day length the sun is up.
     pub day_share: f32,
+    /// How far the sun's path leans toward the south (+Z): the noon sun stands this far from
+    /// overhead.
+    pub tilt_deg: f32,
 }
 
 impl SkyParams {
@@ -47,6 +59,12 @@ impl SkyParams {
             return Err(ParamError {
                 field: "sky.day_share",
                 rule: "must be above 0 and below 1",
+            });
+        }
+        if !(0.0..=MAX_TILT_DEG).contains(&self.tilt_deg) {
+            return Err(ParamError {
+                field: "sky.tilt_deg",
+                rule: "must be from 0 to 60 degrees",
             });
         }
         Ok(())
@@ -118,10 +136,18 @@ impl TimeOfDay {
     }
 }
 
-/// With no tilt: the sun's angle is uniform in hours, overhead at noon.
-pub fn sun_elevation_deg(hour: f32) -> f32 {
-    let angle = ((hour - SUNRISE as f32) / 12.0 * 180.0).to_radians();
-    angle.sin().asin().to_degrees()
+/// The sun's angle along its path is uniform in hours; the path leans `tilt_deg` toward the
+/// south, so the noon sun stands that far from overhead.
+pub fn sun_elevation_deg(hour: f32, tilt_deg: f32) -> f32 {
+    let along = sun_angle_rad(hour);
+    (along.sin() * tilt_deg.to_radians().cos())
+        .asin()
+        .to_degrees()
+}
+
+/// How far along its path the sun is: 0 rising in the east, pi setting in the west.
+fn sun_angle_rad(hour: f32) -> f32 {
+    ((hour - SUNRISE as f32) / 12.0 * 180.0).to_radians()
 }
 
 pub fn daylight(elevation_deg: f32) -> f32 {
@@ -234,7 +260,8 @@ impl Clock {
     }
 
     pub fn daylight(&self) -> f32 {
-        daylight(sun_elevation_deg(self.hour()))
+        let tilt = self.sky.map_or(0.0, |sky| sky.tilt_deg);
+        daylight(sun_elevation_deg(self.hour(), tilt))
     }
 
     pub fn steps_per_s(&self) -> f32 {

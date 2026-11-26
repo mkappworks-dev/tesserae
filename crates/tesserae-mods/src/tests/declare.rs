@@ -2544,6 +2544,7 @@ fn sky() -> content::SkyParams {
         day_length_s: 1200.0,
         start_hour: 7.0,
         day_share: 0.7,
+        tilt_deg: 25.0,
     }
 }
 
@@ -2565,6 +2566,7 @@ fn a_games_sky_is_kept_and_a_world_without_one_has_none() {
             day_length_s: 1200.0,
             start_hour: 7.0,
             day_share: 0.7,
+            tilt_deg: 25.0,
         })
     );
     assert_eq!(declare_sky(None, true).unwrap().sky, None);
@@ -2584,13 +2586,16 @@ fn only_the_game_sets_the_sky() {
 #[test]
 fn a_bad_sky_is_a_load_error_naming_the_field() {
     type Edit = fn(&mut content::SkyParams);
-    let cases: [(Edit, &str); 6] = [
+    let cases: [(Edit, &str); 9] = [
         (|s| s.day_length_s = 59.0, "sky.day_length_s"),
         (|s| s.day_length_s = f32::NAN, "sky.day_length_s"),
         (|s| s.start_hour = 24.0, "sky.start_hour"),
         (|s| s.start_hour = -1.0, "sky.start_hour"),
         (|s| s.day_share = 0.0, "sky.day_share"),
         (|s| s.day_share = 1.0, "sky.day_share"),
+        (|s| s.tilt_deg = -1.0, "sky.tilt_deg"),
+        (|s| s.tilt_deg = 61.0, "sky.tilt_deg"),
+        (|s| s.tilt_deg = f32::NAN, "sky.tilt_deg"),
     ];
     for (edit, field) in cases {
         let mut s = sky();

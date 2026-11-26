@@ -1,5 +1,5 @@
 //! The sky: the air's sky colour at the zenith, blending to its fog colour at
-//! the horizon, with a sun disc and glow toward the fixed light.
+//! the horizon, with a sun disc and glow where the Sky state puts the sun.
 //!
 //! Drawn in the main pass, so its horizon is the fog uniform through the same
 //! tonemapper as the fogged terrain, which meets it with no edge whatever the
@@ -21,6 +21,7 @@ use bevy::shader::ShaderRef;
 
 use super::fog::FogSettings;
 use crate::client::camera::MainCamera;
+use crate::client::sky::SkyNow;
 use crate::session::SessionApp;
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone, PartialEq)]
@@ -28,7 +29,8 @@ pub struct SkyMaterial {
     /// Linear, as it shows on screen.
     #[uniform(0)]
     pub zenith: Vec4,
-    /// Unit length, toward the sun.
+    /// Unit length, toward the sun: the Sky state's, never the light's, which is the moon by
+    /// night.
     #[uniform(0)]
     pub toward_sun: Vec4,
 }
@@ -113,7 +115,7 @@ fn build_assets(
         triangle: meshes.add(covering_triangle()),
         material: materials.add(SkyMaterial {
             zenith: zenith(FogSettings::default().sky),
-            toward_sun: Vec4::Y,
+            toward_sun: Vec3::from(SkyNow::default().0.toward_sun).extend(0.0),
         }),
     });
 }
@@ -156,7 +158,7 @@ fn follow_air(
     settings: Res<FogSettings>,
     clear: Res<ClearColor>,
     assets: Option<Res<SkyAssets>>,
-    light: Query<&GlobalTransform, With<DirectionalLight>>,
+    now: Option<Res<SkyNow>>,
     mut materials: ResMut<Assets<SkyMaterial>>,
     mut skies: Query<&mut Visibility, With<MeshMaterial3d<SkyMaterial>>>,
 ) {
@@ -171,13 +173,10 @@ fn follow_air(
     for mut sky in &mut skies {
         sky.set_if_neq(visibility);
     }
-    let toward_sun = light
-        .iter()
-        .next()
-        .map_or(Vec3::Y, |light| light.back().as_vec3());
+    let toward_sun = now.map_or_else(|| SkyNow::default().0.toward_sun, |now| now.0.toward_sun);
     let want = SkyMaterial {
         zenith: zenith(settings.sky),
-        toward_sun: toward_sun.extend(0.0),
+        toward_sun: Vec3::from(toward_sun).extend(0.0),
     };
     // Read first: `get_mut` alone re-uploads the uniform every frame.
     if materials.get(&assets.material) != Some(&want)
@@ -228,12 +227,6 @@ mod tests {
             .register_required_components::<Mesh3d, Visibility>()
             .add_systems(Startup, build_assets)
             .add_systems(Update, (spawn_under_camera, follow_air).chain());
-        app.world_mut().spawn((
-            DirectionalLight::default(),
-            GlobalTransform::from(
-                Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
-            ),
-        ));
         app
     }
 
@@ -265,8 +258,50 @@ mod tests {
         let want = Vec3::new(1.0, 2.2, 0.8).normalize();
         assert!(
             material.toward_sun.truncate().distance(want) < 1e-5,
-            "{:?}",
+            "today's sun: {:?}",
             material.toward_sun
+        );
+    }
+
+    #[test]
+    fn the_sun_is_where_the_sky_state_puts_it_even_while_the_light_is_the_moon() {
+        use tesserae_core::sky::{Air, LightSource, SkyInputs, SkyParams, sky_state};
+        let terra = SkyParams {
+            day_length_s: 1200.0,
+            start_hour: 7.0,
+            day_share: 0.7,
+            tilt_deg: 25.0,
+        };
+        let haze = FogSettings::default();
+        let night = sky_state(&SkyInputs {
+            hour: 22.0,
+            moon_phase: 0,
+            sky: Some(&terra),
+            air: Air {
+                sky: haze.sky,
+                fog: haze.color,
+                underground: 0.0,
+            },
+        });
+        assert_eq!(night.light_source, LightSource::Moon);
+        let mut app = app();
+        app.world_mut().spawn(MainCamera);
+        app.world_mut().spawn((
+            DirectionalLight::default(),
+            GlobalTransform::from(
+                Transform::from_translation(Vec3::from(night.toward_moon))
+                    .looking_at(Vec3::ZERO, Vec3::Y),
+            ),
+        ));
+        app.insert_resource(SkyNow(night));
+        app.update();
+        app.update();
+        let material = the_sky(&mut app).2;
+        let sun = material.toward_sun.truncate();
+        assert!(sun.distance(Vec3::from(night.toward_sun)) < 1e-6);
+        assert!(
+            sun.y < 0.0,
+            "below the horizon, where the shader draws none of it"
         );
     }
 

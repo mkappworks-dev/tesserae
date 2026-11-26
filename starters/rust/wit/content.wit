@@ -262,6 +262,9 @@ interface content {
         start-hour: f32,
         /// How much of the Day length the sun is up, above 0 and below 1.
         day-share: f32,
+        /// How far the sun's path leans toward the south (+Z), in degrees from
+        /// 0 to 60: the noon sun stands that far from overhead.
+        tilt-deg: f32,
     }
 
     /// A region of the underground, chosen where the cave Climate (two 3D

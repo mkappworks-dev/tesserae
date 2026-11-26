@@ -175,6 +175,7 @@ impl Guest for Terra {
             day_length_s: 20.0 * 60.0,
             start_hour: 7.0,
             day_share: 0.7,
+            tilt_deg: 25.0,
         });
         Declaration {
             materials: vec![

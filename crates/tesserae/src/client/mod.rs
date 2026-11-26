@@ -67,7 +67,7 @@ mod scenery;
 mod settings;
 #[cfg(feature = "profiling")]
 pub mod sight;
-mod sky;
+pub(crate) mod sky;
 #[cfg(feature = "dev")]
 mod soak;
 mod sound;

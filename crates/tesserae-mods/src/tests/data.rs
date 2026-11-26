@@ -203,6 +203,7 @@ fn component() -> Declaration {
                 day_length_s: 1200.0,
                 start_hour: 7.0,
                 day_share: 0.7,
+                tilt_deg: 25.0,
             }),
             sea_level_m: 20.0,
             relief_m: 12.0,

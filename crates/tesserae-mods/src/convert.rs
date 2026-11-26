@@ -162,6 +162,7 @@ pub(crate) fn sky_params(s: content::SkyParams) -> tesserae_core::sky::SkyParams
         day_length_s: s.day_length_s,
         start_hour: s.start_hour,
         day_share: s.day_share,
+        tilt_deg: s.tilt_deg,
     }
 }
 

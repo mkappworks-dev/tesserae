@@ -344,6 +344,8 @@ impl ContentCatalogue {
 pub struct SkyFogTarget {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
+    /// A Cave Biome's air, which the hour never tints, rather than the Biomes' pair.
+    pub cave: bool,
 }
 
 /// The Game's `sky`, sent once at session start; `None` holds the World at noon.

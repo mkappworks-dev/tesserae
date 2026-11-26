@@ -23,30 +23,35 @@ fn moved(sent: SkyFogBlend, now: SkyFogBlend) -> bool {
     apart(sent.sky, now.sky) || apart(sent.fog, now.fog)
 }
 
+/// The air at the Eye: a Cave Biome's when it is in one, else the Biomes' pair.
+fn air_at(generator: &WorldGenerator, eye: Vec3) -> Option<(SkyFogBlend, bool)> {
+    match generator.cave_fog_at(eye.x, eye.y, eye.z) {
+        Some(cave) => Some((cave, true)),
+        None => generator.sky_fog_at(eye.x, eye.z).map(|open| (open, false)),
+    }
+}
+
 /// Measured against what was last sent, not the last tick, so a slow drift still arrives.
 fn publish(
     generator: Option<Res<WorldGenerator>>,
     player: Query<&Player>,
-    mut sent: Local<Option<SkyFogBlend>>,
+    mut sent: Local<Option<(SkyFogBlend, bool)>>,
     mut targets: MessageWriter<SkyFogTarget>,
 ) {
     let (Some(generator), Ok(player)) = (generator, player.single()) else {
         return;
     };
-    let eye = player.eye();
-    let Some(now) = generator
-        .cave_fog_at(eye.x, eye.y, eye.z)
-        .or_else(|| generator.sky_fog_at(eye.x, eye.z))
-    else {
+    let Some((now, cave)) = air_at(&generator, player.eye()) else {
         return;
     };
-    if sent.is_some_and(|sent| !moved(sent, now)) {
+    if sent.is_some_and(|(sent, was_cave)| was_cave == cave && !moved(sent, now)) {
         return;
     }
-    *sent = Some(now);
+    *sent = Some((now, cave));
     targets.write(SkyFogTarget {
         sky: now.sky,
         fog: now.fog,
+        cave,
     });
 }
 
@@ -178,6 +183,7 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert_eq!(bytes(sent[0].sky), [0x87, 0xce, 0xeb]);
         assert_eq!(bytes(sent[0].fog), [0xff, 0xff, 0xff]);
+        assert!(!sent[0].cave);
     }
 
     #[test]
@@ -193,7 +199,8 @@ mod tests {
             first,
             vec![SkyFogTarget {
                 sky: want.sky,
-                fog: want.fog
+                fog: want.fog,
+                cave: false,
             }]
         );
         assert!(tick(&mut app).is_empty());
@@ -216,7 +223,8 @@ mod tests {
             sent,
             vec![SkyFogTarget {
                 sky: want.sky,
-                fog: want.fog
+                fog: want.fog,
+                cave: false,
             }]
         );
     }
@@ -276,5 +284,9 @@ mod tests {
             .collect();
         assert_eq!(caves, [HereCave(Some(0))]);
         assert_eq!(sky[0].fog, [20.0, 40.0, 120.0].map(|c: f32| c / 255.0));
+        assert!(
+            sky[0].cave,
+            "a Cave Biome's air is marked so the hour leaves it alone"
+        );
     }
 }

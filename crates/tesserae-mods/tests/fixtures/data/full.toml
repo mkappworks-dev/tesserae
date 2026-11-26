@@ -190,6 +190,7 @@ humidity-size-m = 640.0
 day-length-s = 1200.0
 start-hour = 7.0
 day-share = 0.7
+tilt-deg = 25.0
 
 [[biomes]]
 name = "dry"

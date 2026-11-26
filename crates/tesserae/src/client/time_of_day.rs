@@ -77,10 +77,6 @@ pub struct ClientTimeOfDay {
 }
 
 impl ClientTimeOfDay {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the light, sky and sound read it next")
-    )]
     pub fn sky(&self) -> Option<&SkyParams> {
         self.sky.as_ref()
     }
@@ -116,18 +112,12 @@ impl ClientTimeOfDay {
         if hour >= 24.0 { hour - 24.0 } else { hour }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the light, sky and sound read it next")
-    )]
+    #[cfg_attr(not(test), expect(dead_code, reason = "the sound mix reads it next"))]
     pub fn daylight(&self) -> f32 {
-        sky::daylight(sky::sun_elevation_deg(self.hour()))
+        let tilt = self.sky.as_ref().map_or(0.0, |sky| sky.tilt_deg);
+        sky::daylight(sky::sun_elevation_deg(self.hour(), tilt))
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the light, sky and sound read it next")
-    )]
     /// 0 is full and 4 new.
     pub fn moon_phase(&self) -> u8 {
         self.sky
@@ -148,7 +138,7 @@ pub fn clock_label(day: u64, hour: f32) -> String {
 }
 
 /// Advances before reading, as a message's time is the Server's at sending.
-fn follow(
+pub(super) fn follow(
     time: Res<Time>,
     mut skies: MessageReader<WorldSky>,
     mut syncs: MessageReader<TimeOfDaySync>,
@@ -180,6 +170,7 @@ mod tests {
         day_length_s: 1200.0,
         start_hour: 7.0,
         day_share: 0.7,
+        tilt_deg: 25.0,
     };
 
     const RATE: f32 = 64.0;

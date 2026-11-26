@@ -16,6 +16,8 @@ pub struct FluidSurface {
     /// The fluid Material's light dimming, which sets how far it can be seen
     /// through.
     pub dimming: u8,
+    /// Whether the fluid gives off light, so the hour does not darken it.
+    pub emits: bool,
 }
 
 /// The fluid at the eye's cell, or the highest within `reach_m` below it.
@@ -64,10 +66,12 @@ pub fn fluid_at(
         .iter()
         .fold(fluid.surface, |m, l| m.max(l.surface));
     let surface_y_m = (y as f32 + f32::from(wettest) / f32::from(Fluid::FULL_SURFACE)) * size;
+    let def = tables.materials.def(fluid.material);
     (surface_y_m >= eye_m[1] - reach_m).then_some(FluidSurface {
         material: fluid.material,
         surface_y_m,
-        dimming: tables.materials.def(fluid.material).dimming,
+        dimming: def.dimming,
+        emits: def.emission > 0,
     })
 }
 
@@ -116,6 +120,7 @@ mod tests {
                 material: f.water,
                 surface_y_m: 4.0,
                 dimming: 2,
+                emits: false,
             })
         );
     }

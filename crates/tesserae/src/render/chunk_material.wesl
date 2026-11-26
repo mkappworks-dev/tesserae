@@ -118,10 +118,17 @@ const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 // exposure works in: 4.0 on screen at Bevy's default Exposure (EV100 9.7).
 const BLOCK_LIGHT_STRENGTH: f32 = 3992.0;
 
-// The ambient dome a face no sky light reaches still gets, as a share of `SKY_AMBIENT` in
-// chunk_view.rs: about 96 of it, so a sealed cave's walls read as shapes and not a void, while a
-// torch is still what lights it. The sun gets none.
-const UNLIT_AMBIENT: f32 = 0.0642;
+// Guards the division below: a black channel of the ambient shows no ambient at all, floor or not.
+const MIN_AMBIENT: f32 = 1e-3;
+
+// The share of the hour's ambient that is the noon floor a face no sky light reaches keeps
+// (`tesserae_core::sky::CAVE_FLOOR`), so a sealed cave looks the same at every hour: bevy_pbr
+// multiplies the occlusion by the hour's ambient, and this divides it back out. Per channel, so a
+// blue night does not tint the cave either.
+fn cave_floor() -> vec3<f32> {
+    let noon = bitcast<f32>(constants::CHUNK_CAVE_FLOOR) * bitcast<f32>(constants::CHUNK_NOON_AMBIENT);
+    return noon / max(view_bindings::lights.ambient_color.rgb, vec3<f32>(MIN_AMBIENT));
+}
 
 // The share of screen-space occlusion the sun's light takes as well as the sky's.
 const SUN_OCCLUSION: f32 = 0.5;
@@ -247,7 +254,7 @@ fn fragment(
     // cave past its faint floor. pbr_types.wesl's own doc on that field says "use this for custom
     // shadow maps", which is exactly what a sky-light flood-fill is.
     // The dome share scales the sky only, so a cave's faint floor stays as it was.
-    pbr_input.diffuse_occlusion *= vec3<f32>(max(sky * in.sky_view, UNLIT_AMBIENT));
+    pbr_input.diffuse_occlusion *= max(vec3<f32>(sky * in.sky_view), cave_floor());
     pbr_input.directional_shadow_factor *= sky;
 
     // Block light is a local source, so it is emissive: tinted by the Voxel's

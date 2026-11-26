@@ -1,10 +1,11 @@
 use tesserae_core::sky::{Clock, Pin, SkyParams, TimeOfDay, daylight, sun_elevation_deg};
 
-/// Terra's: a 20-minute day, the sun up 0.7 of it, a World starting at 07:00.
+/// Terra's: a 20-minute day, the sun up 0.7 of it, a World starting at 07:00, the path 25° south.
 const TERRA: SkyParams = SkyParams {
     day_length_s: 1200.0,
     start_hour: 7.0,
     day_share: 0.7,
+    tilt_deg: 25.0,
 };
 
 /// 1200 s of 1/64 s steps.
@@ -12,6 +13,10 @@ const TERRA_DAY: u64 = 76_800;
 
 fn share(day_share: f32) -> SkyParams {
     SkyParams { day_share, ..TERRA }
+}
+
+fn tilt(tilt_deg: f32) -> SkyParams {
+    SkyParams { tilt_deg, ..TERRA }
 }
 
 fn hour(steps: u64, sky: &SkyParams) -> f32 {
@@ -45,12 +50,22 @@ fn the_sun_rises_at_six_and_sets_at_eighteen_under_any_day_share() {
             hour(sunset, &sky)
         );
         assert!(close(hour(TERRA_DAY / 2, &sky), 12.0), "{s}");
-        assert!(close(sun_elevation_deg(hour(sunrise, &sky)), 0.0));
-        assert!(close(sun_elevation_deg(hour(sunset, &sky)), 0.0));
+        for tilt in [0.0, 25.0, 60.0] {
+            assert!(close(sun_elevation_deg(hour(sunrise, &sky), tilt), 0.0));
+            assert!(close(sun_elevation_deg(hour(sunset, &sky), tilt), 0.0));
+        }
     }
-    assert!(close(sun_elevation_deg(12.0), 90.0));
-    assert!(close(sun_elevation_deg(0.0), -90.0));
-    assert!(close(sun_elevation_deg(9.0), 45.0));
+    assert!(close(sun_elevation_deg(12.0, 0.0), 90.0));
+    assert!(close(sun_elevation_deg(0.0, 0.0), -90.0));
+    assert!(close(sun_elevation_deg(9.0, 0.0), 45.0));
+}
+
+#[test]
+fn the_noon_sun_stands_the_tilt_from_overhead() {
+    for tilt in [0.0, 25.0, 60.0] {
+        assert!(close(sun_elevation_deg(12.0, tilt), 90.0 - tilt), "{tilt}");
+        assert!(close(sun_elevation_deg(0.0, tilt), tilt - 90.0), "{tilt}");
+    }
 }
 
 #[test]
@@ -238,7 +253,7 @@ fn daylight_follows_the_sun_through_the_day() {
 #[test]
 fn each_sky_rule_names_its_field() {
     assert_eq!(TERRA.validate(), Ok(()));
-    let cases: [(SkyParams, &str); 8] = [
+    let cases: [(SkyParams, &str); 11] = [
         (
             SkyParams {
                 day_length_s: 59.9,
@@ -277,6 +292,9 @@ fn each_sky_rule_names_its_field() {
         (share(0.0), "sky.day_share"),
         (share(1.0), "sky.day_share"),
         (share(f32::NAN), "sky.day_share"),
+        (tilt(-1.0), "sky.tilt_deg"),
+        (tilt(60.5), "sky.tilt_deg"),
+        (tilt(f32::NAN), "sky.tilt_deg"),
     ];
     for (sky, field) in cases {
         assert_eq!(sky.validate().unwrap_err().field, field, "{sky:?}");
@@ -290,4 +308,5 @@ fn each_sky_rule_names_its_field() {
         .validate()
         .is_ok()
     );
+    assert!(tilt(0.0).validate().is_ok() && tilt(60.0).validate().is_ok());
 }

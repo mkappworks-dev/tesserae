@@ -106,6 +106,7 @@ pub(super) struct Sky {
     day_length_s: f32,
     start_hour: f32,
     day_share: f32,
+    tilt_deg: f32,
 }
 
 impl From<Sky> for content::SkyParams {
@@ -114,6 +115,7 @@ impl From<Sky> for content::SkyParams {
             day_length_s: s.day_length_s,
             start_hour: s.start_hour,
             day_share: s.day_share,
+            tilt_deg: s.tilt_deg,
         }
     }
 }

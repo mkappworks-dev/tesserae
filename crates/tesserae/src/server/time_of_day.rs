@@ -139,6 +139,7 @@ mod tests {
         day_length_s: 1200.0,
         start_hour: 7.0,
         day_share: 0.7,
+        tilt_deg: 25.0,
     };
 
     fn opened(pin: Option<&str>) -> WorldClock {

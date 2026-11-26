@@ -331,6 +331,10 @@ last: `day-length-s` (at least 60), `start-hour` (from 0 up to 24) and
 `none` holds the World at noon, so a Game that declares no sky looks as before.
 A Declaration built against the earlier 0.3 text needs a rebuild.
 
+`sky-params` then gained `tilt-deg` last, from 0 to 60: how far the sun's path
+leans toward the south (+Z), so the noon sun stands that far from overhead. A
+Declaration built against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and
