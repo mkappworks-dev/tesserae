@@ -180,7 +180,9 @@ fn the_clock_advances_one_step_per_logical_step_and_holds_while_the_cycle_is_off
     }
     assert_eq!(clock.time().steps(), start + 64);
     assert_eq!(clock.steps_per_s(), 64.0);
+    assert!(clock.cycle());
     clock.set_cycle(false);
+    assert!(!clock.cycle());
     for _ in 0..64 {
         clock.step();
     }

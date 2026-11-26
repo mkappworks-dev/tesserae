@@ -508,6 +508,8 @@ mod tests {
             biomes: None,
             player_mode: None,
             mode_changes: Default::default(),
+            sky: false,
+            daylight_cycle: true,
         };
         let folder = library::create(&worlds.0, &sidecar).unwrap();
         let before = snapshot(&folder);
@@ -545,6 +547,8 @@ mod tests {
             biomes: None,
             player_mode: None,
             mode_changes: Default::default(),
+            sky: false,
+            daylight_cycle: true,
         };
         let folder = library::create(&worlds.0, &sidecar).unwrap();
         let prepare = || {

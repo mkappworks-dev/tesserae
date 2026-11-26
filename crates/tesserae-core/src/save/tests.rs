@@ -85,6 +85,7 @@ pub(super) fn fixture() -> Commit {
         map: Default::default(),
         game_mode: GameMode::Creative,
         time_of_day: None,
+        daylight_cycle: true,
     }
 }
 
@@ -1851,6 +1852,20 @@ mod dropped_items {
         };
         let back: Commit = serde_json::from_value(serde_json::to_value(&dusk).unwrap()).unwrap();
         assert_eq!(back.time_of_day, Some(123_456));
+    }
+
+    #[test]
+    fn a_commit_without_a_daylight_cycle_runs_it_and_one_turned_off_stays_off() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        value.as_object_mut().unwrap().remove("daylight_cycle");
+        let old: Commit = serde_json::from_value(value).unwrap();
+        assert!(old.daylight_cycle, "the default is on, not bool's");
+        let off = Commit {
+            daylight_cycle: false,
+            ..fixture()
+        };
+        let back: Commit = serde_json::from_value(serde_json::to_value(&off).unwrap()).unwrap();
+        assert!(!back.daylight_cycle);
     }
 
     #[test]

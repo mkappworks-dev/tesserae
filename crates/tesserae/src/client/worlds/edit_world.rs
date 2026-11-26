@@ -1,5 +1,5 @@
-//! Edit World: renaming, game mode changes waiting for the next open, and
-//! deleting.
+//! Edit World: renaming, game mode and Daylight cycle changes waiting for the
+//! next open, and deleting.
 
 use super::*;
 
@@ -12,8 +12,10 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             };
             let name = entry.name().unwrap_or_default().to_owned();
             let chosen = entry.details().map_or_else(Modes::default, modes);
+            let on = entry.details().is_none_or(cycle);
             l.rename = name;
             l.modes = chosen;
+            l.cycle = on;
             l.selected = Some(path.clone());
             l.show(Screen::Edit(path));
         }
@@ -54,6 +56,11 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
                 own: mode,
             };
             l.refocus = Some(Act::EditMode(mode));
+            l.version += 1;
+        }
+        Act::EditCycle(on) => {
+            l.cycle = on;
+            l.refocus = Some(Act::EditCycle(on));
             l.version += 1;
         }
         Act::SaveName => {
@@ -113,9 +120,11 @@ pub(super) fn on_edit_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
     }
 }
 
-/// Writes Edit World's name and mode to the World's save.
+/// Writes Edit World's name, mode and Daylight cycle to the World's save.
 fn save(l: &Launcher, path: &Path) -> Result<(), String> {
-    let current = l.entry(path).and_then(Entry::details).map(saved_modes);
+    let details = l.entry(path).and_then(Entry::details);
+    let current = details.map(saved_modes);
+    let was_cycle = details.map_or(l.cycle, |d| d.daylight_cycle);
     let name = library::valid_name(&l.rename).map_err(|_| too_long())?;
     library::rename(path, &name).map_err(describe)?;
     // Applied by the Server when the World next opens; nothing changes in play.
@@ -123,11 +132,12 @@ fn save(l: &Launcher, path: &Path) -> Result<(), String> {
     let changes = library::ModeChanges {
         default: (now.default != was.default).then_some(now.default),
         own: (now.own != was.own).then_some(now.own),
+        daylight_cycle: (l.cycle != was_cycle).then_some(l.cycle),
     };
     library::request_modes(path, changes).map_err(describe)
 }
 
-/// Whether Edit World holds a name or mode not yet saved.
+/// Whether Edit World holds a name, mode or Daylight cycle not yet saved.
 pub(super) fn unsaved(l: &Launcher) -> bool {
     let Screen::Edit(path) = &l.screen else {
         return false;
@@ -136,7 +146,10 @@ pub(super) fn unsaved(l: &Launcher) -> bool {
         return false;
     };
     let named = entry.name().unwrap_or_default() != l.rename.trim();
-    named || entry.details().is_some_and(|d| modes(d) != l.modes)
+    named
+        || entry
+            .details()
+            .is_some_and(|d| modes(d) != l.modes || cycle(d) != l.cycle)
 }
 
 /// A World's default game mode, for Players new to it, and the player's own.
@@ -161,6 +174,14 @@ pub(super) fn modes(details: &Sidecar) -> Modes {
         default: details.mode_changes.default.unwrap_or(saved.default),
         own: details.mode_changes.own.unwrap_or(saved.own),
     }
+}
+
+/// A World's Daylight cycle once any requested change has applied.
+pub(super) fn cycle(details: &Sidecar) -> bool {
+    details
+        .mode_changes
+        .daylight_cycle
+        .unwrap_or(details.daylight_cycle)
 }
 
 pub(super) fn describe(error: tesserae_core::save::Error) -> String {

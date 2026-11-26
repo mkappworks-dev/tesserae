@@ -468,6 +468,7 @@ pub(crate) fn preview(
             })
             .collect(),
         climate: params.climate,
+        sky: loaded.sky.is_some(),
         ground: params.ground.map(ground),
         materials: {
             let ground =
@@ -592,6 +593,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         map: Default::default(),
         game_mode: Default::default(),
         time_of_day: None,
+        daylight_cycle: true,
     };
     Writer::acquire(path, &id, &content)
         .unwrap()
@@ -2366,6 +2368,7 @@ layers = [["{row}"]]
                 map: Default::default(),
                 game_mode: Default::default(),
                 time_of_day: None,
+                daylight_cycle: true,
             };
             Writer::acquire(&path, &id, &content)
                 .unwrap()

@@ -2264,6 +2264,13 @@ pub struct Commit<C = SavedChunk, P = ([i32; 3], Simulation)> {
     /// it, or by a Game with no sky: opens at the Game's start hour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_of_day: Option<u64>,
+    /// Absent in commits written before the setting: those Worlds run their cycle.
+    #[serde(default = "daylight_cycle_on")]
+    pub daylight_cycle: bool,
+}
+
+fn daylight_cycle_on() -> bool {
+    true
 }
 
 impl<C, P> Commit<C, P> {
@@ -2288,6 +2295,7 @@ impl<C, P> Commit<C, P> {
             map,
             game_mode,
             time_of_day,
+            daylight_cycle,
         } = self;
         let head = Commit {
             format,
@@ -2308,6 +2316,7 @@ impl<C, P> Commit<C, P> {
             map,
             game_mode,
             time_of_day,
+            daylight_cycle,
         };
         (head, chunks, paused)
     }

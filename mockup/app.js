@@ -20,6 +20,7 @@ const games = {
     ],
     seed: "where-the-river-turns",
     required: [],
+    sky: true,
   },
   Tidewater: {
     about: "Islands & quiet lagoons",
@@ -277,6 +278,7 @@ function startCreate(from) {
     seed: from?.seed || randomSeed(),
     voxel: from?.voxel || "1",
     mode: from?.mode || "Creative",
+    cycle: from ? from.cycle !== false : true,
     mods: clone(from?.mods || []),
     biomes: clone(from?.biomes || defaultBiomes("Terra")),
     tempSize: from?.tempSize || 256,
@@ -333,6 +335,7 @@ function startEdit(id) {
     voxel: w.voxel,
     mode: w.mode,
     playerMode: w.playerMode,
+    cycle: w.cycle !== false,
     dirty: false,
   });
   render();
@@ -678,12 +681,31 @@ function voxelPicks(value) {
     "",
   )}</div><small class="mode-hint">${VOXEL_SIZES.find(([size]) => size === value)?.[1] || ""}</small></fieldset>`;
 }
+// A Game without a sky has no cycle, so neither World screen shows it.
+const CYCLE_HINTS = {
+  on: "The sun rises and sets, and the hours pass.",
+  off: "The sky holds at its current hour.",
+};
+function cyclePicks(on, note) {
+  const legend = "Daylight cycle";
+  return `<fieldset class="mode-picks cycle-picks"><legend class="section-label">${legend}</legend><div class="segmented" role="radiogroup" aria-label="${legend}">${[
+    ["off", "Off"],
+    ["on", "On"],
+  ]
+    .map(
+      ([value, label]) =>
+        `<button type="button" role="radio" class="${(value === "on") === on ? "selected" : ""}" data-action="pick-cycle" data-value="${value}" aria-checked="${(value === "on") === on}">${label}</button>`,
+    )
+    .join(
+      "",
+    )}</div><small class="mode-hint">${note || CYCLE_HINTS[on ? "on" : "off"]}</small></fieldset>`;
+}
 function worldForm() {
   const seedActions = [
     { name: "randomize", label: "Randomize seed", icon: "shuffle" },
     { name: "copy-seed", label: "Copy seed", icon: "copy" },
   ];
-  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}${voxelPicks(state.voxel)}${climateScale()}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
+  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${games[state.game]?.sky ? cyclePicks(state.cycle) : ""}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}${voxelPicks(state.voxel)}${climateScale()}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
 }
 function climateScale() {
   const fields = state.reading.game
@@ -873,6 +895,9 @@ function reviewForm() {
     rows([
       ["Name", esc(state.name.trim() || "New World")],
       ["Game mode", state.mode],
+      ...(games[state.game]?.sky
+        ? [["Daylight cycle", state.cycle ? "On" : "Off"]]
+        : []),
       ["Seed", state.seed ? seedWithCopy(state.seed) : "Random on creation"],
       ["Voxel size", voxel],
       ...(state.reading.game
@@ -910,9 +935,16 @@ function edit() {
     ["Created", w.created],
   ];
   const changed = state.mode !== w.mode || state.playerMode !== w.playerMode;
+  const cycle = games[w.game]?.sky
+    ? cyclePicks(
+        state.cycle,
+        state.cycle !== (w.cycle !== false) &&
+          "Daylight cycle changes take effect when the World next opens.",
+      )
+    : "";
   return frame({
     title: "Edit World",
-    body: `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("worldMode", state.playerMode, { legend: "Game mode", quiet: true })}<small class="muted">${changed ? "Mode changes take effect when the World next opens." : "Creative: take any Material, no damage or hunger. Survival: gather what you place."}</small></div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview(`data-world-id="${w.id}"`, [320, 180], `Terrain preview of ${w.name}`)}<span class="form-label fixed-label">Fixed at creation</span><dl class="review-rows fixed-rows">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></aside></div>`,
+    body: `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("worldMode", state.playerMode, { legend: "Game mode", quiet: true })}<small class="muted">${changed ? "Mode changes take effect when the World next opens." : "Creative: take any Material, no damage or hunger. Survival: gather what you place."}</small>${cycle}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview(`data-world-id="${w.id}"`, [320, 180], `Terrain preview of ${w.name}`)}<span class="form-label fixed-label">Fixed at creation</span><dl class="review-rows fixed-rows">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></aside></div>`,
     prompts: [
       ["Ctrl+Enter", "Save", "save-edit"],
       ["D", "New World with these settings", "duplicate", w.id],
@@ -933,7 +965,8 @@ function editUnsaved() {
     !!w &&
     (state.name.trim() !== w.name ||
       state.mode !== w.mode ||
-      state.playerMode !== w.playerMode)
+      state.playerMode !== w.playerMode ||
+      state.cycle !== (w.cycle !== false))
   );
 }
 function trustItems() {
@@ -1246,6 +1279,7 @@ function action(name, value) {
     w.name = state.name.trim() || w.name;
     w.mode = state.mode;
     w.playerMode = state.playerMode;
+    w.cycle = state.cycle;
     action("duplicate-go", value);
     return;
   }
@@ -1285,6 +1319,17 @@ function action(name, value) {
       render();
       $(`.game-row[data-value="${value}"]`)?.focus({ preventScroll: true });
     } else if (state.screen === "wizard" && state.step === 0) goStep(1);
+    return;
+  }
+  if (name === "pick-cycle") {
+    state.cycle = value === "on";
+    state.dirty = true;
+    const y = $(".body").scrollTop;
+    render();
+    $(".body").scrollTop = y;
+    $(`[data-action="pick-cycle"][data-value="${value}"]`)?.focus({
+      preventScroll: true,
+    });
     return;
   }
   if (name === "pick-voxel") {
@@ -1487,6 +1532,7 @@ function action(name, value) {
       humiditySize: Number(state.humiditySize),
       mode: state.mode,
       playerMode: state.mode,
+      cycle: state.cycle,
       last: "Just created",
       created: "Today",
     };
@@ -1506,6 +1552,7 @@ function action(name, value) {
     w.name = state.name.trim();
     w.mode = state.mode;
     w.playerMode = state.playerMode;
+    w.cycle = state.cycle;
     if (w.id === state.activeWorld)
       state.itemAccess = w.playerMode.toLowerCase();
     navigate("worlds");

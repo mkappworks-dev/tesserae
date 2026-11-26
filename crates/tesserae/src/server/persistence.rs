@@ -399,6 +399,14 @@ impl Persistence {
             .unwrap_or_default();
         let game_mode = changes.default.unwrap_or(game_mode);
         let reopened_game_mode = changes.own.or(reopened_game_mode);
+        let daylight_cycle =
+            changes
+                .daylight_cycle
+                .unwrap_or(match (&opening.recovered, &opening.details) {
+                    (Some(r), _) => r.commit.daylight_cycle,
+                    (None, Some(d)) => d.daylight_cycle,
+                    (None, None) => true,
+                });
         let mut restored_entities = None;
         let mut initial_containers = Vec::new();
         let mut initial_looted = Vec::new();
@@ -500,6 +508,8 @@ impl Persistence {
                     "New World - unsaved".into(),
                 )
             };
+        let mut clock = Clock::open(loaded.sky, saved_time);
+        clock.set_cycle(daylight_cycle);
         let writer = opening
             .directory
             .as_ref()
@@ -517,6 +527,8 @@ impl Persistence {
                 d.last_played_unix_s = library::now_unix_s();
                 d.game_mode = game_mode;
                 d.player_mode = Some(reopened_game_mode.unwrap_or(game_mode));
+                d.sky = loaded.sky.is_some();
+                d.daylight_cycle = daylight_cycle;
                 // Display data only: failing to record last-played never blocks play.
                 if !d.pending
                     && let Err(e) = library::write(&path, &d)
@@ -568,7 +580,7 @@ impl Persistence {
             reopened_eye,
             game_mode,
             reopened_game_mode,
-            clock: Clock::open(loaded.sky, saved_time),
+            clock,
             initial_simulation,
             initial_chunks,
             opening_detail: detail,
@@ -926,7 +938,11 @@ pub(super) fn drive(
     let generation = p.generation.clone();
     let generator = p.generator;
     let game_mode = p.game_mode;
-    let time_of_day = clock.and_then(|c| c.clock().saved()).map(|t| t.steps());
+    let time_of_day = clock
+        .as_ref()
+        .and_then(|c| c.clock().saved())
+        .map(|t| t.steps());
+    let daylight_cycle = clock.is_none_or(|c| c.clock().cycle());
     let settings = p.settings;
     let id = p.id.clone();
     let pending = p
@@ -980,6 +996,7 @@ pub(super) fn drive(
                 map: saved_map,
                 game_mode,
                 time_of_day,
+                daylight_cycle,
             };
             writer.write_draft(commit)?;
             if let Err(e) = writer.retain() {

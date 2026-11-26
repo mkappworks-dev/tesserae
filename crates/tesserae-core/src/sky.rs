@@ -196,6 +196,10 @@ impl Clock {
         self.cycle = on;
     }
 
+    pub fn cycle(&self) -> bool {
+        self.cycle
+    }
+
     /// Stops the clock at `time` whatever the Daylight cycle, for a capture.
     pub fn hold(&mut self, time: TimeOfDay) {
         if self.sky.is_some() {

@@ -710,6 +710,7 @@ fn real_terra_builds_nothing_new_or_reopened() {
         map: Default::default(),
         game_mode: Default::default(),
         time_of_day: None,
+        daylight_cycle: true,
         looted: Vec::new(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
@@ -922,6 +923,8 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
         biomes: None,
         player_mode: None,
         mode_changes: Default::default(),
+        sky: true,
+        daylight_cycle: true,
     }
 }
 
@@ -1562,6 +1565,7 @@ fn a_survival_death_reopens_dead_after_edit_world_switches_the_player_to_creativ
         library::ModeChanges {
             default: None,
             own: Some(GameMode::Creative),
+            daylight_cycle: None,
         },
     )
     .unwrap();
@@ -2322,6 +2326,7 @@ fn mode_changes_from_edit_world_apply_at_the_next_open_and_not_before() {
         library::ModeChanges {
             default: Some(GameMode::Survival),
             own: Some(GameMode::Survival),
+            daylight_cycle: None,
         },
     )
     .unwrap();
@@ -2722,6 +2727,88 @@ fn a_world_saved_without_a_time_of_day_opens_at_the_games_start_hour() {
     let reopened = clock(&Rig::new(&dir));
     assert_eq!(reopened.time().day(reopened.sky().unwrap()), 0);
     assert!((reopened.hour() - 7.0).abs() < 1e-3);
+}
+
+#[test]
+fn a_world_created_with_the_daylight_cycle_off_opens_at_the_start_hour_and_stays_there() {
+    let worlds = Directory::new();
+    let created = library::Sidecar {
+        daylight_cycle: false,
+        ..details("Still", 7, 1.0)
+    };
+    let path = library::create(&worlds.0, &created).unwrap();
+    let mut rig = reopen(&path);
+    let start = clock(&rig);
+    assert!((start.hour() - 7.0).abs() < 1e-3, "Terra starts at 07:00");
+    assert!(!start.runs());
+    for _ in 0..200 {
+        rig.tick();
+    }
+    assert_eq!(clock(&rig).time(), start.time());
+    rig.settled_save();
+    drop(rig);
+    assert!(!save::inspect(&path).unwrap().unwrap().commit.daylight_cycle);
+    let reopened = clock(&reopen(&path));
+    assert_eq!(reopened.time(), start.time());
+    assert!(!reopened.runs());
+}
+
+#[test]
+fn the_daylight_cycle_from_edit_world_applies_at_the_next_open_and_survives_a_reopen() {
+    let worlds = Directory::new();
+    let path = with_biomes(&worlds, "Cycle", None);
+    let mut rig = reopen(&path);
+    for _ in 0..200 {
+        rig.tick();
+    }
+    rig.settled_save();
+    drop(rig);
+    let request = |on| {
+        library::request_modes(
+            &path,
+            library::ModeChanges {
+                daylight_cycle: Some(on),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    };
+    request(false);
+    let saved = save::inspect(&path).unwrap().unwrap().commit;
+    assert!(saved.daylight_cycle, "not before the open");
+
+    let mut rig = reopen(&path);
+    let held = clock(&rig);
+    assert_eq!(held.time().steps(), saved.time_of_day.unwrap());
+    assert!(!held.runs());
+    for _ in 0..200 {
+        rig.tick();
+    }
+    assert_eq!(clock(&rig).time(), held.time(), "off holds the hour");
+    rig.settled_save();
+    drop(rig);
+    let commit = save::inspect(&path).unwrap().unwrap().commit;
+    assert!(!commit.daylight_cycle);
+    assert_eq!(commit.time_of_day, Some(held.time().steps()));
+    let details = library::read(&path).unwrap().unwrap();
+    assert!(details.mode_changes.is_empty(), "applied once");
+    assert!(!details.daylight_cycle);
+    assert!(details.sky);
+    assert!(!clock(&reopen(&path)).runs(), "off survives a reopen");
+
+    request(true);
+    let mut rig = reopen(&path);
+    let resumed = clock(&rig);
+    assert_eq!(resumed.time(), held.time(), "on resumes from the held hour");
+    assert!(resumed.runs());
+    for _ in 0..200 {
+        rig.tick();
+    }
+    assert!(clock(&rig).time().steps() > held.time().steps());
+    rig.settled_save();
+    drop(rig);
+    assert!(save::inspect(&path).unwrap().unwrap().commit.daylight_cycle);
+    assert!(clock(&reopen(&path)).runs(), "on survives a reopen");
 }
 
 #[test]
