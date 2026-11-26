@@ -183,7 +183,7 @@ const WATER_EYES_M: [(&str, Vec3); 5] = [
     // 60 m west of the middle of a lake standing at 67.25 m, 19 m deep.
     ("lake", Vec3::new(-738.3, 69.7, 935.3)),
     // 3 m over a pool at 37.6 m, above a lip and pools falling to 32.4 m.
-    ("river", Vec3::new(-4061.3, 40.7, 424.6)),
+    ("river", Vec3::new(-4061.3, 40.6, 448.7)),
     // At the water's edge of a beach, the sea at 24 m deepening to 10 m within 100 m.
     ("coast", Vec3::new(-8247.3, 26.7, 2487.4)),
     // 4 m under the lake's surface, over its deepest Voxel.

@@ -51,11 +51,34 @@ const BANK_SLOPE: f32 = 0.5;
 /// least `STENCIL - 1` nodes away, less the meander's push. A reach past that dropped a segment at
 /// a node line while its valley still applied, and the ground stepped there.
 const VALLEY_REACH_M: f32 = (STENCIL - 1) as f32 * NODE_M - MEANDER_M;
+/// How far a stream of `width_m` swings to either side, up to [`MEANDER_M`], which the stencil
+/// and the valley's reach are bounded by; and how much of its bending is long bends rather than
+/// tight wiggles, 0 for the narrowest brook and 1 for a river of [`LONG_BEND_WIDTH_M`].
+fn meander_m(width_m: f32) -> (f32, f32) {
+    let amount_m = (2.0 * width_m).clamp(3.0, MEANDER_M);
+    let long = ((width_m - BROOK_WIDTH_M) / (LONG_BEND_WIDTH_M - BROOK_WIDTH_M)).clamp(0.0, 1.0);
+    (amount_m, long)
+}
+
+/// The point a stream's channel is drawn from, `amount_m` off `(x_m, z_m)`: tight bends and long
+/// ones, each over a fixed size and blended by `long`. A size that changed with the stream would
+/// stretch the noise about the origin, so the warp would swing kilometres out.
+fn meander_at(x_m: f32, z_m: f32, amount_m: f32, long: f32) -> (f32, f32) {
+    let (tx, tz) = crate::noise::warp2(x_m, z_m, MEANDER_SEED, TIGHT_BEND_M, amount_m);
+    let (lx, lz) = crate::noise::warp2(x_m, z_m, MEANDER_SEED ^ 1, LONG_BEND_M, amount_m);
+    (tx + (lx - tx) * long, tz + (lz - tz) * long)
+}
+
 /// How far the narrowest brook's gully cuts the ground: 1 in 2 banks up to 6 m deep.
 const BROOK_REACH_M: f32 = 12.0;
 /// The nodes on each side of a point whose segments it asks.
 const STENCIL: i32 = 4;
-/// The most the meander warp moves a point.
+/// The size of a brook's tight bends and a large river's long ones.
+const TIGHT_BEND_M: f32 = 40.0;
+const LONG_BEND_M: f32 = 240.0;
+/// The width from which a stream bends only in long bends.
+const LONG_BEND_WIDTH_M: f32 = 20.0;
+/// The most the meander warp moves a point: a river's swing, and a brook's is less.
 const MEANDER_M: f32 = 14.0;
 
 const NO_PARENT: u8 = 8;
@@ -331,9 +354,6 @@ impl Drainage {
             }
         }
 
-        // Bends the lattice's straight 8-way segments into meanders; bounded under a node's width so
-        // the stencil below still holds every segment that can reach the point.
-        let (qx, qz) = crate::noise::warp2(x_m, z_m, MEANDER_SEED, 90.0, MEANDER_M);
         let (mut cut_m, mut river_cut_m) = (0.0f32, 0.0f32);
         for dj in -STENCIL + 1..=STENCIL {
             for di in -STENCIL + 1..=STENCIL {
@@ -353,9 +373,18 @@ impl Drainage {
                     (nj + sj) as f32 * self.node_m,
                 ];
                 let ab = [b[0] - a[0], b[1] - a[1]];
-                let t = (((qx - a[0]) * ab[0] + (qz - a[1]) * ab[1])
-                    / (ab[0] * ab[0] + ab[1] * ab[1]))
-                    .clamp(0.0, 1.0);
+                let along = |x: f32, z: f32| {
+                    (((x - a[0]) * ab[0] + (z - a[1]) * ab[1]) / (ab[0] * ab[0] + ab[1] * ab[1]))
+                        .clamp(0.0, 1.0)
+                };
+                // Bends the lattice's straight 8-way segments into meanders sized by the stream,
+                // blended between its two ends as its width is, so a tributary and the river it
+                // joins bend alike where they meet.
+                let s0 = along(x_m, z_m);
+                let w0 = river_width_m(n.catchment) * (1.0 - s0) + river_width_m(p.catchment) * s0;
+                let (amount_m, long) = meander_m(w0);
+                let (qx, qz) = meander_at(x_m, z_m, amount_m, long);
+                let t = along(qx, qz);
                 let (cx, cz) = (a[0] + ab[0] * t, a[1] + ab[1] * t);
                 let (dx, dz) = (qx - cx, qz - cz);
                 let d = (dx * dx + dz * dz).sqrt();
@@ -636,6 +665,38 @@ mod tests {
             brook > 100 && river > 100,
             "{brook} brook cuts, {river} river cuts"
         );
+    }
+
+    #[test]
+    fn meanders_grow_with_the_stream_and_stay_inside_the_stencil() {
+        let widths: Vec<f32> = (STREAM_NODES..40_000)
+            .step_by(7)
+            .map(river_width_m)
+            .collect();
+        let bends: Vec<(f32, f32)> = widths.iter().map(|&w| meander_m(w)).collect();
+        assert!(
+            bends
+                .windows(2)
+                .all(|b| b[1].0 >= b[0].0 && b[1].1 >= b[0].1),
+            "a wider stream bends less"
+        );
+        let (brook, river) = (bends[0], *bends.last().unwrap());
+        assert!(brook.0 * 3.0 <= river.0, "brook {brook:?}, river {river:?}");
+        assert_eq!(
+            (brook.1, river.1),
+            (0.0, 1.0),
+            "brook {brook:?}, river {river:?}"
+        );
+        assert!(
+            bends.iter().all(|&(a, _)| a <= MEANDER_M),
+            "a bend leaves the stencil"
+        );
+        // Never further than the swing, wherever the point is.
+        for k in 0..2000 {
+            let (x, z) = (k as f32 * 977.3 - 9e5, k as f32 * -611.9 + 4e5);
+            let (qx, qz) = meander_at(x, z, MEANDER_M, (k % 11) as f32 / 10.0);
+            assert!((qx - x).hypot(qz - z) <= MEANDER_M * 2f32.sqrt() + 1e-2);
+        }
     }
 
     #[test]
