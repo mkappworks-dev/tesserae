@@ -21,7 +21,7 @@ under the tag `workbench` opens the same Recipes as this one.
 
 **Depends on:** `flora`, `strata`.
 
-**Used by:** `timber`, `brickwork`, `glassworks`.
+**Used by:** `timber`, `brickwork`, `glassworks`, and all five demo Games.
 
 ## Licence and artwork
 

@@ -16,7 +16,7 @@ Glass, light, and the Shapes for building with them.
 
 **Depends on:** `strata`, `flora`, `workshop`.
 
-**Used by:** `meadow`, `lumen`.
+**Used by:** `terra`, `meadow`, `ember`, `tidewater`, `lumen`.
 
 ## Licence and artwork
 

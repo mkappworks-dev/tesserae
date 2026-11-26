@@ -625,10 +625,10 @@ natively; no Mod is called when a Voxel is used
 
 Any row may set `shape`, a Shape by full name (`core:slab`, or a Mod's own),
 which a Player's Place of its Material always uses whatever Shape they chose:
-Terra's 2 by 3 m Door and its 1 m Gate are a thin `terra:panel`, and its
-Workbench a `terra:table`. A Station or Container keeps the Player's
-Orientation; a Door is turned as above. A Shape any row fixes is that row's
-alone: the Player is not offered it to place other Materials in.
+`timber`'s 2 by 3 m Door and its 1 m Gate are a thin `timber:panel`, and
+`workshop`'s Workbench a `workshop:table`. A Station or Container keeps the
+Player's Orientation; a Door is turned as above. A Shape any row fixes is that
+row's alone: the Player is not offered it to place other Materials in.
 
 #### Choosing a Door's hinge
 
@@ -1185,32 +1185,33 @@ mockup with `node mockup/export-templates.mjs`, into
 
 ### Obtainable
 
-Every Material a Template a Biome stands names, alone or in a Settlement, and
-that Settlement's `path`, must be Obtainable in the World: a Player there can
-get its Item without the building. The Engine works it out once, when a World's
-Game and Mods are composed:
+Every Material any Template names, and every Settlement's `path`, must be
+Obtainable in the World: a Player there can get its Item without the building.
+The Engine works it out once, when a World's Game and Mods are composed:
 
 1. Start from what worldgen lays: the World's and each Biome's ground, the lake
    fluid, ores, surface features and crop fields.
 2. Add what those give: breaking a laid Material gives its Plant's yields, else
    its own Item, and a laid Plant grows every Material of that Plant.
-3. Add every Recipe output whose inputs are already Obtainable, until nothing
-   changes. Stations are not checked.
+3. Add every Recipe output whose inputs are already Obtainable, at `hand` or at
+   a Station some Obtainable Material declares, until nothing changes.
 
 Structures, the Catalogue and Mod Commands are not sources: a building is never
 the only source of its own Materials. A `ground` cell is always Obtainable,
 since the Biome lays it, and a fluid cell is not checked: a well is meant to be
-a Settlement's water, even in a World that lays none. A Template or Settlement
-no Biome of the World lists is not checked, as only a Creative Player can place
-it. A breach refuses the World before it opens, naming the Template, the palette
-character (or `foundation`) and the Material:
+a Settlement's water, even in a World that lays none. A Template no Biome lists
+is checked too: the Creative `place` Tool stands it as a Structure. A breach
+refuses the World before it opens, naming the Template, the palette character
+(or `foundation`) and the Material:
 
 ```text
 mod `showcase`: template 0 `hut`: palette `s`: Material `showcase:marble` is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from what is
 ```
 
-Add a Recipe that makes it from Obtainable Items, a Biome or ore that lays it,
-or a dependency on a Mod that does.
+When a Recipe makes it but only at a Station no Player can get, the message ends
+`at a Station a Player can get (needs `oven`)`. Add a Recipe that makes it from
+Obtainable Items, a Biome or ore that lays it, a Recipe for the Station, or a
+dependency on a Mod that does, such as `workshop` for the shared Stations.
 
 ### Biomes stand Structures
 

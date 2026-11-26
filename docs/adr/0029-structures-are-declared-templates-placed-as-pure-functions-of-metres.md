@@ -163,3 +163,10 @@ are where the build is narrower or more exact than they say.
 Coarse levels no longer leave Structures out: from step 22 each stands as an
 Impostor at every coarse level, from the same draws. Plants other than trees
 stay out. See [ADR-0035](0035-a-coarse-level-draws-level-0s-answer.md).
+
+## Amended by ADR-0038
+
+A Recipe counts towards Obtainable only at an Obtainable Station, and every
+declared Template and Settlement path is checked, not only those a Biome stands.
+See
+[ADR-0038](0038-building-materials-come-from-shared-mods-and-a-recipe-needs-an-obtainable-station.md).

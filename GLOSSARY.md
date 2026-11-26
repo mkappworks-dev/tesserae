@@ -597,8 +597,9 @@ where a Structure is placed. Layers below it are underground, such as a cellar.
 
 **Obtainable** — of a Material, that a Player in a World can get its Item: from
 what world generation lays, grows or drops, or by Recipes from things already
-obtainable. Structures and the Catalogue are not sources. Every cell of a
-Template must be obtainable in each World it is used in.
+obtainable, at a Station that is itself obtainable. Structures and the Catalogue
+are not sources. Every cell of a Template must be obtainable in each World it is
+used in.
 
 **Structure** — a Template placed in a World, by world generation, by a Player's
 Tool or by a Site. Rotated about the vertical axis in quarter turns, and the

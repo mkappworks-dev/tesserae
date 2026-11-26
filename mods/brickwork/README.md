@@ -21,7 +21,7 @@ grows arms towards other walls.
 
 **Depends on:** `strata`, `workshop`.
 
-**Used by:** bog (brick is what mud and lava make).
+**Used by:** `terra`; `bog` (brick is what mud and lava make).
 
 ## Licence and artwork
 

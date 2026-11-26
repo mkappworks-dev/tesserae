@@ -24,7 +24,7 @@ and `crops`' wheat at `workshop`'s Stations.
 
 **Depends on:** `flora`, `crops`, `workshop`.
 
-**Used by:** nothing yet.
+**Used by:** `terra`, `meadow`, `ember`, `tidewater`, `lumen`.
 
 ## Licence and artwork
 
