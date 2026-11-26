@@ -483,7 +483,7 @@ fn a_player_walks_through_each_leaf_of_an_open_door_at_every_voxel_size() {
 fn every_window_sits_on_a_whole_cell_and_the_larger_buildings_have_tall_ones() {
     let game = "terra";
     let (_install, loaded) = loaded(game, 1.0);
-    let glass = super::material(&loaded, &format!("{game}:glass"));
+    let glass = super::material(&loaded, "glassworks:glass");
     let exported = export(game);
     let mut tall = Vec::new();
     let mut square = false;

@@ -21,16 +21,15 @@ struct Game {
     loaded: LoadedMods,
     generator: Worldgen,
     chest: MaterialId,
-    name: &'static str,
 }
 
 /// `name` loaded as a World of `size` opens it.
 fn game(name: &'static str, size: f32) -> Game {
     let (install, loaded) = loaded(name, size);
-    game_of(name, size, (install, loaded))
+    game_of(size, (install, loaded))
 }
 
-fn game_of(name: &'static str, size: f32, (install, loaded): (Install, LoadedMods)) -> Game {
+fn game_of(size: f32, (install, loaded): (Install, LoadedMods)) -> Game {
     let generator = Worldgen::new(SEED, size, loaded.world.unwrap())
         .with_templates(&loaded.tables.templates)
         .with_settlements(&loaded.tables.settlements)
@@ -44,7 +43,6 @@ fn game_of(name: &'static str, size: f32, (install, loaded): (Install, LoadedMod
         loaded,
         generator,
         chest,
-        name,
     }
 }
 
@@ -58,7 +56,7 @@ impl Game {
     fn server(&self, chunks: &[(ChunkCoord, Chunk)]) -> App {
         let mut app = app_with_tables(chunks, self.loaded.tables.clone());
         let items = self.loaded.every_item(self.size());
-        let chest_item = format!("{}:chest", self.name);
+        let chest_item = "workshop:chest".to_owned();
         app.insert_resource(WorldSettings {
             voxel_size: self.size(),
             seed: SEED,
@@ -263,7 +261,7 @@ fn settlement_at(terra: &Game, world: &Generated, well: [i32; 3]) -> &'static st
 fn a_settlement_chest_holds_only_its_buildings_table_or_else_its_settlements() {
     let (install, loaded) = loaded("terra", 1.0);
     let town_m = terra_town_m(&loaded);
-    let terra = game_of("terra", 1.0, (install, loaded));
+    let terra = game_of(1.0, (install, loaded));
     let mut seen = BTreeMap::<(&str, bool), usize>::new();
     for (centre_m, half_m) in [(village_m(&terra), 128.0), (town_m, 128.0)] {
         let (world, chests) =
@@ -358,7 +356,7 @@ fn first_voxel(g: &Game, app: &mut App, metre: [i32; 3]) -> [i32; 3] {
     for at in above {
         remove(app, at);
         assert!(
-            dropped_counts(app, &format!("{}:chest", g.name)).is_empty(),
+            dropped_counts(app, "workshop:chest").is_empty(),
             "only the first Voxel draws"
         );
     }

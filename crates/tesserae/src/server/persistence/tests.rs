@@ -900,6 +900,10 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
             ("flora", "0.2.0"),
             ("crops", "0.1.0"),
             ("aquatic", "0.1.0"),
+            ("workshop", "0.1.0"),
+            ("timber", "0.1.0"),
+            ("brickwork", "0.1.0"),
+            ("glassworks", "0.1.0"),
         ]
         .map(|(id, version)| library::ModRef {
             id: id.into(),
@@ -1038,6 +1042,10 @@ fn a_new_world_takes_its_identity_and_settings_from_its_details() {
                 ("flora", "0.2.0", false),
                 ("crops", "0.1.0", false),
                 ("aquatic", "0.1.0", false),
+                ("workshop", "0.1.0", false),
+                ("timber", "0.1.0", false),
+                ("brickwork", "0.1.0", false),
+                ("glassworks", "0.1.0", false),
             ]
             .map(|(id, version, game)| crate::server::mods::Wanted {
                 id: id.into(),

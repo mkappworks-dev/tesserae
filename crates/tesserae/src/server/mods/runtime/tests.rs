@@ -1426,7 +1426,7 @@ fn terra_contract_content_loads_and_terra_builds_nothing_at_spawn() {
             .add_plugins(super::super::plugin);
         assert_eq!(
             h.app.world().resource::<ContentTables>().shapes.len(),
-            usize::from(shape_base) + 3
+            usize::from(shape_base) + 1
         );
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::for_tests(

@@ -667,7 +667,7 @@ mod tests {
                 .map(|s| (s.materials, s.shapes, s.fluids))
         });
         let _ = std::fs::remove_dir_all(&root);
-        assert_eq!(counts, [Some((2, 2, 0)), Some((4, 1, 1)), Some((2, 0, 1))]);
+        assert_eq!(counts, [Some((13, 3, 0)), Some((4, 1, 1)), Some((2, 0, 1))]);
         assert_eq!(Installed::fake(None, &[]).summary("timber"), None);
     }
 
