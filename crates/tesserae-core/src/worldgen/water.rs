@@ -20,26 +20,30 @@ impl Worldgen {
     /// toward its outlet. Zero on dry ground and on the sea, whose motion is waves from Wind. Pure
     /// in the seed and metres, so the same at every Voxel size.
     pub fn flow_at(&self, x_m: f32, z_m: f32) -> [f32; 2] {
-        let sea_m = self.water_level_of(None);
-        match self.terrain.inland_water_m(x_m, z_m) {
-            Some(level_m) if sea_m.is_some_and(|sea_m| level_m > sea_m) => {
-                self.terrain.flow(x_m, z_m)
-            }
+        self.flow_over(self.water_level_m(x_m, z_m), [x_m, z_m])
+    }
+
+    /// [`Self::flow_at`] of a column whose water level is `level_m`.
+    fn flow_over(&self, level_m: Option<f32>, [x_m, z_m]: [f32; 2]) -> [f32; 2] {
+        match (level_m, self.water_level_of(None)) {
+            (Some(level_m), Some(sea_m)) if level_m > sea_m => self.terrain.flow(x_m, z_m),
             _ => [0.0; 2],
         }
+    }
+
+    /// [`Self::water_surface_m`] over global column `[gx, gz]`, read from its Cell's cache when a
+    /// Chunk has built it.
+    fn surface_over(&self, gx: i32, gz: i32) -> Option<f32> {
+        self.wet_m(None, [self.global_m(gx), self.global_m(gz)])
     }
 
     /// The Fall over the column at global Voxel `[gx, gz]`, if it is a lip with a lower pool past
     /// it; of several, the longest drop, the first along [`CARDINALS`] on a tie. A lip is asked on
     /// each Voxel size's own lattice, so a Fall is pure in the seed, metres and Voxel size.
     pub fn fall_at(&self, gx: i32, gz: i32) -> Option<Fall> {
-        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
-        if self.water.is_none() || self.surface_height_m(x_m, z_m) <= self.raw_column(x_m, z_m).0 {
-            return None;
-        }
-        let surface =
-            |dx: i32, dz: i32| self.water_surface_m(self.global_m(gx + dx), self.global_m(gz + dz));
-        CARDINALS
+        self.water?;
+        let surface = |dx: i32, dz: i32| self.surface_over(gx + dx, gz + dz);
+        let fall = CARDINALS
             .iter()
             .filter_map(|&(dx, dz, _)| {
                 let (from_m, to_m) = (surface(dx, dz)?, surface(-dx, -dz)?);
@@ -49,7 +53,38 @@ impl Worldgen {
                     to_m,
                 })
             })
-            .min_by(|a, b| (b.from_m - b.to_m).total_cmp(&(a.from_m - a.to_m)))
+            .min_by(|a, b| (b.from_m - b.to_m).total_cmp(&(a.from_m - a.to_m)))?;
+        // Asked last: the raw column is a drainage walk, and most columns have no pools across.
+        let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
+        (self.surface_height_m(x_m, z_m) > self.raw_column(x_m, z_m).0).then_some(fall)
+    }
+}
+
+impl crate::water_columns::WaterAnswers for Worldgen {
+    fn voxel_size(&self) -> f32 {
+        self.voxel_size
+    }
+
+    fn water_material(&self) -> Option<crate::MaterialId> {
+        self.water.map(|w| w.material)
+    }
+
+    fn water_top(&self, [gx, gz]: [i32; 2]) -> Option<(f32, i32)> {
+        let level_m = self.surface_over(gx, gz)?;
+        Some((level_m, self.level_top(level_m)))
+    }
+
+    fn ground_m(&self, [gx, gz]: [i32; 2]) -> f32 {
+        self.surface_height_m(self.global_m(gx), self.global_m(gz))
+    }
+
+    fn flow(&self, [gx, gz]: [i32; 2]) -> [f32; 2] {
+        let at = [self.global_m(gx), self.global_m(gz)];
+        self.flow_over(self.level_m(None, at), at)
+    }
+
+    fn fall(&self, [gx, gz]: [i32; 2]) -> Option<Fall> {
+        self.fall_at(gx, gz)
     }
 }
 

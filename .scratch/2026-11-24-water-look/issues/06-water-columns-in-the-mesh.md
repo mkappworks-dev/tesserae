@@ -28,11 +28,34 @@ the colour branch.
 
 ## Acceptance criteria
 
-- [ ] Core tests through the builder, with a test double for the water answers:
+- [x] Core tests through the builder, with a test double for the water answers:
       a dry Chunk has no water columns; a generated lake's depth runs from its
       drawn top to its ground; simulated flow points down the surface gradient;
       falling Fluid is flagged; a dammed river column and a Settlement pond take
       the scan rule.
-- [ ] Every existing fluid meshing test passes unchanged.
+- [x] Every existing fluid meshing test passes unchanged.
 - [ ] Mesh job time on the river and coast fixtures against the commit before,
       in Comments.
+
+## Comments
+
+- 2026-11-26, on e0d169eb plus this ticket:
+  - `tesserae_core::water_columns::water_columns` builds them; `ChunkMesh`
+    carries them as `water`, 34 x 34 entries of 4 bytes (Flow in 1/31.75 m/s
+    steps, depth in 1/16 m steps saturating at 16 m, `FALLING` and `FOAM`
+    flags), or none for a Chunk with no fluid. The Server's mesh job passes it
+    the Generator and the fluid table.
+  - Generation packs its water as cubes of the Material, not in the overlay,
+    so the scan reads each Voxel as the fluid simulation does
+    (`Occupants::of`): a packed cube is a Source.
+  - A generated column's foam is a Fall over a neighbour landing toward it.
+    A simulated column is falling when it descends, or when its water runs up
+    past what the job sees and is not a Source.
+  - Apron corners repeat the held column beside them along z where the
+    Generator has no water there.
+  - Cost, in release on terrain_v3's land, 46 wet Chunks over brooks and Falls
+    (load 3): 0.27 ms to mesh one and 0.32 ms for its water columns. The first
+    version asked the drainage some 19 times a column, 1.4 ms; the answers now
+    read the Cell's column cache, and only the Flow walks the drainage.
+  - The mesh job time on the river and coast fixtures waits, with ticket 01's
+    series, for a quiet host.

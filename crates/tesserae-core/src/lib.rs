@@ -49,6 +49,7 @@ pub mod underground;
 pub mod usable;
 pub mod visibility;
 pub mod voxel;
+pub mod water_columns;
 pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};

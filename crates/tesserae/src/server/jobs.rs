@@ -17,6 +17,7 @@ use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_cells};
 #[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::visibility::{Connectivity, connectivity};
+use tesserae_core::water_columns::water_columns;
 use tesserae_core::{
     Chunk, ChunkLight, ChunkMesh, ChunkOverlay, LitChunk, Tables, Worldgen, mesh_chunk,
 };
@@ -372,17 +373,23 @@ pub(in crate::server) struct Built {
     pub from: std::sync::Weak<Chunk>,
 }
 
-/// Meshes one Chunk from a snapshot of it and its six face neighbours. Its
-/// connectivity is worked out again only if `known` is not that Chunk's.
+/// Meshes the Chunk at `coord` from a snapshot of it and its six face
+/// neighbours, with its water columns from what `worldgen` answers of its
+/// water. Its connectivity is worked out again only if `known` is not that
+/// Chunk's.
 pub(in crate::server) fn build_mesh(
-    center: &Snapshot,
+    (coord, center): (ChunkCoord, &Snapshot),
     around: &[Snapshot; 6],
     #[cfg(any(feature = "dev", feature = "profiling"))] known: Option<Connectivity>,
     tables: &Tables,
+    worldgen: &Worldgen,
 ) -> Built {
     let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|face| Some(lit(&around[face])));
+    let mut mesh = mesh_chunk(lit(center), neighbors, tables);
+    let coord = [coord.x, coord.y, coord.z];
+    mesh.water = water_columns(coord, lit(center), neighbors, &tables.fluids, worldgen);
     Built {
-        mesh: mesh_chunk(lit(center), neighbors, tables),
+        mesh,
         #[cfg(any(feature = "dev", feature = "profiling"))]
         connectivity: known.unwrap_or_else(|| connectivity(&center.chunk, &tables.materials)),
         #[cfg(any(feature = "dev", feature = "profiling"))]
