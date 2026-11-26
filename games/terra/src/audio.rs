@@ -107,6 +107,15 @@ pub fn sounds() -> Vec<SoundDef> {
         include_bytes!("../audio/cold.ogg"),
         0.35,
     ));
+    for (name, bytes) in [
+        ("birds", &include_bytes!("../audio/birds.ogg")[..]),
+        ("crickets", &include_bytes!("../audio/crickets.ogg")[..]),
+        ("cicadas", &include_bytes!("../audio/cicadas.ogg")[..]),
+        ("dry_night", &include_bytes!("../audio/dry-night.ogg")[..]),
+        ("cold_night", &include_bytes!("../audio/cold-night.ogg")[..]),
+    ] {
+        sounds.push(sound(name, SoundCategory::Ambient, bytes, 0.35));
+    }
     let mut lava = sound(
         "lava",
         Effects,
@@ -332,25 +341,51 @@ pub fn causes() -> Vec<CauseSound> {
     .collect()
 }
 pub fn soundscapes() -> Vec<SoundscapeDef> {
+    use BedHours::*;
     use SoundscapeContext::*;
-    [
-        ("surface", Some(Default), "open", 1.0),
-        ("underground", Some(Underground), "cave", 1.0),
-        ("underwater", Some(Underwater), "water", 1.0),
-        ("temperate", None, "open", 1.0),
-        ("dry", None, "dry", 1.0),
-        ("cold", None, "cold", 1.0),
-    ]
-    .into_iter()
-    .map(|(name, context, bed, volume)| SoundscapeDef {
-        name: name.into(),
-        context,
-        beds: vec![AmbientBed {
-            sound: format!("terra:{bed}"),
-            volume,
-        }],
-        music: vec!["terra:music_two".into()],
-        silence_s: Some(range(120.0, 300.0)),
-    })
-    .collect()
+    type Beds = &'static [(&'static str, f32, BedHours)];
+    // Temperate's pair is the default's; Savanna names the Dry Soundscape, so shares its pair.
+    let open: Beds = &[
+        ("open", 1.0, Always),
+        ("birds", 0.8, Day),
+        ("crickets", 0.7, Night),
+    ];
+    let scapes: [(&str, Option<SoundscapeContext>, Beds); 6] = [
+        ("surface", Some(Default), open),
+        ("underground", Some(Underground), &[("cave", 1.0, Always)]),
+        ("underwater", Some(Underwater), &[("water", 1.0, Always)]),
+        ("temperate", None, open),
+        (
+            "dry",
+            None,
+            &[
+                ("dry", 1.0, Always),
+                ("cicadas", 0.6, Day),
+                ("dry_night", 0.7, Night),
+            ],
+        ),
+        (
+            "cold",
+            None,
+            &[("cold", 1.0, Day), ("cold_night", 1.0, Night)],
+        ),
+    ];
+    scapes
+        .into_iter()
+        .map(|(name, context, beds)| SoundscapeDef {
+            name: name.into(),
+            context,
+            beds: beds
+                .iter()
+                .map(|&(bed, volume, when)| AmbientBed {
+                    sound: format!("terra:{bed}"),
+                    volume,
+                    when: Some(when),
+                })
+                .collect(),
+            music: vec!["terra:music_two".into()],
+            silence_s: Some(range(120.0, 300.0)),
+            night_music: None,
+        })
+        .collect()
 }

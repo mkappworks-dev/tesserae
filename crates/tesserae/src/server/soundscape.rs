@@ -281,6 +281,7 @@ mod tests {
             def: tesserae_core::audio::SoundscapeDef {
                 beds: Vec::new(),
                 music: Vec::new(),
+                night_music: None,
                 silence_s: tesserae_core::audio::DEFAULT_SILENCE_S,
             },
         };

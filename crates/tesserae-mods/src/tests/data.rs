@@ -508,12 +508,21 @@ fn component() -> Declaration {
             content::SoundscapeDef {
                 name: "surface".into(),
                 context: Some(content::SoundscapeContext::Default),
-                beds: vec![content::AmbientBed {
-                    sound: "full:wind".into(),
-                    volume: 0.6,
-                }],
+                beds: vec![
+                    content::AmbientBed {
+                        sound: "full:wind".into(),
+                        volume: 0.6,
+                        when: None,
+                    },
+                    content::AmbientBed {
+                        sound: "full:wind".into(),
+                        volume: 0.3,
+                        when: Some(content::BedHours::Night),
+                    },
+                ],
                 music: vec!["full:tune".into()],
                 silence_s: None,
+                night_music: Some(vec!["full:tune".into()]),
             },
             content::SoundscapeDef {
                 name: "cave".into(),
@@ -524,6 +533,7 @@ fn component() -> Declaration {
                     min: 20.0,
                     max: 40.0,
                 }),
+                night_music: None,
             },
         ],
         cause_sounds: [content::SoundCause::Hurt, content::SoundCause::UseMeasured]
@@ -742,6 +752,7 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
         ("[world.movement]", "[world.walking]", "walking"),
         ("[world.climate]", "[world.weather]", "weather"),
         ("stars = 0.2", "stars = 0.2\nglow = 1.0", "glow"),
+        ("when = \"night\"", "when = \"dusk\"", "dusk"),
         ("cover = 0.4", "cover = 0.4\nrain = 1", "rain"),
         (
             "temperature-size-m = 400.0",
@@ -875,6 +886,11 @@ fn shared_validation_bounds_apply_to_data() {
             "cloud-cover = 0.5",
             "cloud-cover = 5.0",
             "biomes.cloud_cover",
+        ),
+        (
+            "night-music = [\"full:tune\"]",
+            "night-music = [\"full:crack\"]",
+            "night-music",
         ),
     ] {
         refused(replace, with, field);

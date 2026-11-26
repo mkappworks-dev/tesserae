@@ -1,7 +1,10 @@
 //! The music scheduler: silences drawn from a Soundscape's range, no track
-//! twice in a row, a fade on every change, all replayed from a seed.
+//! twice in a row, a fade on every change, all replayed from a seed, and night
+//! music started below half Daylight.
 
-use tesserae_core::audio::{MUSIC_FADE_S, Music, MusicVoice, SoundId, Span};
+use tesserae_core::audio::{
+    MUSIC_FADE_S, Music, MusicVoice, NIGHT_MUSIC_BELOW, SoundId, Span, tracks_at,
+};
 
 const STEP_S: f32 = 0.25;
 const SILENCE: Span = Span {
@@ -182,4 +185,109 @@ fn repeated_copies_of_one_track_can_play_again() {
     music.ended(playing(&music).id);
     wait_for_track(&mut music);
     assert_eq!(playing(&music).track, SoundId(0));
+}
+
+const DAY: [SoundId; 2] = [SoundId(0), SoundId(1)];
+const NIGHT: [SoundId; 2] = [SoundId(5), SoundId(6)];
+
+#[test]
+fn a_track_comes_from_night_music_below_half_daylight() {
+    assert_eq!(NIGHT_MUSIC_BELOW, 0.5);
+    for (daylight, want) in [
+        (1.0, &DAY),
+        (0.75, &DAY),
+        (0.5, &DAY),
+        (0.499, &NIGHT),
+        (0.25, &NIGHT),
+        (0.0, &NIGHT),
+    ] {
+        assert_eq!(
+            tracks_at(&DAY, Some(&NIGHT[..]), daylight),
+            want,
+            "{daylight}"
+        );
+    }
+}
+
+#[test]
+fn with_no_night_music_music_plays_at_every_hour() {
+    for daylight in [0.0, 0.25, 0.5, 1.0] {
+        assert_eq!(tracks_at(&DAY, None, daylight), DAY, "{daylight}");
+    }
+    let run = |by_hour: bool| {
+        let mut music = Music::new(42);
+        if by_hour {
+            music.change_by_hour(&tracks(3), None, SILENCE);
+        } else {
+            music.change(&tracks(3), SILENCE);
+        }
+        music.set_daylight(0.0);
+        let mut heard = Vec::new();
+        for _ in 0..10 {
+            let waited = wait_for_track(&mut music);
+            let voice = playing(&music);
+            heard.push((waited, voice.track));
+            music.ended(voice.id);
+        }
+        heard
+    };
+    assert_eq!(run(true), run(false), "as today, whatever the hour");
+}
+
+#[test]
+fn each_start_reads_the_hour_it_starts_at() {
+    let mut music = Music::new(13);
+    music.change_by_hour(&DAY, Some(&NIGHT[..]), Span::at(1.0));
+    for (daylight, list) in [(1.0, DAY), (0.2, NIGHT), (0.6, DAY), (0.0, NIGHT)] {
+        music.set_daylight(daylight);
+        wait_for_track(&mut music);
+        let voice = playing(&music);
+        assert!(list.contains(&voice.track), "{daylight}: {voice:?}");
+        music.ended(voice.id);
+    }
+}
+
+#[test]
+fn a_playing_track_is_never_cut_by_the_hour() {
+    let mut music = Music::new(17);
+    music.change_by_hour(&DAY, Some(&NIGHT[..]), Span::at(1.0));
+    music.set_daylight(1.0);
+    wait_for_track(&mut music);
+    let day_track = playing(&music);
+    for daylight in [0.6, 0.4, 0.0] {
+        music.set_daylight(daylight);
+        music.advance(30.0);
+        assert_eq!(voices(&music), [day_track], "{daylight}");
+    }
+    music.ended(day_track.id);
+    wait_for_track(&mut music);
+    assert!(NIGHT.contains(&playing(&music).track));
+}
+
+#[test]
+fn empty_night_music_is_silence_by_night_and_music_again_by_day() {
+    let mut music = Music::new(19);
+    music.change_by_hour(&DAY, Some(&[][..]), Span::at(1.0));
+    music.set_daylight(0.0);
+    for _ in 0..400 {
+        music.advance(STEP_S);
+        assert!(voices(&music).is_empty());
+    }
+    music.set_daylight(1.0);
+    assert!(wait_for_track(&mut music) <= 1.0);
+    assert!(DAY.contains(&playing(&music).track));
+}
+
+#[test]
+fn night_music_alone_waits_for_the_night() {
+    let mut music = Music::new(23);
+    music.change_by_hour(&[], Some(&NIGHT[..]), Span::at(1.0));
+    music.set_daylight(1.0);
+    for _ in 0..400 {
+        music.advance(STEP_S);
+        assert!(voices(&music).is_empty());
+    }
+    music.set_daylight(0.0);
+    wait_for_track(&mut music);
+    assert!(NIGHT.contains(&playing(&music).track));
 }

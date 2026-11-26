@@ -285,8 +285,12 @@ sound-set = "full:rock"
 [[soundscapes]]
 name = "surface"
 context = "default"
-beds = [{ sound = "full:wind", volume = 0.6 }]
+beds = [
+  { sound = "full:wind", volume = 0.6 },
+  { sound = "full:wind", volume = 0.3, when = "night" },
+]
 music = ["full:tune"]
+night-music = ["full:tune"]
 
 [[soundscapes]]
 name = "cave"

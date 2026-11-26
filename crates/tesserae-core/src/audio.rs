@@ -442,11 +442,34 @@ pub enum SoundscapeContext {
     Underwater,
 }
 
+/// The hours a bed is heard at. Closed in contract 0.3.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum BedHours {
+    Day,
+    Night,
+    #[default]
+    Always,
+}
+
+impl BedHours {
+    /// The share of its volume a bed plays at, so day and night beds crossfade
+    /// through dawn and dusk.
+    pub fn gain(self, daylight: f32) -> f32 {
+        let daylight = daylight.clamp(0.0, 1.0);
+        match self {
+            BedHours::Day => daylight,
+            BedHours::Night => 1.0 - daylight,
+            BedHours::Always => 1.0,
+        }
+    }
+}
+
 /// An Ambient Sound a Soundscape loops, at a volume on top of the Sound's own.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Bed {
     pub sound: SoundId,
     pub volume: f32,
+    pub when: BedHours,
 }
 
 /// The ambience and music heard while a Soundscape applies.
@@ -455,8 +478,25 @@ pub struct SoundscapeDef {
     pub beds: Vec<Bed>,
     /// Music Sounds.
     pub music: Vec<SoundId>,
+    /// Music Sounds by night; `None` plays `music` at every hour.
+    pub night_music: Option<Vec<SoundId>>,
     /// The silence before each track.
     pub silence_s: Span,
+}
+
+/// Below this Daylight a track starts from the night list.
+pub const NIGHT_MUSIC_BELOW: f32 = 0.5;
+
+/// The list the next track starts from at `daylight`.
+pub fn tracks_at<'a>(
+    music: &'a [SoundId],
+    night_music: Option<&'a [SoundId]>,
+    daylight: f32,
+) -> &'a [SoundId] {
+    match night_music {
+        Some(night) if daylight < NIGHT_MUSIC_BELOW => night,
+        _ => music,
+    }
 }
 
 /// A Soundscape's silence when its Declaration gives none.
@@ -491,6 +531,8 @@ pub struct MusicVoice {
 pub struct Music {
     rng: SoundRng,
     tracks: Vec<SoundId>,
+    night_tracks: Option<Vec<SoundId>>,
+    daylight: f32,
     silence_s: Span,
     /// Seconds of silence left, while no track plays.
     waiting_s: Option<f32>,
@@ -506,6 +548,8 @@ impl Music {
         Music {
             rng: SoundRng::new(seed),
             tracks: Vec::new(),
+            night_tracks: None,
+            daylight: 1.0,
             silence_s: Span::at(0.0),
             waiting_s: None,
             playing: None,
@@ -516,14 +560,32 @@ impl Music {
     }
 
     /// The Soundscape changed: the playing track fades out and a silence from
-    /// the new range begins.
+    /// the new range begins. `tracks` play at every hour.
     pub fn change(&mut self, tracks: &[SoundId], silence_s: Span) {
+        self.change_by_hour(tracks, None, silence_s);
+    }
+
+    /// As [`change`](Music::change), with `night` tracks starting below
+    /// [`NIGHT_MUSIC_BELOW`] Daylight when set.
+    pub fn change_by_hour(
+        &mut self,
+        tracks: &[SoundId],
+        night: Option<&[SoundId]>,
+        silence_s: Span,
+    ) {
         if let Some(voice) = self.playing.take() {
             self.fading.push((voice, MUSIC_FADE_S));
         }
         self.tracks = tracks.to_vec();
+        self.night_tracks = night.map(<[SoundId]>::to_vec);
         self.silence_s = silence_s;
         self.begin_silence();
+    }
+
+    /// The hour now. Only the next start reads it: a playing track is never
+    /// cut by the hour.
+    pub fn set_daylight(&mut self, daylight: f32) {
+        self.daylight = daylight;
     }
 
     pub fn advance(&mut self, dt_s: f32) {
@@ -559,22 +621,28 @@ impl Music {
     }
 
     fn begin_silence(&mut self) {
-        self.waiting_s = (!self.tracks.is_empty()).then(|| self.silence_s.draw(&mut self.rng));
+        let any =
+            !self.tracks.is_empty() || self.night_tracks.as_ref().is_some_and(|n| !n.is_empty());
+        self.waiting_s = any.then(|| self.silence_s.draw(&mut self.rng));
     }
 
     fn start(&mut self) {
-        let mut others: Vec<SoundId> = match self.tracks.len() {
-            0 => return,
-            1 => self.tracks.clone(),
-            _ => self
-                .tracks
+        let tracks = tracks_at(&self.tracks, self.night_tracks.as_deref(), self.daylight).to_vec();
+        let mut others: Vec<SoundId> = match tracks.len() {
+            // Nothing for this hour, so wait out another silence and look again.
+            0 => {
+                self.begin_silence();
+                return;
+            }
+            1 => tracks.clone(),
+            _ => tracks
                 .iter()
                 .copied()
                 .filter(|&t| Some(t) != self.last)
                 .collect(),
         };
         if others.is_empty() {
-            others = self.tracks.clone();
+            others = tracks;
         }
         let track = others[self.rng.below(others.len() as u32) as usize];
         self.last = Some(track);

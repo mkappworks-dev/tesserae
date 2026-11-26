@@ -2,7 +2,7 @@
 //! direction and seeded variation, with no audio device.
 
 use tesserae_core::audio::{
-    Falloff, Listener, SoundCategory, SoundDef, SoundRng, Span, Volumes, equal_power, pan,
+    BedHours, Falloff, Listener, SoundCategory, SoundDef, SoundRng, Span, Volumes, equal_power, pan,
 };
 
 const FALLOFF: Falloff = Falloff {
@@ -299,4 +299,46 @@ fn interface_sets_menu_sounds_apart_from_effects_and_0_mutes_them() {
         }
         .valid()
     );
+}
+
+#[test]
+fn day_and_night_beds_crossfade_through_dawn_and_dusk() {
+    // Daylight rising through dawn, then falling through dusk.
+    let dawn = [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
+    let dusk: Vec<f32> = dawn.iter().rev().copied().collect();
+    for (pass, daylights) in [("dawn", dawn.to_vec()), ("dusk", dusk)] {
+        for &d in &daylights {
+            let day = BedHours::Day.gain(d);
+            let night = BedHours::Night.gain(d);
+            assert!(close(day, d), "{pass} {d}: day {day}");
+            assert!(close(night, 1.0 - d), "{pass} {d}: night {night}");
+            assert!(close(day + night, 1.0), "{pass} {d}: no dip or swell");
+            assert_eq!(BedHours::Always.gain(d), 1.0, "{pass} {d}");
+        }
+        let days: Vec<f32> = daylights.iter().map(|&d| BedHours::Day.gain(d)).collect();
+        let rising = days.windows(2).all(|w| w[1] > w[0]);
+        let falling = days.windows(2).all(|w| w[1] < w[0]);
+        assert!(
+            if pass == "dawn" { rising } else { falling },
+            "{pass}: {days:?}"
+        );
+    }
+    assert_eq!(BedHours::Day.gain(1.0), 1.0, "a day bed is whole at noon");
+    assert_eq!(
+        BedHours::Night.gain(0.0),
+        1.0,
+        "a night bed is whole at midnight"
+    );
+    assert_eq!(BedHours::Day.gain(0.0), 0.0);
+    assert_eq!(BedHours::Night.gain(1.0), 0.0);
+}
+
+#[test]
+fn a_bed_with_no_when_plays_at_every_hour_as_today() {
+    assert_eq!(BedHours::default(), BedHours::Always);
+    for d in [-0.5, 0.0, 0.3, 1.0, 1.5] {
+        assert_eq!(BedHours::default().gain(d), 1.0);
+    }
+    assert_eq!(BedHours::Day.gain(1.5), 1.0, "Daylight is clamped");
+    assert_eq!(BedHours::Night.gain(-0.5), 1.0, "Daylight is clamped");
 }

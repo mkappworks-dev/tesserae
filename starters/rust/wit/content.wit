@@ -1217,12 +1217,24 @@ interface content {
         underwater,
     }
 
+    /// The hours an ambient bed is heard at. Closed in 0.3.
+    enum bed-hours {
+        /// Scaled by Daylight: whole by day, silent by night.
+        day,
+        /// Scaled by one minus Daylight, so it crossfades with the day beds.
+        night,
+        /// At every hour.
+        always,
+    }
+
     /// An ambient loop a Soundscape plays for as long as it applies.
     record ambient-bed {
         /// An `ambient` Sound, `<mod id>:<name>`, of any loaded Mod.
         sound: string,
         /// From 0 to 1, on top of the Sound's own volume.
         volume: f32,
+        /// `none` is `always`.
+        when: option<bed-hours>,
     }
 
     /// The ambience and music heard where it applies. The engine registers it
@@ -1241,6 +1253,11 @@ interface content {
         /// The silence before each track, in seconds, drawn from 0 to 3600
         /// [60 to 180].
         silence-s: option<sound-range>,
+        /// At most 8 `music` Sounds by full name. When set, a track starts from
+        /// `music` while Daylight is at least 0.5 and from these otherwise; a
+        /// playing track is never cut by the hour. `none` plays `music` at
+        /// every hour.
+        night-music: option<list<string>>,
     }
 
     /// Why the Server makes a Sound event that is not a Voxel's. Closed in

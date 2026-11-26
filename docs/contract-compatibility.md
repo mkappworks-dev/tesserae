@@ -353,6 +353,16 @@ no clouds. `biome-def` gained `cloud-cover` after `cave-scale`, an optional
 multiplier from 0 to 4 on the Game's cover over that Biome; `none` is 1. A
 Declaration built against the earlier 0.3 text needs a rebuild.
 
+`ambient-bed` then gained `when` last, an optional closed `bed-hours` of `day`,
+`night` or `always`: a day bed plays at its volume times Daylight, a night bed
+times one minus Daylight, so they crossfade at dawn and dusk; `none` is
+`always`. `soundscape-def` gained `night-music` last, an optional list of at
+most 8 `music` Sounds by full name: when set, a track starts from `music` while
+Daylight is at least 0.5 and from `night-music` otherwise, and a playing track
+is never cut by the hour; `none` plays `music` at every hour, so a Soundscape
+declared before sounds as it did. A Declaration built against the earlier 0.3
+text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

@@ -283,12 +283,28 @@ by distance. A Sound of the wrong category as a bed or track, an unknown name, a
 `context` from a Mod or a second one for a context fails the load naming the
 Mod, the Soundscape and the field.
 
+A bed may add `when`: `day`, `night` or `always`, the default. A day bed plays
+at its volume times Daylight and a night bed times one minus it, so birds give
+way to crickets through dusk and back at dawn; an `always` bed ignores the hour.
+A Soundscape may add `night-music`, at most 8 `music` Sounds by full name: when
+it is set, each track starts from `music` while Daylight is at least 0.5 and
+from `night-music` otherwise, and a playing track is never cut by the hour. An
+empty `night-music` is silence by night. Without it `music` plays at every hour.
+A World whose Game declares no `sky` is held at noon, so its day beds play whole
+and its night beds not at all. The Server still names only the Soundscape; the
+Client mixes it by the hour.
+
 ```toml
 [[soundscapes]]
 name = "open"
 context = "default"
-beds = [{ sound = "plain:wind", volume = 0.6 }]
+beds = [
+  { sound = "plain:wind", volume = 0.6 },
+  { sound = "plain:birds", volume = 0.5, when = "day" },
+  { sound = "plain:crickets", volume = 0.4, when = "night" },
+]
 music = ["plain:morning", "plain:dusk"]
+night-music = ["plain:nocturne"]
 silence-s = { min = 90.0, max = 240.0 }
 ```
 

@@ -118,7 +118,6 @@ impl ClientTimeOfDay {
         if hour >= 24.0 { hour - 24.0 } else { hour }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "the sound mix reads it next"))]
     pub fn daylight(&self) -> f32 {
         let tilt = self.sky.as_ref().map_or(0.0, |sky| sky.tilt_deg);
         sky::daylight(sky::sun_elevation_deg(self.hour(), tilt))

@@ -5,8 +5,8 @@ use std::ops::RangeInclusive;
 
 use tesserae_core::MaterialId;
 use tesserae_core::audio::{
-    Bed, DEFAULT_SILENCE_S, Falloff, SoundCategory, SoundDef, SoundId, SoundSet, SoundscapeContext,
-    SoundscapeDef, Span,
+    Bed, BedHours, DEFAULT_SILENCE_S, Falloff, SoundCategory, SoundDef, SoundId, SoundSet,
+    SoundscapeContext, SoundscapeDef, Span,
 };
 use tesserae_core::audio::{Cause, SoundscapeId};
 
@@ -261,6 +261,11 @@ pub(crate) fn check(
         for (field, len, max) in [
             ("beds", scape.beds.len(), MAX_BEDS_PER_SOUNDSCAPE),
             ("music", scape.music.len(), MAX_MUSIC_PER_SOUNDSCAPE),
+            (
+                "night-music",
+                scape.night_music.as_ref().map_or(0, Vec::len),
+                MAX_MUSIC_PER_SOUNDSCAPE,
+            ),
         ] {
             if len > max {
                 return Err(bad(field, format!("holds {len}, at most {max}")));
@@ -424,6 +429,11 @@ pub fn resolve_sounds(behaviours: &[Behaviour], registry: &Registry) -> Result<S
                         Ok(Bed {
                             sound: named("beds", &bed.sound, SoundCategory::Ambient)?,
                             volume: bed.volume,
+                            when: match bed.when {
+                                None | Some(content::BedHours::Always) => BedHours::Always,
+                                Some(content::BedHours::Day) => BedHours::Day,
+                                Some(content::BedHours::Night) => BedHours::Night,
+                            },
                         })
                     })
                     .collect::<Result<_, ModError>>()?,
@@ -432,6 +442,16 @@ pub fn resolve_sounds(behaviours: &[Behaviour], registry: &Registry) -> Result<S
                     .iter()
                     .map(|track| named("music", track, SoundCategory::Music))
                     .collect::<Result<_, ModError>>()?,
+                night_music: scape
+                    .night_music
+                    .as_ref()
+                    .map(|tracks| {
+                        tracks
+                            .iter()
+                            .map(|track| named("night-music", track, SoundCategory::Music))
+                            .collect::<Result<_, ModError>>()
+                    })
+                    .transpose()?,
                 silence_s: scape.silence_s.map_or(DEFAULT_SILENCE_S, |s| Span {
                     min: s.min,
                     max: s.max,

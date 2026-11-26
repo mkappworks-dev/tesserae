@@ -151,10 +151,19 @@ enum Context {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Hours {
+    Day,
+    Night,
+    Always,
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Bed {
     sound: String,
     volume: f32,
+    when: Option<Hours>,
 }
 
 #[derive(Deserialize)]
@@ -167,6 +176,7 @@ pub(super) struct Soundscape {
     #[serde(default)]
     music: Vec<String>,
     silence_s: Option<Range>,
+    night_music: Option<Vec<String>>,
 }
 
 impl From<Soundscape> for content::SoundscapeDef {
@@ -184,10 +194,16 @@ impl From<Soundscape> for content::SoundscapeDef {
                 .map(|b| content::AmbientBed {
                     sound: b.sound,
                     volume: b.volume,
+                    when: b.when.map(|w| match w {
+                        Hours::Day => content::BedHours::Day,
+                        Hours::Night => content::BedHours::Night,
+                        Hours::Always => content::BedHours::Always,
+                    }),
                 })
                 .collect(),
             music: s.music,
             silence_s: s.silence_s.map(Into::into),
+            night_music: s.night_music,
         }
     }
 }
