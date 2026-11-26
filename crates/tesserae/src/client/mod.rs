@@ -77,6 +77,7 @@ mod structure;
 mod structure_menu;
 mod theme;
 mod tile_preview;
+pub(crate) mod time_of_day;
 mod tool;
 mod tool_panel;
 mod touch;
@@ -159,6 +160,7 @@ pub fn plugin(app: &mut App) {
         soundscape::plugin,
         map_cache::plugin,
         compass::plugin,
+        time_of_day::plugin,
     ));
     app.add_plugins((minimap::plugin, map_window::plugin));
     app.add_plugins((structure::plugin, structure_menu::plugin));

@@ -15,6 +15,7 @@ use super::actions::{Action, Actions};
 use super::cinematic::{self as cine, Kind};
 use super::menu_ui::{self as ui, IconKind};
 use super::theme;
+use super::time_of_day::ClientTimeOfDay;
 use crate::content::{HereBiome, HereCave, MaterialPalette, WorldFacts};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
 use crate::server::game_mode::GameMode;
@@ -106,6 +107,10 @@ pub(super) enum Choice {
 #[derive(Component)]
 struct MenuRoot;
 
+/// "Day 3, 19:42" under "You are here".
+#[derive(Component)]
+struct ClockLine;
+
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Menu>()
         .init_session_state::<Swatches>()
@@ -130,6 +135,7 @@ pub(super) fn plugin(app: &mut App) {
                 receive_here,
                 receive_cave,
                 render,
+                tick_clock,
             )
                 .chain(),
         );
@@ -319,7 +325,11 @@ type Optional<'w> = (
 type Open<'w> = (
     Res<'w, Menu>,
     Res<'w, Facts>,
-    (Res<'w, Here>, Res<'w, Cave>),
+    (
+        Res<'w, Here>,
+        Res<'w, Cave>,
+        Option<Res<'w, ClientTimeOfDay>>,
+    ),
     Option<Res<'w, super::settings::Settings>>,
 );
 
@@ -345,7 +355,7 @@ impl Picture<'_> {
 
 fn render(
     mut commands: Commands,
-    (menu, facts, (here, cave), settings): Open,
+    (menu, facts, (here, cave, clock), settings): Open,
     (own, preferences, allowed): Optional,
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
@@ -428,7 +438,8 @@ fn render(
                     .or_else(|| here.0.and_then(|i| facts.and_then(|f| f.biomes.get(i))))
                     .map(|name| ui::declared_title(name));
                 if let Some(biome) = biome {
-                    world_status(pause, facts, &biome);
+                    let day = clock.as_ref().and_then(|c| c.label());
+                    world_status(pause, facts, &biome, day);
                 }
             });
             use super::frame::{Cap, Prompt};
@@ -555,7 +566,12 @@ fn short_key(label: String) -> String {
 }
 
 /// Where the Player stands, at the bottom right.
-fn world_status(pause: &mut ChildSpawnerCommands, facts: Option<&WorldFacts>, biome: &str) {
+fn world_status(
+    pause: &mut ChildSpawnerCommands,
+    facts: Option<&WorldFacts>,
+    biome: &str,
+    day: Option<String>,
+) {
     let shadow = |y: f32| TextShadow {
         offset: Vec2::new(0.0, y),
         color: Color::BLACK.with_alpha(0.8),
@@ -591,6 +607,20 @@ fn world_status(pause: &mut ChildSpawnerCommands, facts: Option<&WorldFacts>, bi
                 },
                 Pickable::IGNORE,
             ));
+            if let Some(day) = day {
+                status.spawn((
+                    ClockLine,
+                    Text::new(day),
+                    theme::font(theme::TEXT_TAG),
+                    TextColor(theme::STATUS_INK),
+                    shadow(1.0),
+                    Node {
+                        margin: UiRect::bottom(Val::Px(6.0)),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
             status.spawn((
                 Text::new(format!("{game}   /   a little further to explore.")),
                 theme::font(theme::TEXT_TAG),
@@ -599,6 +629,21 @@ fn world_status(pause: &mut ChildSpawnerCommands, facts: Option<&WorldFacts>, bi
                 Pickable::IGNORE,
             ));
         });
+}
+
+/// The clock runs while the Menu is open; only its line follows it, not the whole Menu.
+fn tick_clock(clock: Option<Res<ClientTimeOfDay>>, mut lines: Query<&mut Text, With<ClockLine>>) {
+    if lines.is_empty() {
+        return;
+    }
+    let Some(label) = clock.and_then(|c| c.label()) else {
+        return;
+    };
+    for mut line in &mut lines {
+        if line.0 != label {
+            line.0.clone_from(&label);
+        }
+    }
 }
 
 /// The World's picture in World details.
@@ -1016,6 +1061,59 @@ mod tests {
                 ("Q".into(), "Save & Quit".into())
             ]
         );
+    }
+
+    const SKY: tesserae_core::sky::SkyParams = tesserae_core::sky::SkyParams {
+        day_length_s: 1200.0,
+        start_hour: 7.0,
+        day_share: 0.7,
+    };
+
+    /// The Server's sky and Time of day, and the Player in the meadow.
+    fn at(app: &mut App, sky: Option<tesserae_core::sky::SkyParams>, day: u64, hour: f32) {
+        use crate::content::{TimeOfDaySync, WorldSky};
+        use tesserae_core::sky::TimeOfDay;
+        if !app.world().contains_resource::<ClientTimeOfDay>() {
+            app.add_plugins(super::super::time_of_day::plugin);
+        }
+        app.world_mut().write_message(WorldSky(sky));
+        app.world_mut().write_message(TimeOfDaySync {
+            time: sky.map_or(TimeOfDay::from_steps(0), |sky| {
+                TimeOfDay::on_day(day, hour, &sky)
+            }),
+            steps_per_s: 0.0,
+        });
+        app.world_mut().write_message(HereBiome(Some(1)));
+        // The clock and the Menu are not ordered, so the line may follow a frame later.
+        app.update();
+        app.update();
+    }
+
+    #[test]
+    fn you_are_here_tells_the_day_and_the_hour_and_follows_the_clock() {
+        let mut app = app();
+        river_bend(&mut app);
+        at(&mut app, Some(SKY), 0, 7.0);
+        press(&mut app, KeyCode::Tab);
+        let shown = texts(&mut app);
+        for line in ["YOU ARE HERE", "Meadow", "Day 1, 07:00"] {
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
+        }
+        at(&mut app, Some(SKY), 2, 19.75);
+        let shown = texts(&mut app);
+        assert!(shown.iter().any(|t| t == "Day 3, 19:45"), "{shown:?}");
+        assert!(!shown.iter().any(|t| t == "Day 1, 07:00"));
+    }
+
+    #[test]
+    fn a_world_with_no_sky_tells_no_hour() {
+        let mut app = app();
+        river_bend(&mut app);
+        at(&mut app, None, 0, 0.0);
+        press(&mut app, KeyCode::Tab);
+        let shown = texts(&mut app);
+        assert!(shown.iter().any(|t| t == "Meadow"), "{shown:?}");
+        assert!(!shown.iter().any(|t| t.starts_with("Day ")), "{shown:?}");
     }
 
     #[test]

@@ -836,6 +836,11 @@ summary {
   color: #c1d2b8;
   font-size: 11px;
 }
+/* Only a Game that declares a sky has a day to tell; the others are held at noon. */
+.world-status .world-time {
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
+}
 .loading-screen {
   margin: auto;
   text-align: center;

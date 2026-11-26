@@ -1073,7 +1073,7 @@ function pause() {
   const w = activeWorld();
   const item = (label, act, key = "") =>
     `<button type="button" data-action="${act}"><span>${label}</span>${key ? `<kbd>${key}</kbd>` : ""}</button>`;
-  return `<div class="pause-screen game-pause"><section class="pause-list"><h2>Paused</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><nav class="title-menu pause-actions" aria-label="Menu">${item("Resume", "resume", "Esc")}${item("Inventory", "inventory-open", "I")}${state.mapForbidden ? "" : item("Map", "map-open", "M")}${item("Settings", "settings")}${item("World details", "world-details")}${item("Return to Worlds", "leave")}${item("Save &amp; Quit", "save-quit")}</nav></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3><p>${w?.game || "Terra"}</p></div></div>`;
+  return `<div class="pause-screen game-pause"><section class="pause-list"><h2>Paused</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><nav class="title-menu pause-actions" aria-label="Menu">${item("Resume", "resume", "Esc")}${item("Inventory", "inventory-open", "I")}${state.mapForbidden ? "" : item("Map", "map-open", "M")}${item("Settings", "settings")}${item("World details", "world-details")}${item("Return to Worlds", "leave")}${item("Save &amp; Quit", "save-quit")}</nav></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3>${(w?.game || "Terra") === "Terra" ? '<p class="world-time">Day 3, 19:42</p>' : ""}<p>${w?.game || "Terra"}</p></div></div>`;
 }
 function play() {
   ensureInventory();
