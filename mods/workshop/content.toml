@@ -1,0 +1,133 @@
+[[materials]]
+name = "workbench"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "forge"
+emission = 6
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "anvil"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "oven"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "chest"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[appearance]]
+material = "workbench"
+color = [179, 156, 113, 255]
+texture = "art/workbench.png"
+
+[[appearance]]
+material = "forge"
+color = [128, 111, 102, 255]
+texture = "art/forge.png"
+
+[[appearance]]
+material = "anvil"
+color = [86, 86, 89, 255]
+texture = "art/anvil.png"
+
+[[appearance]]
+material = "oven"
+color = [141, 72, 54, 255]
+texture = "art/oven.png"
+
+[[appearance]]
+material = "chest"
+color = [115, 51, 29, 255]
+texture = "art/chest.png"
+
+# Four legs under a thick top. A body collides with the whole cell, so nothing snags between the
+# legs.
+[[shapes]]
+name = "table"
+boxes = [
+  { min = [1, 0, 1], max = [4, 12, 4] },
+  { min = [12, 0, 1], max = [15, 12, 4] },
+  { min = [1, 0, 12], max = [4, 12, 15] },
+  { min = [12, 0, 12], max = [15, 12, 15] },
+  { min = [0, 12, 0], max = [16, 16, 16] },
+]
+collision = [{ min = [0, 0, 0], max = [16, 16, 16] }]
+
+[[voxel-uses]]
+kind = "station"
+material = "workshop:workbench"
+tag = "workbench"
+shape = "workshop:table"
+
+[[voxel-uses]]
+kind = "station"
+material = "workshop:forge"
+tag = "forge"
+
+[[voxel-uses]]
+kind = "station"
+material = "workshop:anvil"
+tag = "anvil"
+
+[[voxel-uses]]
+kind = "station"
+material = "workshop:oven"
+tag = "oven"
+
+[[voxel-uses]]
+kind = "container"
+material = "workshop:chest"
+
+# Stone, not iron, for the anvil: no shared Mod declares iron.
+[[recipes]]
+inputs = [{ item = "flora:log", count = 4 }]
+output = { item = "workshop:workbench", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "strata:stone", count = 8 }]
+output = { item = "workshop:forge", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "strata:stone", count = 4 }, { item = "strata:sand", count = 2 }]
+output = { item = "workshop:oven", count = 1 }
+station = "hand"
+
+[[recipes]]
+inputs = [{ item = "strata:stone", count = 6 }]
+output = { item = "workshop:anvil", count = 1 }
+station = "forge"
+
+[[recipes]]
+inputs = [{ item = "flora:log", count = 8 }]
+output = { item = "workshop:chest", count = 1 }
+station = "workbench"

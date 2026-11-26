@@ -49,7 +49,7 @@ impl Drop for Install {
     }
 }
 
-fn copy_tree(from: &Path, to: &Path) {
+pub(in crate::server) fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();

@@ -241,17 +241,23 @@ def fnv(values):
     return (h % 1000) / 1000
 
 
+# A forge's fire and an oven's embers, drawn outside the albedo range because they glow.
+GLOW = (0xE8, 0x74, 0x2A)
+SOOT = (0x2A, 0x22, 0x20)
+
+
 def building(salt, pattern):
     """Terra's building painter: `pattern(x, y, top, n)` gives a colour and a factor for it, `n`
     the painter's two noise octaves."""
 
-    def texel(face, x, y):
+    def paint(face, x, y):
         coarse = cells(x, y, 2, salt + face + 3) / 255 * 0.08
         fine = noise(x, y, salt + face) / 255 * 0.04
         colour, k = pattern(x, y, face != 1, coarse - 0.04 + fine - 0.02)
-        return tuple(int(max(0.0, min(255.0, c * k))) for c in colour)
+        lit = tuple(int(max(0.0, min(255.0, c * k))) for c in colour)
+        return (*(lit if colour == GLOW else albedo(lit)), 255)
 
-    return drawn(texel)
+    return paint
 
 
 def planks(base, salt):
@@ -277,7 +283,7 @@ def thatch(base, salt):
     return building(salt, pattern)
 
 
-def bricks(base, mortar, salt):
+def bricks_pattern(base, mortar):
     def pattern(x, y, top, n):
         row = y >> 2
         shifted = x + (row % 2) * 4
@@ -285,7 +291,11 @@ def bricks(base, mortar, salt):
             return mortar, 0.95 + n
         return base, 0.84 + fnv([(shifted >> 3) & 1, row & 3]) * 0.22 + n
 
-    return building(salt, pattern)
+    return pattern
+
+
+def bricks(base, mortar, salt):
+    return building(salt, bricks_pattern(base, mortar))
 
 
 COBBLES = [(2, 3), (9, 1), (14, 5), (5, 9), (11, 10), (1, 14), (8, 15), (15, 13), (4, 5)]
@@ -296,14 +306,18 @@ def around(v, p):
     return d - 16 * round(d / 16)
 
 
-def cobble(base, joint, salt):
+def cobble_pattern(base, joint):
     def pattern(x, y, top, n):
         ds = sorted((math.hypot(around(x, px), around(y, py)), i) for i, (px, py) in enumerate(COBBLES))
         if ds[1][0] - ds[0][0] < 1.1:
             return joint, 0.85
         return base, 0.82 + fnv([ds[0][1], 11]) * 0.3 + n
 
-    return building(salt, pattern)
+    return pattern
+
+
+def cobble(base, joint, salt):
+    return building(salt, cobble_pattern(base, joint))
 
 
 def roof_tiles(base, grout, salt):
@@ -316,6 +330,213 @@ def roof_tiles(base, grout, salt):
         return base, 0.9 + fnv([x // 8 & 1, y // 8 & 1, 5]) * 0.16 + (y % 8) * 0.012 + n
 
     return building(salt, pattern)
+
+
+def squared_log(bark, grain, salt):
+    """A squared log: bark down the sides, end grain in rings on the top and bottom."""
+
+    def pattern(x, y, top, n):
+        if top:
+            d = math.hypot(x - 7.5, y - 7.5)
+            if d > 6.6:
+                return bark, 0.8 + n
+            return grain, 0.85 + math.cos(d * 1.7) * 0.1 + n
+        if (x + (y >> 2)) % 4 == 0:
+            return bark, 0.68 + n
+        return bark, 0.92 + fnv([x & 15, 3]) * 0.14 + n
+
+    return building(salt, pattern)
+
+
+def ashlar(base, joint, salt):
+    """Dressed stone in courses of 8 texels, one stone per course per tile."""
+
+    def pattern(x, y, top, n):
+        row = y >> 3
+        shifted = x + (row % 2) * 8
+        if y % 8 == 7 or shifted % 16 == 15:
+            return joint, 0.9 + n
+        return base, 0.9 + fnv([0, row & 1]) * 0.12 + n
+
+    return building(salt, pattern)
+
+
+def shingles(base, salt):
+    def pattern(x, y, top, n):
+        row = y >> 2
+        shifted = x + (row % 2) * 2
+        if y % 4 == 3:
+            return base, 0.55
+        if shifted % 4 == 0:
+            return base, 0.72
+        return base, 0.85 + fnv([(shifted >> 2) & 3, row & 3]) * 0.25 + n
+
+    return building(salt, pattern)
+
+
+def plaster(base, salt):
+    return building(salt, lambda x, y, top, n: (base, 0.94 + n))
+
+
+def slate(base, salt):
+    def pattern(x, y, top, n):
+        row = y >> 2
+        shifted = x + (row % 2) * 4
+        if y % 4 == 3:
+            return base, 0.6
+        if shifted % 8 == 0:
+            return base, 0.75
+        lip = 0.08 if y % 4 == 0 else 0.0
+        return base, 0.88 + fnv([(shifted >> 3) & 1, row & 3]) * 0.2 + lip + n
+
+    return building(salt, pattern)
+
+
+def awning(stripe, ground, salt):
+    """Woven cloth in stripes four texels wide."""
+
+    def pattern(x, y, top, n):
+        return (ground if (x >> 2) % 2 else stripe), 0.92 + (x + y) % 2 * 0.05 + n * 0.5
+
+    return building(salt, pattern)
+
+
+def anvil(iron, stump, salt):
+    """An iron anvil on a wooden stump: the face, the waist, then the stump's grain."""
+
+    def pattern(x, y, top, n):
+        edge = x in (0, 15) or y in (0, 15)
+        if top:
+            if edge:
+                return iron, 0.7
+            if 5 <= x <= 10 and 5 <= y <= 10:
+                return iron, 1.15 + n
+            return iron, 0.95 + n
+        if y == 0:
+            return iron, 1.2
+        if y < 5:
+            return iron, 0.95 + n
+        if y < 9:
+            return (iron, 0.8 + n) if 4 <= x <= 11 else (stump, 0.5)
+        if y == 9:
+            return stump, 0.62
+        return stump, 0.85 + fnv([x, 5]) * 0.15 + n
+
+    return building(salt, pattern)
+
+
+def forge(stone, joint, salt):
+    """Fieldstone round an open fire on the sides, a grate over it on top."""
+    rubble = cobble_pattern(stone, joint)
+
+    def pattern(x, y, top, n):
+        if not top and 4 <= x <= 11 and 7 <= y <= 13:
+            return (joint, 0.5) if y == 7 else (GLOW, 0.8 + (y - 8) * 0.06 + n * 2)
+        if top and 5 <= x <= 10 and 5 <= y <= 10:
+            return (SOOT, 0.8) if (x + y) % 2 == 0 else (GLOW, 0.9 + n)
+        return rubble(x, y, top, n)
+
+    return building(salt, pattern)
+
+
+def oven(brick, mortar, salt):
+    """Brick with an arched mouth, embers at its floor."""
+    courses = bricks_pattern(brick, mortar)
+
+    def pattern(x, y, top, n):
+        mouth = 4 <= x <= 11 and (y >= 10 or (y >= 8 and abs(x - 7.5) <= 2.5))
+        if not top and mouth:
+            return (GLOW, 0.85 + n * 2) if y >= 14 else (SOOT, 0.9 + n)
+        return courses(x, y, top, n)
+
+    return building(salt, pattern)
+
+
+def grain(base, x, y, salt, k):
+    return tint(base, (2 * (noise(x, y, salt) - 128) + k) // (2 * k))[:3]
+
+
+INK = (62, 46, 31)
+WALNUT = (92, 62, 38)
+
+
+def saw_and_hammer(x, y):
+    """A saw laid diagonally across a workbench's top and a hammer above it."""
+    blade = lambda x: 12 - div((x - 3) * 3, 5)
+    return (
+        (3 <= x <= 11 and y == blade(x))
+        or (4 <= x <= 10 and x % 2 == 0 and y == blade(x) + 1)
+        or (x == 12 and 3 <= y <= 10)
+        or (y == 3 and 10 <= x <= 14)
+    )
+
+
+def workbench(base):
+    def texel(face, x, y):
+        if face != 1:
+            if x in (0, 15) or y in (0, 15):
+                return WALNUT
+            if face == 0 and saw_and_hammer(x, y):
+                return INK
+            return grain(tint(base, -16 if y % 5 == 0 else 0)[:3], x, y, 11, 14)
+        if y < 3:
+            return grain(base, x, y, 12, 14)
+        if 1 <= x <= 3 or 12 <= x <= 14:
+            return grain(tint(base, -18)[:3], x, y, 13, 14)
+        if 6 <= y <= 9 and (x + y) % 3 == 0:
+            return (176, 150, 108)
+        return grain(WALNUT, x, y, 14, 14)
+
+    return drawn(texel)
+
+
+def chest(base):
+    def texel(face, x, y):
+        frame = x < 2 or x > 13 or y < 2 or y > 13
+        rope = face == 1 and (
+            (y == 8 and 6 <= x <= 9) or (x in (5, 10) and 8 <= y <= 10) or (y == 10 and 5 <= x <= 10)
+        )
+        if rope:
+            return grain((196, 168, 112), x, y, 75, 16)
+        if frame:
+            return grain(tint(base, -48)[:3], x, y, 71 + 2 * face, 18)
+        if face == 1 and y == 6:
+            return tint(base, -46)[:3]
+        return grain(tint(base, -18 if y % 4 == 0 else 0)[:3], x, y, 72 + 2 * face, 14)
+
+    return drawn(texel)
+
+
+def door(base):
+    def texel(face, x, y):
+        n = cells(x, y, 1, face + 3)
+        if x <= 1 or x >= 14 or y <= 1 or y >= 14:
+            return tint(base, -34)[:3]
+        if x % 4 == 1:
+            return tint(base, -22)[:3]
+        return tint(base, div(n - 128, 14))[:3]
+
+    return drawn(texel)
+
+
+GATE_STILE = (2, 13)
+
+
+def gate(base):
+    """Two stiles with three rails across them, the upper two at the edges of a fence's rail; the
+    rest is open. Its top and bottom show only the stiles' ends."""
+
+    def texel(face, x, y):
+        stile = lambda c: c <= GATE_STILE[0] or c >= GATE_STILE[1]
+        gap = (not stile(x) and y not in (3, 4, 7, 8, 11, 12)) if face == 1 else not (stile(x) and stile(y))
+        if gap:
+            return None
+        n = cells(x, y, 1, face + 3)
+        shadow = face == 1 and (x in (0, 15) if stile(x) else y % 4 == 0)
+        grained = (x % 3 if stile(x) or face != 1 else y % 3) == 1
+        return tint(base, -36 if shadow else -14 if grained else div(n - 128, 14))[:3]
+
+    return drawn(texel)
 
 
 def glow(base, hot):
@@ -1250,11 +1471,37 @@ TEXTURES = {
         "frosted_glass": frosted,
         "lantern": lantern,
     },
-    "timber": {"planks": planks((190, 141, 80), 101), "thatch": thatch((210, 182, 99), 211)},
+    # The building Materials beyond the first few keep the colours Terra drew them in.
+    "timber": {
+        "planks": planks((190, 141, 80), 101),
+        "pine_planks": planks((0x7A, 0x56, 0x34), 103),
+        "dark_planks": planks((0x4F, 0x36, 0x20), 107),
+        "red_planks": planks((0x8E, 0x3B, 0x2C), 109),
+        "frame": squared_log((0x6B, 0x4A, 0x2B), (0xB8, 0x8A, 0x54), 113),
+        "dark_frame": squared_log((0x3E, 0x2A, 0x19), (0x7A, 0x56, 0x34), 127),
+        "shingles": shingles((0x6D, 0x5A, 0x45), 131),
+        "thatch": thatch((210, 182, 99), 211),
+        "awning": awning((0xC9, 0x4F, 0x4F), (0xEF, 0xE6, 0xD6), 137),
+        "door": door((128, 88, 50)),
+        "door_open": door((128, 88, 50)),
+        "gate": gate((140, 97, 55)),
+        "gate_open": gate((140, 97, 55)),
+    },
     "brickwork": {
         "brick": bricks((173, 97, 82), (208, 202, 192), 307),
         "cobble": cobble((132, 130, 123), (86, 84, 78), 409),
         "tile": roof_tiles((190, 121, 73), (140, 70, 20), 503),
+        "red_tile": roof_tiles((0xA8, 0x49, 0x2F), (110, 40, 24), 509),
+        "ashlar": ashlar((0xA9, 0xA5, 0x9A), (0x77, 0x74, 0x6C), 521),
+        "slate": slate((0x4C, 0x55, 0x60), 523),
+        "whitewash": plaster((0xE9, 0xE3, 0xD3), 541),
+    },
+    "workshop": {
+        "anvil": anvil((0x5B, 0x61, 0x68), (0x6B, 0x4A, 0x2B), 601),
+        "forge": forge((0x8A, 0x8A, 0x85), (0x5E, 0x5E, 0x5A), 607),
+        "oven": oven((0xA8, 0x49, 0x2F), (0x67, 0x53, 0x4A), 613),
+        "workbench": workbench((214, 190, 140)),
+        "chest": chest((128, 62, 40)),
     },
     "lamps": {
         "glowstone": glow((226, 196, 90), (255, 244, 180)),

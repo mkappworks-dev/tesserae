@@ -1,0 +1,8 @@
+id = "workshop"
+version = "0.1.0"
+api = "0.3"
+declaration = "content.toml"
+depends = ["flora", "strata"]
+category = "Building"
+description = "The workbench, forge, anvil, oven and chest"
+thumbnail = "thumbnail.png"

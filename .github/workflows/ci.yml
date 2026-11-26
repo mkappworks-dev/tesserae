@@ -286,6 +286,21 @@ jobs:
       - name: Validate the shared Mods
         run: for mod in mods/*/; do target/release/tesserae validate "$mod" --mods mods; done
 
+      # Composing a Game runs the Obtainable check, the only check most demo Games get: their
+      # tests run on Terra alone.
+      - name: Build the Games
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/wasm-guests
+        run: |
+          rustup target add wasm32-wasip2
+          ./scripts/build-guests games
+
+      - name: Validate the Games
+        run: |
+          for game in games/*/; do
+            target/release/tesserae validate "$game" --mods mods --trust-for-run
+          done
+
       - name: Upload binaries
         uses: actions/upload-artifact@v7
         with:

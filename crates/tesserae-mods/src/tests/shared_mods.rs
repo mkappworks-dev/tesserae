@@ -9,7 +9,7 @@ use tesserae_core::{Burn, Tables};
 
 use crate::{Behaviour, Kind, ModHost, Registry, Trust, apply, plan, resolve, scan};
 
-const SHARED: [&str; 17] = [
+const SHARED: [&str; 18] = [
     "strata",
     "waters",
     "flora",
@@ -19,6 +19,7 @@ const SHARED: [&str; 17] = [
     "glassworks",
     "timber",
     "brickwork",
+    "workshop",
     "lamps",
     "wool",
     "frost",
