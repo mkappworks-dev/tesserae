@@ -1,7 +1,6 @@
-//! Lumen's building Materials: silverwood, moonstone, amethyst, glowcap and dusk-coloured planks,
-//! and the Stations and furnishings its buildings hold.
+//! Lumen's building Materials: silverwood, moonstone, amethyst, glowcap and dusk-coloured planks.
 
-use demo_kit::building::{Block, Pattern::*, block, make, station};
+use demo_kit::building::{Block, Pattern::*, block, make};
 
 const LOG: &str = "flora:log";
 const LEAVES: &str = "flora:leaves";
@@ -10,7 +9,7 @@ const SAND: &str = "strata:sand";
 const SOIL: &str = "strata:soil";
 const AMETHYST: &str = "crystals:amethyst";
 
-pub const BLOCKS: [Block; 24] = [
+pub const BLOCKS: [Block; 16] = [
     block(
         "pale_plaster",
         Plaster,
@@ -122,62 +121,6 @@ pub const BLOCKS: [Block; 24] = [
         0x8fd3c8,
         0x3f3d66,
         make("hand", &[(LEAVES, 6)], 2),
-    ),
-    station(
-        "anvil",
-        Anvil,
-        0xa8b3c9,
-        0x3f3d66,
-        make("forge", &[(STONE, 4), (AMETHYST, 1)], 1),
-    ),
-    station(
-        "forge",
-        Forge,
-        0x8c8fb3,
-        0x5d5f85,
-        make("hand", &[(STONE, 8)], 1),
-    ),
-    station(
-        "oven",
-        Oven,
-        0x8c8fb3,
-        0x4a4c70,
-        make("hand", &[(STONE, 4), (SAND, 2)], 1),
-    ),
-    station(
-        "workbench",
-        Workbench,
-        0x3b3550,
-        0xb8c4d8,
-        make("hand", &[(LOG, 4)], 1),
-    ),
-    block(
-        "chest",
-        Chest,
-        0x3b3550,
-        0xb8c4d8,
-        make("workbench", &[(LOG, 8)], 1),
-    ),
-    block(
-        "door",
-        Door,
-        0x3b3550,
-        0xb8c4d8,
-        make("workbench", &[(LOG, 3)], 1),
-    ),
-    block(
-        "glass",
-        Glass,
-        0xb9a8f0,
-        0xc8d0e0,
-        make("oven", &[(SAND, 2)], 1),
-    ),
-    block(
-        "lamp",
-        Lamp,
-        0xd8ecff,
-        0x6a6a88,
-        make("workbench", &[("lumen:glass", 1), (AMETHYST, 1)], 2),
     ),
 ];
 

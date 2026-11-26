@@ -378,7 +378,7 @@ impl Guest for Ember {
                 .into_iter()
                 .chain(building::materials())
                 .collect(),
-            shapes: building::shapes(),
+            shapes: Vec::new(),
             appearance: [food::appearance()]
                 .into_iter()
                 .chain(building::appearance())
@@ -406,7 +406,7 @@ impl Guest for Ember {
             death_marker_kind: None,
             templates: templates::templates(),
             settlements: structures::settlements(),
-            voxel_uses: building::voxel_uses(),
+            voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),
                 min_depth_m: 6.0,

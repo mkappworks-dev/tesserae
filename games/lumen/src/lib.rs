@@ -491,7 +491,7 @@ impl Guest for Lumen {
                 .into_iter()
                 .chain(building::materials())
                 .collect(),
-            shapes: building::shapes(),
+            shapes: Vec::new(),
             appearance: [food::appearance()]
                 .into_iter()
                 .chain(building::appearance())
@@ -519,7 +519,7 @@ impl Guest for Lumen {
             death_marker_kind: None,
             templates: templates::templates(),
             settlements: structures::settlements(),
-            voxel_uses: building::voxel_uses(),
+            voxel_uses: Vec::new(),
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),
                 min_depth_m: 8.0,

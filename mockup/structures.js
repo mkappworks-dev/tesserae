@@ -10,8 +10,8 @@ const CASES = {
 const VIEWS = { outside: "Outside", inside: "Inside", placing: "Placing" };
 const STOREY = 4;
 
-/* Roles a builder names; a Template's style says which Material fills each. These are each Game's own furnishings, or Terra's shared ones. */
-const SHARED_FIXED = {
+/* Roles a builder names; a Template's style says which Material fills each. Every Game's furnishings are the shared Mods'. */
+const FIXED = {
   glass: "glassworks:glass",
   door: "timber:door",
   lamp: "glassworks:lantern",
@@ -20,16 +20,6 @@ const SHARED_FIXED = {
   anvil: "workshop:anvil",
   forge: "workshop:forge",
   oven: "workshop:oven",
-};
-const FIXED = {
-  glass: "glass",
-  door: "door",
-  lamp: "lamp",
-  chest: "chest",
-  bench: "workbench",
-  anvil: "anvil",
-  forge: "forge",
-  oven: "oven",
 };
 const ROLE = {
   chest: "Container",
@@ -1795,10 +1785,7 @@ function materialOf(t, c) {
   if (c.m.includes(":")) return c.m;
   if (c.m === "water")
     return t.game === "Terra" ? "terra:water" : "waters:water";
-  if (FIXED[c.m])
-    return t.game === "Terra"
-      ? SHARED_FIXED[c.m]
-      : `${t.game.toLowerCase()}:${FIXED[c.m]}`;
+  if (FIXED[c.m]) return FIXED[c.m];
   const style = STYLES[t.style] || STYLES.wild,
     role = { wall2: style.wall2 ? "wall2" : "wall", table: "trim" }[c.m] || c.m;
   return gameMaterial(

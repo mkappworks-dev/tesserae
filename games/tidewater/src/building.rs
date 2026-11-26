@@ -1,7 +1,6 @@
-//! Tidewater's building Materials: driftwood, palm, sandstone, coral and sailcloth, and the
-//! Stations and furnishings its buildings hold.
+//! Tidewater's building Materials: driftwood, palm, sandstone, coral and sailcloth.
 
-use demo_kit::building::{Block, Pattern::*, block, make, station};
+use demo_kit::building::{Block, Pattern::*, block, make};
 
 const LOG: &str = "flora:log";
 const LEAVES: &str = "flora:leaves";
@@ -9,7 +8,7 @@ const STONE: &str = "strata:stone";
 const SAND: &str = "strata:sand";
 const CLAY: &str = "strata:clay";
 
-pub const BLOCKS: [Block; 24] = [
+pub const BLOCKS: [Block; 16] = [
     block(
         "shell_plaster",
         Plaster,
@@ -121,66 +120,6 @@ pub const BLOCKS: [Block; 24] = [
         0xe9e4d4,
         0x3d7ea6,
         make("hand", &[(LEAVES, 6)], 2),
-    ),
-    station(
-        "anvil",
-        Anvil,
-        0x5b6168,
-        0x8a7253,
-        make("forge", &[(STONE, 4), ("crystals:aquamarine", 1)], 1),
-    ),
-    station(
-        "forge",
-        Forge,
-        0xd8c48f,
-        0xb39e68,
-        make("hand", &[(STONE, 8)], 1),
-    ),
-    station(
-        "oven",
-        Oven,
-        0xd98b74,
-        0xefe0c8,
-        make("hand", &[(CLAY, 6)], 1),
-    ),
-    station(
-        "workbench",
-        Workbench,
-        0x8a5a36,
-        0x4a4f55,
-        make("hand", &[(LOG, 4)], 1),
-    ),
-    block(
-        "chest",
-        Chest,
-        0x8a5a36,
-        0x4a4f55,
-        make("workbench", &[(LOG, 8)], 1),
-    ),
-    block(
-        "door",
-        Door,
-        0x8a5a36,
-        0x4a4f55,
-        make("workbench", &[(LOG, 3)], 1),
-    ),
-    block(
-        "glass",
-        Glass,
-        0x9fd8cf,
-        0xb9ae98,
-        make("oven", &[(SAND, 2)], 1),
-    ),
-    block(
-        "lamp",
-        Lamp,
-        0xffe2a8,
-        0x5b7480,
-        make(
-            "workbench",
-            &[("tidewater:glass", 1), ("crystals:aquamarine", 1)],
-            2,
-        ),
     ),
 ];
 
