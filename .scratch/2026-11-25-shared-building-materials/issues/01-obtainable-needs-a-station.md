@@ -1,6 +1,6 @@
 # 01: A Recipe needs an Obtainable Station, and every Template is checked
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 

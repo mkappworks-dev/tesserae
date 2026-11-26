@@ -1,6 +1,6 @@
 # 06: The other demo Games use the shared Stations and furnishing
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 

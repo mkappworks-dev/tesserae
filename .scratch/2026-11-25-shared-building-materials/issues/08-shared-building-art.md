@@ -1,6 +1,6 @@
 # 08: Art for the new shared building Materials
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03, and `fix/colour-art-and-shader` merged to main
 

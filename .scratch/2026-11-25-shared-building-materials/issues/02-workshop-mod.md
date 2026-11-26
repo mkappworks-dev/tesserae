@@ -1,6 +1,6 @@
 # 02: The `workshop` Mod declares the shared Stations and chest
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 

@@ -1,6 +1,6 @@
 # 05: Terra deletes its own building Materials
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 

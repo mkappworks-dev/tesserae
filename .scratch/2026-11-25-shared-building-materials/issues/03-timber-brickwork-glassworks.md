@@ -1,6 +1,6 @@
 # 03: `timber`, `brickwork` and `glassworks` carry Items and Recipes
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 

@@ -1,6 +1,6 @@
 # 07: ADR-0038, the glossary and the docs
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 05, 06
 

@@ -1,6 +1,6 @@
 # 04: Terra builds from the shared Mods
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 03
 
