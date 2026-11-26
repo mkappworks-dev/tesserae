@@ -1123,29 +1123,68 @@ function nextTime(minutes) {
 // Each tile's thumbnail: the sky at that hour over a stepped hill, with the sun or moon where it
 // stands. Colours follow Terra's Day curve.
 const TIME_SCENES = {
-  sunrise: { sky: ["#7d8fb3", "#e9b48c", "#f6d7a0"], body: [30, 44, 9, "#fff1c9"], hill: "#4d5a4a", near: "#3a4538" },
-  noon: { sky: ["#4f86cf", "#8fb6e6", "#cfe1f2"], body: [80, 16, 8, "#fffbe8"], hill: "#5f8f4e", near: "#4a7a3d" },
-  sunset: { sky: ["#4f5b86", "#d4876a", "#f2b06e"], body: [130, 44, 9, "#ffd9a0"], hill: "#4f4a48", near: "#3a3536" },
-  midnight: { sky: ["#070b18", "#101a33", "#1d2a48"], body: [112, 18, 6, "#e9eef6"], hill: "#141a22", near: "#0d1117", stars: true },
+  sunrise: {
+    sky: ["#7d8fb3", "#e9b48c", "#f6d7a0"],
+    body: [30, 44, 9, "#fff1c9"],
+    hill: "#4d5a4a",
+    near: "#3a4538",
+  },
+  noon: {
+    sky: ["#4f86cf", "#8fb6e6", "#cfe1f2"],
+    body: [80, 16, 8, "#fffbe8"],
+    hill: "#5f8f4e",
+    near: "#4a7a3d",
+  },
+  sunset: {
+    sky: ["#4f5b86", "#d4876a", "#f2b06e"],
+    body: [130, 44, 9, "#ffd9a0"],
+    hill: "#4f4a48",
+    near: "#3a3536",
+  },
+  midnight: {
+    sky: ["#070b18", "#101a33", "#1d2a48"],
+    body: [112, 18, 6, "#e9eef6"],
+    hill: "#141a22",
+    near: "#0d1117",
+    stars: true,
+  },
 };
 function timeThumb(value) {
   const t = TIME_SCENES[value];
   const id = `sky-${value}`;
   const stars = t.stars
-    ? [[14, 10], [30, 24], [52, 8], [70, 30], [88, 12], [140, 26], [150, 8], [44, 38], [128, 40]]
-        .map(([x, y]) => `<rect x="${x}" y="${y}" width="1.5" height="1.5" fill="#dfe6f2"/>`)
+    ? [
+        [14, 10],
+        [30, 24],
+        [52, 8],
+        [70, 30],
+        [88, 12],
+        [140, 26],
+        [150, 8],
+        [44, 38],
+        [128, 40],
+      ]
+        .map(
+          ([x, y]) =>
+            `<rect x="${x}" y="${y}" width="1.5" height="1.5" fill="#dfe6f2"/>`,
+        )
         .join("")
     : "";
   const [bx, by, br, bc] = t.body;
-  const glow = value === "midnight" ? "" : `<circle cx="${bx}" cy="${by}" r="${br * 2.2}" fill="${bc}" opacity="0.25"/>`;
+  const glow =
+    value === "midnight"
+      ? ""
+      : `<circle cx="${bx}" cy="${by}" r="${br * 2.2}" fill="${bc}" opacity="0.25"/>`;
   return `<svg viewBox="0 0 160 80" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${t.sky[0]}"/><stop offset="0.65" stop-color="${t.sky[1]}"/><stop offset="1" stop-color="${t.sky[2]}"/></linearGradient></defs><rect width="160" height="80" fill="url(#${id})"/>${stars}${glow}<circle cx="${bx}" cy="${by}" r="${br}" fill="${bc}"/><path d="M0 58h16v-6h14v-8h18v6h12v-10h20v8h14v6h18v-4h16v8h32v22H0z" fill="${t.hill}"/><path d="M0 68h22v-4h26v6h30v-6h24v4h20v-6h38v18H0z" fill="${t.near}"/></svg>`;
 }
 function timePicks(pick) {
-  return `<div class="time-picks" role="radiogroup" aria-label="Time of day">${TIMES.map((t) => {
-    const at = nextTime(t.minutes);
-    const on = t.value === pick;
-    return `<button type="button" role="radio" class="time-pick time-${t.value} ${on ? "selected" : ""}" aria-checked="${on}" data-action="pick-time" data-value="${t.value}"><i>${timeThumb(t.value)}</i><span>${t.label}</span><small>${at.day === menuClock.day ? "Today" : `Day ${at.day}`}, ${hhmm(t.minutes)}</small></button>`;
-  }).join("")}</div>`;
+  return `<div class="time-picks" role="radiogroup" aria-label="Time of day">${TIMES.map(
+    (t) => {
+      const at = nextTime(t.minutes);
+      const on = t.value === pick;
+      return `<button type="button" role="radio" class="time-pick time-${t.value} ${on ? "selected" : ""}" aria-checked="${on}" data-action="pick-time" data-value="${t.value}"><i>${timeThumb(t.value)}</i><span>${t.label}</span><small>${at.day === menuClock.day ? "Today" : `Day ${at.day}`}, ${hhmm(t.minutes)}</small></button>`;
+    },
+  ).join("")}</div>`;
 }
 // Custom starts at the next quarter hour; ◀ ▶ step it by a quarter, and any HH:MM can be typed.
 const CUSTOM_STEP = 15;
@@ -1165,7 +1204,8 @@ function customRow(pick) {
 function timeDialog(pick, focus) {
   const held = activeWorld()?.cycle === false;
   if (customMinutes === null)
-    customMinutes = (Math.ceil(menuClock.minutes / CUSTOM_STEP) * CUSTOM_STEP) % (24 * 60);
+    customMinutes =
+      (Math.ceil(menuClock.minutes / CUSTOM_STEP) * CUSTOM_STEP) % (24 * 60);
   dialog(
     "Time of day",
     `${timePicks(pick)}${customRow(pick)}<p class="muted time-note">${held ? "The Daylight cycle is off, so the sky holds at the hour you pick." : "The clock moves on to the hour you pick, and the day count carries on from there."}</p>`,
@@ -1718,18 +1758,23 @@ function action(name, value) {
     return;
   }
   if (name === "time-step") {
-    customMinutes = (customMinutes + Number(value) * CUSTOM_STEP + 24 * 60) % (24 * 60);
+    customMinutes =
+      (customMinutes + Number(value) * CUSTOM_STEP + 24 * 60) % (24 * 60);
     timeDialog("custom", `#dialog-root .time-step[data-value="${value}"]`);
     return;
   }
   if (name === "time-set") {
     const t = TIMES.find((x) => x.value === value);
-    const minutes = t ? t.minutes : (parseHhmm($("#time-custom")?.value || "") ?? customMinutes);
+    const minutes = t
+      ? t.minutes
+      : (parseHhmm($("#time-custom")?.value || "") ?? customMinutes);
     Object.assign(menuClock, nextTime(minutes));
     closeDialog();
     const line = $(".world-time");
     if (line) line.textContent = clockLabel();
-    toast(`Time set to ${t ? t.label.toLowerCase() : hhmm(minutes)}, ${clockLabel()}.`);
+    toast(
+      `Time set to ${t ? t.label.toLowerCase() : hhmm(minutes)}, ${clockLabel()}.`,
+    );
     return;
   }
   if (name === "world-details") {
