@@ -281,7 +281,12 @@ macro_rules! building {
                     let [r, g, b_] = b.rgb();
                     crate::tesserae::mods::content::Appearance {
                         material: b.name.into(),
-                        color: crate::tesserae::mods::types::Srgba { r, g, b: b_, a: 255 },
+                        color: crate::tesserae::mods::types::Srgba {
+                            r,
+                            g,
+                            b: b_,
+                            a: 255,
+                        },
                         texture: Some(b.texture()),
                         variation: crate::tesserae::mods::content::TileVariation::Fixed,
                     }
