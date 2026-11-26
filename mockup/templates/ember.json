@@ -50,7 +50,7 @@
     {
      "symbol": "E",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
@@ -418,7 +418,7 @@
     {
      "symbol": "H",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -840,7 +840,7 @@
     {
      "symbol": "F",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
@@ -1202,7 +1202,7 @@
     {
      "symbol": "H",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
@@ -1214,7 +1214,7 @@
     {
      "symbol": "J",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -1629,13 +1629,13 @@
     {
      "symbol": "E",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "F",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -2083,7 +2083,7 @@
     {
      "symbol": "G",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -2471,13 +2471,13 @@
     {
      "symbol": "F",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 6
     },
     {
      "symbol": "G",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 0
     },
     {
@@ -3362,7 +3362,7 @@
     {
      "symbol": "E",
      "material": "timber:door",
-     "shape": "timber:panel",
+     "shape": "timber:leaf",
      "orientation": 6
     }
    ],

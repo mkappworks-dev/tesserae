@@ -1028,10 +1028,10 @@ mod tests {
     fn terra() -> ContentCatalogue {
         let mut catalogue = dry();
         for (id, name, solid, fluid, burns) in [
-            (terra_ids()[0], "terra:lamp", true, None, false),
+            (terra_ids()[0], "terra:stone", true, None, false),
             (terra_ids()[1], "terra:lava", false, Some(1), false),
             (terra_ids()[2], "terra:mud", false, Some(2), false),
-            (terra_ids()[3], "terra:brick", true, None, false),
+            (terra_ids()[3], "terra:dirt", true, None, false),
             (wood(), "terra:wood", true, None, true),
             (terra_ids()[5], "terra:ash", true, None, false),
             (terra_water(), "terra:water", false, Some(0), false),

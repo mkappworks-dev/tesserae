@@ -15,11 +15,10 @@ Terra still declares its own building Materials in this ticket, now unused;
 ticket 05 deletes them. Terra adds hand Recipes from `terra:rock` to
 `strata:stone` and from `terra:sand` to `strata:sand`, one for one.
 
-The mockup's role table names full `<mod>:<name>` Materials; the per-Game
-substitution table is keyed by those names; a full name passes through
-unprefixed. For Terra, the furnishing table names the shared workbench,
-Stations, chest, door, glass and lantern, and the exporter's Shape prefixing
-gives door cells `timber:door` and the workbench `workshop:table`. Every Game's
+The mockup maps each of Terra's building roles to its shared Material. For
+Terra, the furnishing table names the shared workbench, Stations, chest, door,
+glass and lantern, and the exporter's Shape prefixing gives door cells
+`timber:leaf` and the workbench `workshop:table`. Every Game's
 Templates are regenerated; only Terra's change.
 
 Sound rows give the shared Materials a set each, as the spec lists: most were

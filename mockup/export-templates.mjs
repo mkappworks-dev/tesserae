@@ -35,8 +35,7 @@ const SHAPES = {
   fence: "fence",
   cross: "flora:cross",
 };
-/* The shared Shapes every Game's Templates take. */
-const SHARED_SHAPES = { panel: "timber:panel", table: "workshop:table" };
+const SHARED_SHAPES = { panel: "timber:leaf", table: "workshop:table" };
 /* Wilderness Structures stand on rougher ground than the Settlement levels for its Plots. */
 const WILD_TOLERANCE_M = 2;
 const KEEP = ".",

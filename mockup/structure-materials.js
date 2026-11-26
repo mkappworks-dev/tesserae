@@ -209,7 +209,6 @@ const STYLES = {
     trim: "oak-planks",
   },
 };
-/* The shared Material Terra builds each role's choice from. */
 const SHARED = {
   whitewash: "brickwork:whitewash",
   "oak-log": "timber:frame",
@@ -229,7 +228,11 @@ const SHARED = {
   awning: "timber:awning",
 };
 function gameMaterial(game, terraName) {
-  if (game === "Terra" || !SUB[game]?.[terraName]) return SHARED[terraName];
+  if (game === "Terra" || !SUB[game]?.[terraName]) {
+    if (!SHARED[terraName])
+      throw new Error(`no shared Material for \`${terraName}\``);
+    return SHARED[terraName];
+  }
   return `${game.toLowerCase()}:${SUB[game][terraName]}`.replace(/-/g, "_");
 }
 function materialLabel(name) {

@@ -67,9 +67,8 @@ pub const fn block(
 }
 
 impl Block {
-    pub fn rgba(&self) -> [u8; 4] {
-        let [r, g, b] = rgb(self.main).map(|c| c as u8);
-        [r, g, b, 255]
+    pub fn rgb(&self) -> [u8; 3] {
+        rgb(self.main).map(|c| c as u8)
     }
 
     pub fn remove_time_s(&self) -> f32 {
@@ -279,10 +278,10 @@ macro_rules! building {
             $blocks
                 .iter()
                 .map(|b| {
-                    let [r, g, b_, a] = b.rgba();
+                    let [r, g, b_] = b.rgb();
                     crate::tesserae::mods::content::Appearance {
                         material: b.name.into(),
-                        color: crate::tesserae::mods::types::Srgba { r, g, b: b_, a },
+                        color: crate::tesserae::mods::types::Srgba { r, g, b: b_, a: 255 },
                         texture: Some(b.texture()),
                         variation: crate::tesserae::mods::content::TileVariation::Fixed,
                     }

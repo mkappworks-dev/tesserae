@@ -1,17 +1,16 @@
 //! The shared building Materials and Stations Terra's buildings hold: textured, in the Catalogue,
 //! and Obtainable from what Terra's worldgen lays, through Stations that are.
 
-use std::collections::HashSet;
-
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
+use tesserae_core::Voxel;
 use tesserae_core::craft::{Count, Station};
-use tesserae_core::{GroundParams, MaterialId, SurfacePlantKind, Voxel};
 
 use super::{loaded, material};
 use crate::server::craft::{self, Craft, CraftRefusal, CraftRefused};
 use crate::server::inventory::Inventory;
-use crate::server::mods::{LoadedMods, placeable};
+use crate::server::mods::placeable;
+use crate::server::obtainable::obtainable;
 use crate::server::player::Player;
 use crate::server::station::AtStation;
 
@@ -60,91 +59,15 @@ fn terras_building_materials_are_textured_and_in_the_catalogue() {
     }
 }
 
-/// The Materials a World of `loaded` lays: its ground, every Biome's ground, ores and surface
-/// features, and every Material of the Plants those features stand.
-fn laid(loaded: &LoadedMods) -> HashSet<MaterialId> {
-    let world = loaded.world.as_ref().expect("a Game sets its World");
-    let mut laid = HashSet::new();
-    let mut ground = |g: &GroundParams| laid.extend([g.rock, g.soil, g.surface]);
-    world.ground.iter().for_each(&mut ground);
-    for biome in world.biomes.as_slice() {
-        biome.ground.iter().for_each(&mut ground);
-    }
-    laid.extend(world.ores.as_slice().iter().map(|o| o.material));
-    for biome in world.biomes.as_slice() {
-        for feature in biome.surface_features.as_slice() {
-            laid.insert(feature.material);
-            let Some(plant) = feature.plant else { continue };
-            match plant.kind {
-                SurfacePlantKind::Stages { materials, len, .. } => {
-                    laid.extend(&materials[..usize::from(len)])
-                }
-                SurfacePlantKind::Column { material, .. } => {
-                    laid.insert(material);
-                }
-                SurfacePlantKind::Tree(tree) => {
-                    laid.insert(tree.trunk);
-                    laid.extend(tree.canopies(world.biomes.variety()).as_slice());
-                }
-                SurfacePlantKind::Vine(vine) => {
-                    laid.insert(vine.material);
-                    laid.extend(&vine.fruit[..usize::from(vine.len)]);
-                }
-            }
-        }
-    }
-    laid
-}
-
-/// The Items a Player can come by in a World of `loaded`: what breaking a laid Voxel yields or
-/// drops, then every Recipe output whose inputs are already in hand at a Station whose Item is,
-/// until nothing changes.
-fn obtainable_items(loaded: &LoadedMods) -> HashSet<String> {
-    let items = loaded.every_item(0.5);
-    let mut held: HashSet<String> = HashSet::new();
-    for material in laid(loaded) {
-        let yields = loaded.tables.plants.yields(material);
-        if yields.is_empty() {
-            held.extend(
-                items
-                    .dropped_by(material)
-                    .map(|at| items.0[at].name.clone()),
-            );
-        } else {
-            held.extend(yields.iter().map(|y| y.item.clone()));
-        }
-    }
-    loop {
-        let before = held.len();
-        let stations: HashSet<&str> = held
-            .iter()
-            .filter_map(|name| items.named(name))
-            .filter_map(|at| items.0[at].material)
-            .filter_map(|m| loaded.tables.uses.station(m))
-            .collect();
-        let at_station = |station: &Station| match station {
-            Station::Hand => true,
-            Station::Tag(tag) => stations.contains(tag.as_str()),
-        };
-        let made: Vec<String> = loaded
-            .recipes
-            .iter()
-            .filter(|r| at_station(&r.station) && r.inputs.iter().all(|i| held.contains(&i.item)))
-            .map(|r| r.output.item.clone())
-            .collect();
-        held.extend(made);
-        if held.len() == before {
-            return held;
-        }
-    }
-}
-
 #[test]
 fn every_building_material_and_station_is_obtainable_from_what_terras_worldgen_lays() {
     let (_install, loaded) = loaded("terra", 0.5);
-    let held = obtainable_items(&loaded);
+    let got = obtainable(&loaded, &loaded.every_item(0.5));
     for name in BUILDING.into_iter().chain(STATIONS.map(|(name, _)| name)) {
-        assert!(held.contains(name), "{name} is Obtainable; held {held:?}");
+        assert!(
+            got.materials.contains(&material(&loaded, name)),
+            "{name} is Obtainable"
+        );
     }
 }
 

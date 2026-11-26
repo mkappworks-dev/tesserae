@@ -12,7 +12,7 @@ pub(crate) fn noise(x: usize, y: usize, salt: usize) -> i16 {
 }
 
 /// Noise per `size`-texel cell, wrapped so it repeats every tile.
-pub(crate) fn cells(x: usize, y: usize, size: usize, salt: usize) -> i16 {
+fn cells(x: usize, y: usize, size: usize, salt: usize) -> i16 {
     let per_tile = EDGE / size;
     noise(x / size % per_tile, y / size % per_tile, salt)
 }
@@ -86,7 +86,7 @@ pub(crate) fn tint(base: [u8; 3], amount: i16) -> [u8; 3] {
 const ALBEDO: Range<u8> = 50..243;
 
 /// `colour` scaled into the range a lit, non-emissive surface keeps, by its luminance.
-pub(crate) fn albedo(colour: [u8; 3]) -> [u8; 3] {
+fn albedo(colour: [u8; 3]) -> [u8; 3] {
     let y = luminance(colour.map(linear));
     let (low, high) = (linear(ALBEDO.start), linear(ALBEDO.end));
     if y > 0.0 && y < low {

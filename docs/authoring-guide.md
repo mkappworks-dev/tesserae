@@ -625,7 +625,7 @@ natively; no Mod is called when a Voxel is used
 
 Any row may set `shape`, a Shape by full name (`core:slab`, or a Mod's own),
 which a Player's Place of its Material always uses whatever Shape they chose:
-`timber`'s 2 by 3 m Door and its 1 m Gate are a thin `timber:panel`, and
+`timber`'s 2 by 3 m Door and its 1 m Gate are a thin `timber:leaf`, and
 `workshop`'s Workbench a `workshop:table`. A Station or Container keeps the
 Player's Orientation; a Door is turned as above. A Shape any row fixes is that
 row's alone: the Player is not offered it to place other Materials in.
@@ -1208,10 +1208,10 @@ refuses the World before it opens, naming the Template, the palette character
 mod `showcase`: template 0 `hut`: palette `s`: Material `showcase:marble` is not Obtainable: no Biome lays it, no Plant yields it and no Recipe makes it from what is
 ```
 
-When a Recipe makes it but only at a Station no Player can get, the message ends
-`at a Station a Player can get (needs `oven`)`. Add a Recipe that makes it from
-Obtainable Items, a Biome or ore that lays it, a Recipe for the Station, or a
-dependency on a Mod that does, such as `workshop` for the shared Stations.
+When a Recipe's inputs are Obtainable but its Station is not, the message ends
+with "at a Station a Player can get (needs `oven`)". Add a Recipe that makes it
+from Obtainable Items, a Biome or ore that lays it, a Recipe for the Station, or
+a dependency on a Mod that does, such as `workshop` for the shared Stations.
 
 ### Biomes stand Structures
 

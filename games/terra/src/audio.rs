@@ -249,7 +249,7 @@ pub fn sets() -> Vec<SoundSetDef> {
         })
         .collect()
 }
-/// The shared building Materials Terra's Structures are made of, by the set each sounds as.
+
 const BUILDING: [(&str, &str); 25] = [
     ("timber:planks", "wood"),
     ("timber:pine_planks", "wood"),

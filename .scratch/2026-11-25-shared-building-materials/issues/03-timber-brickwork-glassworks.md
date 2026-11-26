@@ -15,12 +15,12 @@ at `workshop`'s Stations.
 - `timber` (depends `flora`, `crops`, `workshop`): `planks` (kept),
   `pine_planks`, `dark_planks`, `red_planks`, `frame`, `dark_frame`, `shingles`,
   `thatch` (kept), `awning`, and the `door` Door, 2 m wide and 3 m tall, and
-  `gate` Door, 1 m by 1 m, with their open states. A new `door` Shape, 3/16
+  `gate` Door, 1 m by 1 m, with their open states. A new `leaf` Shape, 3/16
   thick against its own +Z, is fixed by both Doors; the centred `panel` and
   `beam` stay.
 - `brickwork` (depends `strata`, `workshop`): `cobble`, `brick` and `tile`
   (kept), `ashlar`, `slate`, `red_tile`, `whitewash`.
-- `glassworks` (depends `strata`, `workshop`): Recipes for the existing `glass`
+- `glassworks` (depends `strata`, `flora`, `workshop`): Recipes for the existing `glass`
   and `lantern`. `frosted_glass` stays without one.
 
 New Materials take Terra's colour for the Material they replace (the spec's

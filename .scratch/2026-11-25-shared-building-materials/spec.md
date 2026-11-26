@@ -46,7 +46,7 @@ Materials at shared Stations:
 | Mod          | Declares                                                                                        | Made from                                    |
 | ------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | `workshop`   | the `workbench`, `forge`, `anvil` and `oven` Stations, the `chest` Container, the `table` Shape | `flora:log`, `strata:stone`, `strata:sand`   |
-| `timber`     | four planks, two frames, shingles, thatch, awning, the `door` and `gate` Doors, a `door` Shape  | `flora:log`, `flora:leaves`, `crops:wheat`   |
+| `timber`     | four planks, two frames, shingles, thatch, awning, the `door` and `gate` Doors, a `leaf` Shape  | `flora:log`, `flora:leaves`, `crops:wheat`   |
 | `brickwork`  | cobble, ashlar, slate, brick, tile, red tile, whitewash                                         | `strata:stone`, `strata:clay`, `strata:sand` |
 | `glassworks` | glass and the lantern it already has, now with Recipes                                          | `strata:sand`, `flora:log`                   |
 
@@ -140,9 +140,9 @@ for Generator versions before the first release.
 23. As the maintainer, I want CI to compose every Game under `games/` with its
     Mods and run the Obtainable check, so that a breach in Ember, Lumen, Meadow
     or Tidewater fails CI without adding tests for those Games.
-24. As the maintainer, I want the mockup's role table to name full
-    `<mod>:<name>` Materials and regenerate every Game's Templates, so that the
-    Templates and the mockup cannot drift.
+24. As the maintainer, I want the mockup to map each building role to its shared
+    Material and regenerate every Game's Templates, so that the Templates and
+    the mockup cannot drift.
 25. As the maintainer, I want `bog`'s reaction product `brickwork:brick` to keep
     working when brickwork gains Recipes and dependencies, so that nothing that
     already used brickwork breaks.
@@ -185,7 +185,7 @@ rule on the Server.
 | `workshop`   | `flora`, `strata`            |
 | `timber`     | `flora`, `crops`, `workshop` |
 | `brickwork`  | `strata`, `workshop`         |
-| `glassworks` | `strata`, `workshop`         |
+| `glassworks` | `strata`, `flora`, `workshop` |
 
 `bog` already depends on `brickwork` and now pulls in `strata` and `workshop`
 through it.
@@ -224,9 +224,11 @@ basalt, so a basalt anvil would refuse it. The oven is stone and sand, not
 brick, so `workshop` does not depend on `brickwork`.
 
 Shapes. `workshop` declares `table`, a thick top on four legs that a body
-collides with whole, and the workbench fixes it. `timber` declares `door`, a
+collides with whole, and the workbench fixes it. `timber` declares `leaf`, a
 panel 3/16 thick against its own +Z, which its Doors fix so they hinge and fold
-as Terra's did; its existing centred `panel` and `beam` stay. The door is 2 m
+as Terra's did, and which Templates' shutters and boards take; its existing
+centred `panel` and `beam` stay, offered to the Player, as a Shape a Door fixes
+is not. The door is 2 m
 wide and 3 m tall and the gate 1 m by 1 m, as Terra's are, so Templates' door
 openings still fit and a Player's body passes with room.
 
@@ -271,14 +273,14 @@ Each Terra Material maps to one shared Material:
 - Terra's material sound rows name the shared Materials. Only brick, glass and
   the lamp had a sound set before; the rest were silent, and now take one as a
   deliberate addition: planks, frames, shingles, Doors, chest and workbench as
-  wood; masonry and the forge, oven and anvil as stone; glass and the lantern as
-  metal; thatch and awning as soft.
-- The mockup's role table names full `<mod>:<name>` Materials, its per-Game
-  substitution table is keyed by those names, and a full name passes through
-  unprefixed. The furnishing table and the exporter's Shape prefixing name
-  `timber:door`, `workshop:table` and the shared furnishing for Terra. Every
-  Game's Templates are regenerated, and only Terra's change until the other
-  Games switch. Templates are not UI, so no separate mockup approval.
+  wood; masonry, the forge and the oven as stone; the anvil, glass and the
+  lantern as metal; thatch and awning as soft.
+- The mockup keeps its role table keyed by Terra's role names and maps each to
+  its shared Material, failing on a role with none; the other Games' per-Game
+  substitutions are unchanged. The furnishing table and the exporter's Shape
+  prefixing name the shared furnishing, `timber:leaf` and `workshop:table`.
+  Every Game's Templates are regenerated. Templates are not UI, so no separate
+  mockup approval.
 - The guest build's list of Mods shipped with Terra, and the mockup's exported
   Material gallery, follow Terra's new `depends`.
 - Terra keeps building against the WIT contract alone, and its boundary check
@@ -354,6 +356,10 @@ message. It never reaches inside the fixed-point walk.
   Obtainable.
 
 ## Further Notes
+
+- Checking every Template found the `lily_pond` outskirts plot in Terra and
+  Tidewater, which the old check skipped: nothing laid or made its lily pads,
+  so `aquatic` gained a hand Recipe, two seagrass to one lily pad.
 
 - The art for the new shared Materials is drawn in the Mod art generator after
   the colour branch merges, in that session's style, with Terra's current look

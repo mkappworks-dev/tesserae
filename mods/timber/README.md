@@ -7,7 +7,7 @@ and `crops`' wheat at `workshop`'s Stations.
 | Declares   | Name                                                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Materials  | `planks`, `pine_planks`, `dark_planks`, `red_planks`, `frame`, `dark_frame`, `shingles`, `thatch`, `awning`, `door`, `gate` and their open states |
-| Shapes     | `beam` (a bar along x), `panel` (3/16 thick against +Z: a Door's leaf, a shutter or a board)                                                      |
+| Shapes     | `beam` (a bar along x), `panel` (a 2/16 thick wall), `leaf` (a Door's 3/16 thick leaf against +Z)                                                 |
 | Voxel uses | `door`, a Door 2 m by 3 m; `gate`, a Door 1 m by 1 m, cut out between its rails                                                                   |
 
 | Recipe                                   | From                              | At        |

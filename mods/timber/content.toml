@@ -185,10 +185,15 @@ name = "beam"
 boxes = [{ min = [0, 6, 6], max = [16, 10, 10] }]
 collision = [{ min = [0, 6, 6], max = [16, 10, 10] }]
 
-# 3/16 thick against its own +Z: a Door's leaf, which the engine turns to face the Player and Use
-# turns about its hinge, or a shutter or board against a wall.
 [[shapes]]
 name = "panel"
+boxes = [{ min = [0, 0, 7], max = [16, 16, 9] }]
+collision = [{ min = [0, 0, 7], max = [16, 16, 9] }]
+
+# A Door's leaf, 3/16 thick against its own +Z, which the engine turns to face the Player and Use
+# turns about its hinge. Apart from `panel`, because a Shape a Door fixes is never offered to place.
+[[shapes]]
+name = "leaf"
 boxes = [{ min = [0, 0, 13], max = [16, 16, 16] }]
 
 # 2 m by 3 m, so a Player's 0.6 m by 1.8 m body passes with room, and whole Template cells.
@@ -198,7 +203,7 @@ material = "timber:door"
 open = "timber:door_open"
 width-m = 2.0
 height-m = 3.0
-shape = "timber:panel"
+shape = "timber:leaf"
 
 [[voxel-uses]]
 kind = "door"
@@ -206,7 +211,7 @@ material = "timber:gate"
 open = "timber:gate_open"
 width-m = 1.0
 height-m = 1.0
-shape = "timber:panel"
+shape = "timber:leaf"
 
 [[recipes]]
 inputs = [{ item = "flora:log", count = 1 }]

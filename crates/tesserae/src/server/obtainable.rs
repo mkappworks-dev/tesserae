@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use tesserae_core::MaterialId;
-use tesserae_core::craft::Station;
+use tesserae_core::craft::{Recipe, Station};
 use tesserae_mods::Kind;
 
 use super::items::Items;
@@ -14,6 +14,39 @@ pub(super) struct Obtainable {
     pub materials: HashSet<MaterialId>,
     /// The tags of the Stations a Player can get.
     pub stations: HashSet<String>,
+    /// Whether a Player can hold each Item, by its index.
+    held: Vec<bool>,
+}
+
+impl Obtainable {
+    /// The tags of the Stations no Player can get that alone keep a Recipe from making
+    /// `material`: the Recipe's inputs are all held.
+    pub fn missing_stations<'a>(
+        &self,
+        recipes: &'a [Recipe],
+        items: &Items,
+        material: MaterialId,
+    ) -> Vec<&'a str> {
+        let mut tags: Vec<&str> = recipes
+            .iter()
+            .filter(|r| {
+                items
+                    .named(&r.output.item)
+                    .and_then(|at| items.0[at].material)
+                    == Some(material)
+                    && r.inputs
+                        .iter()
+                        .all(|i| items.named(&i.item).is_some_and(|at| self.held[at]))
+            })
+            .filter_map(|r| match &r.station {
+                Station::Tag(tag) if !self.stations.contains(tag) => Some(tag.as_str()),
+                _ => None,
+            })
+            .collect();
+        tags.sort_unstable();
+        tags.dedup();
+        tags
+    }
 }
 
 /// Every Material whose Item a Player can come to hold: what the Biomes lay,
@@ -103,6 +136,7 @@ pub(super) fn obtainable(loaded: &LoadedMods, items: &Items) -> Obtainable {
     Obtainable {
         materials,
         stations: reach.stations,
+        held: reach.held,
     }
 }
 
