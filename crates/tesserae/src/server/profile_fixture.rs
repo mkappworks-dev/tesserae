@@ -60,7 +60,7 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 const BUILT: [&str; 3] = ["transparency", "active", "hidden-hill"];
-const MOVED: [&str; 13] = [
+const MOVED: [&str; 14] = [
     "stationary",
     "flight",
     "sprint-flight",
@@ -74,6 +74,7 @@ const MOVED: [&str; 13] = [
     "river",
     "coast",
     "underwater",
+    "slope",
 ];
 /// Fixtures that need saves, so their eviction and reopening are a Persistent
 /// World's.
@@ -178,7 +179,7 @@ fn jump(
 /// from the Generator and kept fixed so every water ticket's captures compare
 /// the same view; `scripts/profile-frames` aims them. Off whole metres, so the
 /// Eye never sits on a Voxel plane.
-const WATER_EYES_M: [(&str, Vec3); 4] = [
+const WATER_EYES_M: [(&str, Vec3); 5] = [
     // 60 m west of the middle of a lake standing at 67.25 m, 19 m deep.
     ("lake", Vec3::new(-738.3, 69.7, 935.3)),
     // 3 m over a pool at 37.6 m, above a lip and pools falling to 32.4 m.
@@ -187,6 +188,8 @@ const WATER_EYES_M: [(&str, Vec3); 4] = [
     ("coast", Vec3::new(-8247.3, 26.7, 2487.4)),
     // 4 m under the lake's surface, over its deepest Voxel.
     ("underwater", Vec3::new(-678.3, 63.3, 925.4)),
+    // 15 m over a brook halfway down its 40 m fall from a mountain, looking down it.
+    ("slope", Vec3::new(4101.3, 100.3, 3263.3)),
 ];
 
 /// Moves the Player to its water fixture's Eye on the first tick, before

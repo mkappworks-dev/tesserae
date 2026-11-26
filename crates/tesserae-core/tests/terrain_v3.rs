@@ -888,8 +888,8 @@ fn mountain_flanks_are_smooth_and_level_floors_lie_between_them() {
     assert!(level > 0.4, "{level} of rugged columns are level");
 }
 
-/// The share of rugged land whose ground stands under a lake or river: high where valleys between
-/// mountains are closed basins the drainage fills.
+/// The share of rugged land whose ground stands under a lake: high where valleys between mountains
+/// are closed basins the drainage fills. A lake is flat over 8 m round; a brook or river slopes.
 fn rugged_under_inland_water(g: &Worldgen) -> f32 {
     let (mut wet, mut n) = (0usize, 0usize);
     for j in -60..60 {
@@ -899,7 +899,15 @@ fn rugged_under_inland_water(g: &Worldgen) -> f32 {
                 continue;
             }
             n += 1;
-            wet += g.water_surface_m(x, z).is_some_and(|l| l > 24.5) as usize;
+            let flat = |l: f32| {
+                [(8.0, 0.0), (-8.0, 0.0), (0.0, 8.0), (0.0, -8.0)]
+                    .iter()
+                    .all(|&(dx, dz)| {
+                        g.water_level_m(x + dx, z + dz)
+                            .is_some_and(|m| (m - l).abs() < 0.01)
+                    })
+            };
+            wet += g.water_surface_m(x, z).is_some_and(|l| l > 24.5 && flat(l)) as usize;
         }
     }
     wet as f32 / n as f32

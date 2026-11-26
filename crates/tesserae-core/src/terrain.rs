@@ -721,7 +721,7 @@ impl Base {
 pub(crate) struct Column {
     pub(crate) height_m: f32,
     pub(crate) inland_m: Option<f32>,
-    cut_m: f32,
+    river_cut_m: f32,
     warped: (f32, f32),
     fields: FieldNoise<f32>,
     peaks: f32,
@@ -775,7 +775,7 @@ impl Terrain {
         Column {
             height_m: base_m - wet.cut_m,
             inland_m: wet.level_m,
-            cut_m: wet.cut_m,
+            river_cut_m: wet.river_cut_m,
             warped: s.warped,
             fields: s.fields,
             peaks: s.peaks,
@@ -805,7 +805,7 @@ impl Terrain {
                 altitude_m,
                 coast_m,
                 erosion: f.erosion,
-                river_m: c.cut_m,
+                river_m: c.river_cut_m,
             },
             climate_shift(altitude_m, coast_m),
         )
@@ -1065,8 +1065,9 @@ mod tests {
     fn site_asked_apart(t: &Terrain, x_m: f32, z_m: f32) -> (Site, (f32, f32)) {
         let f = t.base.fields(x_m, z_m);
         let h = t.base.base_height_m(x_m, z_m);
-        let river_m = t.drainage.wet(x_m, z_m, h).cut_m;
-        let altitude_m = h - river_m - t.base.sea_m;
+        let wet = t.drainage.wet(x_m, z_m, h);
+        let river_m = wet.river_cut_m;
+        let altitude_m = h - wet.cut_m - t.base.sea_m;
         let coast_m = (f.continent - COAST_CONTINENT) * t.base.continent_size_m * COAST_M_PER_UNIT;
         (
             Site {

@@ -30,8 +30,18 @@ const LAKE_MIN_DEPTH_M: f32 = 2.5;
 /// More than the `EPS_M` steps a flat adds up across a window: a node under its fill level by this
 /// much is in a basin.
 const FLOODED_M: f32 = 0.05;
-/// Catchment, in nodes, above which a node carries a stream.
-const STREAM_NODES: u32 = 120;
+/// Catchment, in nodes, above which a node carries a stream: a brook of 0.025 km² starts high on
+/// a slope, a few nodes below its ridge. Lower, and a brook runs through most lattice cells.
+const STREAM_NODES: u32 = 24;
+/// Catchment, in nodes, from which a stream is a river at its full least width; below it a
+/// brook narrows to [`BROOK_WIDTH_M`].
+const RIVER_NODES: u32 = 120;
+/// The narrowest brook: wider than a 1 m Voxel's diagonal, so a brook running across the grid
+/// still holds two neighbouring columns in each row and its water joins up face to face.
+const BROOK_WIDTH_M: f32 = 1.6;
+/// How far from a hilltop, in nodes, its first brook starts at most.
+#[cfg(test)]
+const BROOK_REACH_NODES: i32 = 4;
 const MAX_CACHED_REGIONS: usize = 96;
 /// How far under the node's level the water surface sits.
 const SURFACE_BELOW_M: f32 = 0.6;
@@ -41,6 +51,8 @@ const BANK_SLOPE: f32 = 0.5;
 /// least `STENCIL - 1` nodes away, less the meander's push. A reach past that dropped a segment at
 /// a node line while its valley still applied, and the ground stepped there.
 const VALLEY_REACH_M: f32 = (STENCIL - 1) as f32 * NODE_M - MEANDER_M;
+/// How far the narrowest brook's gully cuts the ground: 1 in 2 banks up to 6 m deep.
+const BROOK_REACH_M: f32 = 12.0;
 /// The nodes on each side of a point whose segments it asks.
 const STENCIL: i32 = 4;
 /// The most the meander warp moves a point.
@@ -98,8 +110,11 @@ impl Region {
 pub(crate) struct Wet {
     /// The level water stands at over this column, if a lake or river reaches it.
     pub level_m: Option<f32>,
-    /// How far rivers' valleys cut ground standing at the height asked about.
+    /// How far rivers' and brooks' valleys cut ground standing at the height asked about.
     pub cut_m: f32,
+    /// [`Self::cut_m`] by rivers alone: what a Biome reads as a river's bank, so a brook's gully
+    /// keeps its slope's own ground.
+    pub river_cut_m: f32,
 }
 
 pub(crate) struct Drainage {
@@ -319,7 +334,7 @@ impl Drainage {
         // Bends the lattice's straight 8-way segments into meanders; bounded under a node's width so
         // the stencil below still holds every segment that can reach the point.
         let (qx, qz) = crate::noise::warp2(x_m, z_m, MEANDER_SEED, 90.0, MEANDER_M);
-        let mut cut_m = 0.0f32;
+        let (mut cut_m, mut river_cut_m) = (0.0f32, 0.0f32);
         for dj in -STENCIL + 1..=STENCIL {
             for di in -STENCIL + 1..=STENCIL {
                 let (ni, nj) = (i0 + di, j0 + dj);
@@ -347,19 +362,31 @@ impl Drainage {
                 let width = river_width_m(n.catchment) * (1.0 - t) + river_width_m(p.catchment) * t;
                 let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
                 let edge = (d - width / 2.0).max(0.0);
-                if edge >= VALLEY_REACH_M {
+                let reach_m = valley_reach_m(width);
+                if edge >= reach_m {
                     continue;
                 }
-                let dig = 1.2 + 0.25 * width.sqrt();
+                let dig = dig_m(width);
                 let target = surface - dig + edge * BANK_SLOPE;
-                let fade = 1.0 - smoothstep(0.66 * VALLEY_REACH_M, VALLEY_REACH_M, edge);
-                cut_m = cut_m.max((ground_m - target).max(0.0) * fade);
-                if edge * BANK_SLOPE < dig * 2.0 {
+                let fade = 1.0 - smoothstep(0.66 * reach_m, reach_m, edge);
+                let cut = (ground_m - target).max(0.0) * fade;
+                cut_m = cut_m.max(cut);
+                if n.catchment >= RIVER_NODES {
+                    river_cut_m = river_cut_m.max(cut);
+                }
+                // A brook's water stays in the channel it cut: past it the slope stands a few
+                // centimetres either side of the surface, and its Voxels would chequer wet and dry.
+                let band = if n.catchment >= RIVER_NODES { 2.0 } else { 1.0 };
+                if edge * BANK_SLOPE < dig * band {
                     level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
                 }
             }
         }
-        Wet { level_m, cut_m }
+        Wet {
+            level_m,
+            cut_m,
+            river_cut_m,
+        }
     }
 }
 
@@ -408,8 +435,32 @@ fn opposite(step: usize) -> u8 {
     (STEPS.len() - 1 - step) as u8
 }
 
+/// Widens with the square root of catchment, as rivers do; a brook's banks start at the river's
+/// least width and fall away toward its head, never below [`BROOK_WIDTH_M`].
 fn river_width_m(catchment: u32) -> f32 {
-    (1.5 + 0.0045 * (catchment as f32 * NODE_M * NODE_M).sqrt()).min(48.0)
+    let bank_m = 1.5 * (catchment as f32 / RIVER_NODES as f32).min(1.0);
+    (bank_m + 0.0045 * (catchment as f32 * NODE_M * NODE_M).sqrt()).clamp(BROOK_WIDTH_M, 48.0)
+}
+
+/// How far under its surface a stream's bed lies: a river's as it was, and a brook's shallower
+/// with its width, down to a metre at the narrowest, so its banks meet the ground close in and
+/// every Voxel of its channel still holds water at 1 m.
+fn dig_m(width_m: f32) -> f32 {
+    let river = |w: f32| 1.2 + 0.25 * w.sqrt();
+    let least_m = river_width_m(RIVER_NODES);
+    if width_m >= least_m {
+        return river(width_m);
+    }
+    let t = (width_m - BROOK_WIDTH_M) / (least_m - BROOK_WIDTH_M);
+    1.0 + t * (river(least_m) - 1.0)
+}
+
+/// How far from its water a stream's valley cuts the ground: a river's whole reach, and a brook's
+/// gully narrower with its width, so brooks high on a slope do not carve a river's valley.
+fn valley_reach_m(width_m: f32) -> f32 {
+    let least_m = river_width_m(RIVER_NODES);
+    let t = ((width_m - BROOK_WIDTH_M) / (least_m - BROOK_WIDTH_M)).min(1.0);
+    BROOK_REACH_M + t * (VALLEY_REACH_M - BROOK_REACH_M)
 }
 
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
@@ -502,6 +553,89 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 20, "{checked} stream nodes");
+    }
+
+    /// Most hilltops well above the sea have a brook starting below them, so a Player on a ridge
+    /// sees water running down into the valley. At today's river threshold 4 of 14 did; a knoll
+    /// whose slopes drain away on every side may still have none.
+    #[test]
+    fn brooks_start_near_every_high_hilltop() {
+        let d = drainage();
+        let key = [0, 0];
+        let nodes = region_nodes(&d, key);
+        let region = d.solve(key);
+        let inner = |i: i32, j: i32| {
+            (8..REGION_NODES - 8).contains(&i) && (8..REGION_NODES - 8).contains(&j)
+        };
+        let (mut tops, mut fed) = (0, 0);
+        for &(i, j, n) in &nodes {
+            if !inner(i, j) || n.height_m < SEA_M + 40.0 {
+                continue;
+            }
+            let top = STEPS
+                .iter()
+                .all(|(di, dj)| region.node(i + di, j + dj, key).height_m < n.height_m);
+            if !top {
+                continue;
+            }
+            tops += 1;
+            let near = (-BROOK_REACH_NODES..=BROOK_REACH_NODES).any(|dj| {
+                (-BROOK_REACH_NODES..=BROOK_REACH_NODES)
+                    .any(|di| region.node(i + di, j + dj, key).catchment >= STREAM_NODES)
+            });
+            fed += near as u32;
+        }
+        assert!(tops > 5, "{tops} hilltops");
+        assert!(
+            fed * 4 >= tops * 3,
+            "{fed} of {tops} hilltops have a brook within reach"
+        );
+    }
+
+    #[test]
+    fn a_brook_is_a_voxel_wide_and_widens_downstream_into_the_rivers() {
+        assert!(river_width_m(STREAM_NODES) >= std::f32::consts::SQRT_2);
+        assert!(
+            river_width_m(STREAM_NODES) < 2.0,
+            "a brook is narrower than a river"
+        );
+        let widths: Vec<f32> = (STREAM_NODES..20_000).map(river_width_m).collect();
+        assert!(
+            widths.windows(2).all(|w| w[1] >= w[0]),
+            "a stream narrows downstream"
+        );
+        // From today's least river on, the widths are the rivers' as they were.
+        for c in [120u32, 400, 4000, 40_000] {
+            let was = (1.5 + 0.0045 * (c as f32 * NODE_M * NODE_M).sqrt()).min(48.0);
+            assert_eq!(river_width_m(c), was, "catchment {c}");
+        }
+        // A brook's wet band, from bank to bank, stays narrow.
+        let w = river_width_m(STREAM_NODES);
+        assert!(
+            w + 2.0 * dig_m(w) / BANK_SLOPE <= 6.0,
+            "a {w} m brook draws a wide band"
+        );
+        let r = river_width_m(RIVER_NODES);
+        assert_eq!(dig_m(r), 1.2 + 0.25 * r.sqrt(), "a river digs as it did");
+    }
+
+    #[test]
+    fn a_brooks_gully_is_no_rivers_bank() {
+        let d = drainage();
+        let (mut brook, mut river) = (0, 0);
+        for j in -160..160 {
+            for i in -160..160 {
+                let (x, z) = (i as f32 * 12.7, j as f32 * 12.9);
+                let w = d.wet(x, z, 1e4);
+                assert!(w.river_cut_m <= w.cut_m, "{x},{z}");
+                brook += usize::from(w.cut_m > 1.5 && w.river_cut_m == 0.0);
+                river += usize::from(w.river_cut_m > 1.5);
+            }
+        }
+        assert!(
+            brook > 100 && river > 100,
+            "{brook} brook cuts, {river} river cuts"
+        );
     }
 
     #[test]
