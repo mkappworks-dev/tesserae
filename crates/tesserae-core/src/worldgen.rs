@@ -17,8 +17,10 @@ mod layouts;
 mod loot;
 mod settlements;
 mod structures;
+mod water;
 
 pub use loot::{Loot, Stood};
+pub use water::Fall;
 
 use std::cell::RefCell;
 use std::collections::HashMap;

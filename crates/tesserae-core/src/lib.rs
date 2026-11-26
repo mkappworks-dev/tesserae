@@ -103,7 +103,7 @@ pub use usable::{
 };
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{
-    Canopy, CanopyShapes, CaveParams, ColumnTop, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES,
+    Canopy, CanopyShapes, CaveParams, ColumnTop, Fall, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES,
     MAX_SMOOTHED_PER_CHUNK, ParamError, SmoothingParams, StructurePart, TreePart, WaterParams,
     Worldgen, WorldgenParams,
 };

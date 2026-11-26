@@ -458,6 +458,74 @@ fn rivers_and_lakes_are_in_the_same_metres_at_every_voxel_size() {
     }
 }
 
+/// Points on and beside inland water, and the dry ground and sea between.
+fn flow_points(g: &Worldgen) -> Vec<(f32, f32)> {
+    let wet = wet_columns(g, -4096.0, -4096.0, 128, 64.0);
+    let beside = wet
+        .iter()
+        .flat_map(|&(x, z, _)| [(x + 3.3, z), (x, z - 7.1), (x - 13.7, z + 2.9)]);
+    let between = (0..20)
+        .flat_map(|j| (0..20).map(move |i| (i as f32 * 397.0 - 4000.0, j as f32 * 409.0 - 4000.0)));
+    wet.iter()
+        .map(|&(x, z, _)| (x, z))
+        .chain(beside)
+        .chain(between)
+        .collect()
+}
+
+#[test]
+fn flow_is_the_same_in_metres_at_every_voxel_size_in_any_order_and_with_a_cold_cache() {
+    let one = Worldgen::new(SEED, 1.0, wet_world());
+    let points = flow_points(&one);
+    let at = |g: &Worldgen| {
+        points
+            .iter()
+            .map(|&(x, z)| g.flow_at(x, z))
+            .collect::<Vec<_>>()
+    };
+    let want = at(&one);
+    assert!(
+        want.iter().filter(|f| **f != [0.0; 2]).count() > 20,
+        "little Flow"
+    );
+    for size in [0.5, 4.0] {
+        assert_eq!(
+            at(&Worldgen::new(SEED, size, wet_world())),
+            want,
+            "{size} m"
+        );
+    }
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    for &(x, z) in points.iter().step_by(37) {
+        let cy = (g.surface_height_m(x, z) / CHUNK_SIZE as f32).floor() as i32;
+        g.chunk((x / 32.0) as i32, cy, (z / 32.0) as i32);
+    }
+    let mut back: Vec<_> = points.iter().rev().map(|&(x, z)| g.flow_at(x, z)).collect();
+    back.reverse();
+    assert_eq!(back, want, "after Chunks, backwards");
+    one.forget_caches();
+    assert_eq!(at(&one), want, "cold");
+}
+
+#[test]
+fn the_sea_has_no_flow_and_inland_water_does() {
+    let g = Worldgen::new(SEED, 1.0, wet_world());
+    for depth_m in [0.5, 5.0, 40.0] {
+        let (x, z) = ocean_column(&g, depth_m);
+        assert_eq!(g.flow_at(x, z), [0.0; 2], "the sea {depth_m} m deep");
+    }
+    let inland = wet_columns(&g, -4096.0, -4096.0, 128, 64.0);
+    let flowing = inland
+        .iter()
+        .filter(|&&(x, z, _)| g.flow_at(x, z) != [0.0; 2])
+        .count();
+    assert!(
+        flowing * 100 >= inland.len() * 95,
+        "{flowing} of {} inland wet columns flow",
+        inland.len()
+    );
+}
+
 fn caved_v3() -> WorldgenParams {
     WorldgenParams {
         // Tunnels thinner than a Voxel, so what a column holds is cavern and nothing else.

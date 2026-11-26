@@ -82,6 +82,11 @@ const LONG_BEND_WIDTH_M: f32 = 20.0;
 const MEANDER_M: f32 = 14.0;
 
 const NO_PARENT: u8 = 8;
+/// In a basin deep enough to be a lake, shallow margins included, so the lake reaches its shore.
+const LAKE: u8 = 1;
+/// A lake node whose way down leaves its lake by a spill its window sees, not by the window's
+/// edge.
+const SPILLED: u8 = 2;
 const INLAND: u8 = u8::MAX;
 /// Steps from the sea over which a river's channel widens into its mouth.
 const MOUTH_NODES: u8 = 2;
@@ -95,6 +100,12 @@ const DISTRIBUTARY: f32 = 0.5;
 /// reach, which the stencil holds. A mouth wider than that reaches less past its banks.
 const CHANNEL_REACH_M: f32 = 24.0 + VALLEY_REACH_M;
 const MEANDER_SEED: u32 = 0x1a4d_00b1;
+/// A lake's drift, slowest where little of it has passed and fastest near the spill.
+const LAKE_DRIFT_M_S: (f32, f32) = (0.02, 0.2);
+/// Running water, from slack water to rapids.
+const STREAM_M_S: (f32, f32) = (0.3, 4.0);
+/// Manning's roughness of a natural stream bed, in s/m^(1/3).
+const BED_ROUGHNESS: f32 = 0.035;
 const STEPS: [(i32, i32); 8] = [
     (-1, -1),
     (0, -1),
@@ -115,8 +126,8 @@ struct Node {
     level_m: f32,
     catchment: u32,
     down: u8,
-    /// In a basin deep enough to be a lake, shallow margins included, so the lake reaches its shore.
-    lake: bool,
+    /// [`LAKE`], and [`SPILLED`] on a lake node.
+    lake: u8,
     /// Steps downstream to the sea, 0 at the sea; [`INLAND`] past [`MOUTH_NODES`] or where the
     /// stream leaves the window.
     to_sea: u8,
@@ -130,7 +141,11 @@ pub(crate) struct Region {
 
 impl Node {
     fn is_lake(&self) -> bool {
-        self.lake
+        self.lake & LAKE != 0
+    }
+
+    fn is_spilled(&self) -> bool {
+        self.lake & SPILLED != 0
     }
 }
 
@@ -344,6 +359,14 @@ impl Drainage {
                 }
             };
         }
+        let mut spilled = vec![false; size];
+        for &at in &order {
+            if lake[at] && parent[at] != NO_PARENT {
+                let (di, dj) = STEPS[parent[at] as usize];
+                let p = idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj);
+                spilled[at] = !lake[p] || spilled[p];
+            }
+        }
         let mut catchment = vec![1u32; size];
         for &at in order.iter().rev() {
             if parent[at] != NO_PARENT {
@@ -384,7 +407,11 @@ impl Drainage {
                     level_m: level[at],
                     catchment: catchment[at],
                     down: parent[at],
-                    lake: lake[at],
+                    lake: if lake[at] {
+                        LAKE | (spilled[at] as u8 * SPILLED)
+                    } else {
+                        0
+                    },
                     to_sea: to_sea[at],
                     delta: delta[at],
                 });
@@ -563,6 +590,170 @@ impl Drainage {
             if wet { surface } else { f32::MIN },
         )
     }
+
+    /// Where water moves over `(x_m, z_m)`, in m/s along x and z: down the stream whose water
+    /// stands highest there, or drifting across a lake toward its outlet. Zero where neither
+    /// reaches. Walks the same segments as [`Self::wet`], out of its loop, which every column
+    /// asks: only a wet column's mesh asks this.
+    pub(crate) fn flow(&self, x_m: f32, z_m: f32) -> [f32; 2] {
+        let (u, v) = (x_m / self.node_m, z_m / self.node_m);
+        let (i0, j0) = (u.floor() as i32, v.floor() as i32);
+        let key = [i0.div_euclid(REGION_NODES), j0.div_euclid(REGION_NODES)];
+        let region = self.region(key);
+        let mut best: Option<(f32, [f32; 2])> = None;
+        let mut take = |found: Option<(f32, [f32; 2])>| {
+            if let Some((surface, _)) = found
+                && best.is_none_or(|(l, _)| surface > l)
+            {
+                best = found;
+            }
+        };
+        take(self.lake_drift(&region, key, (u, v)));
+        for dj in -STENCIL + 1..=STENCIL {
+            for di in -STENCIL + 1..=STENCIL {
+                let at = (i0 + di, j0 + dj);
+                let n = region.node(at.0, at.1, key);
+                if n.down == NO_PARENT {
+                    continue;
+                }
+                let step = STEPS[n.down as usize];
+                let p = region.node(at.0 + step.0, at.1 + step.1, key);
+                if n.catchment < STREAM_NODES {
+                    if n.to_sea == 1
+                        && let Some(w) = delta_fed_m(&region, key, at)
+                    {
+                        let side = Channel::side(w);
+                        take(self.channel_flow(at, n, step, p, side, (x_m, z_m)));
+                    }
+                    continue;
+                }
+                if p.is_lake() && n.is_lake() {
+                    continue;
+                }
+                let main = Channel {
+                    widths_m: (river_width_m(n.catchment), river_width_m(p.catchment)),
+                    mouth: n.to_sea != INLAND,
+                    band: if n.catchment >= RIVER_NODES { 2.0 } else { 1.0 },
+                };
+                take(self.channel_flow(at, n, step, p, main, (x_m, z_m)));
+                let side = Channel::side(river_width_m(n.catchment) * DISTRIBUTARY);
+                for step in distributaries(n) {
+                    let q = region.node(at.0 + step.0, at.1 + step.1, key);
+                    take(self.channel_flow(at, n, step, q, side, (x_m, z_m)));
+                }
+            }
+        }
+        best.map_or([0.0; 2], |(_, flow)| flow)
+    }
+
+    /// [`Self::lake_drift`] at `(u, v)` on the coarse lattice, without its level.
+    fn wide_drift(&self, (u, v): (f32, f32)) -> Option<[f32; 2]> {
+        let coarse = self.coarse.as_ref()?;
+        let scale = self.node_m / coarse.node_m;
+        let (u, v) = (u * scale, v * scale);
+        let key = [
+            (u.floor() as i32).div_euclid(REGION_NODES),
+            (v.floor() as i32).div_euclid(REGION_NODES),
+        ];
+        Some(coarse.lake_drift(&coarse.region(key), key, (u, v))?.1)
+    }
+
+    /// The level and drift of the highest lake on a corner of the lattice cell holding `(u, v)`,
+    /// in nodes: each lake corner's way down its flood tree, which leads out by the spill, blended
+    /// across the cell, and faster the more of the lake has drained through it.
+    fn lake_drift(
+        &self,
+        region: &Region,
+        key: [i32; 2],
+        (u, v): (f32, f32),
+    ) -> Option<(f32, [f32; 2])> {
+        let (i0, j0) = (u.floor() as i32, v.floor() as i32);
+        let (fu, fv) = (u - i0 as f32, v - j0 as f32);
+        let corners = [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(di, dj)| {
+            let w = (if di == 0 { 1.0 - fu } else { fu }) * (if dj == 0 { 1.0 - fv } else { fv });
+            (region.node(i0 + di, j0 + dj, key), w)
+        });
+        let level_m = corners
+            .iter()
+            .filter(|(n, _)| n.is_lake() && n.level_m > self.sea_m)
+            .map(|(n, _)| n.level_m)
+            .reduce(f32::max)?;
+        // A lake wider than a window leaves it by whichever edge each window sees as nearest
+        // its spill, so two regions would drift it apart; the coarse solve sees such a lake whole.
+        let wide = std::cell::OnceCell::new();
+        let (mut sum, mut weight) = ([0.0f32; 2], 0.0f32);
+        for (n, w) in corners {
+            if !n.is_lake() {
+                continue;
+            }
+            let drift = if n.is_spilled() || self.coarse.is_none() {
+                if n.down == NO_PARENT {
+                    continue;
+                }
+                let (di, dj) = STEPS[n.down as usize];
+                let speed = (LAKE_DRIFT_M_S.0 * (n.catchment as f32).sqrt()).min(LAKE_DRIFT_M_S.1);
+                let scale = speed / ((di * di + dj * dj) as f32).sqrt();
+                [scale * di as f32, scale * dj as f32]
+            } else {
+                match *wide.get_or_init(|| self.wide_drift((u, v))) {
+                    Some(d) => d,
+                    None => continue,
+                }
+            };
+            sum = [sum[0] + w * drift[0], sum[1] + w * drift[1]];
+            weight += w;
+        }
+        let drift = if weight > 0.0 {
+            sum.map(|c| c / weight)
+        } else {
+            [0.0; 2]
+        };
+        Some((level_m, drift))
+    }
+
+    /// The water level and Flow of `channel` from node `n` at `at` down `step` to `p`, at
+    /// `(x_m, z_m)`, if its water reaches there, as [`Self::wet`] draws that water: along the
+    /// meandered centre line, faster down a steeper and deeper channel.
+    fn channel_flow(
+        &self,
+        at: (i32, i32),
+        n: Node,
+        (si, sj): (i32, i32),
+        p: Node,
+        channel: Channel,
+        (x_m, z_m): (f32, f32),
+    ) -> Option<(f32, [f32; 2])> {
+        let a = [at.0 as f32 * self.node_m, at.1 as f32 * self.node_m];
+        let ab = [si as f32 * self.node_m, sj as f32 * self.node_m];
+        let length_m = (ab[0] * ab[0] + ab[1] * ab[1]).sqrt();
+        let along = |x: f32, z: f32| {
+            (((x - a[0]) * ab[0] + (z - a[1]) * ab[1]) / (length_m * length_m)).clamp(0.0, 1.0)
+        };
+        let (wn, wp) = channel.widths_m;
+        let s0 = along(x_m, z_m);
+        let (amount_m, long) = meander_m(wn * (1.0 - s0) + wp * s0);
+        let (qx, qz) = meander_at(x_m, z_m, amount_m, long);
+        let t = along(qx, qz);
+        let (dx, dz) = (qx - (a[0] + ab[0] * t), qz - (a[1] + ab[1] * t));
+        let mut width = wn * (1.0 - t) + wp * t;
+        let mut reach_m = valley_reach_m(width);
+        if channel.mouth {
+            width = mouth_width_m(width, sea_steps(n, p, t));
+            reach_m = valley_reach_m(width).min(CHANNEL_REACH_M - width / 2.0);
+        }
+        let edge = ((dx * dx + dz * dz).sqrt() - width / 2.0).max(0.0);
+        let dig = dig_m(width);
+        if edge >= reach_m || edge * BANK_SLOPE >= dig * channel.band {
+            return None;
+        }
+        let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
+        let slope = (n.level_m - p.level_m).max(0.0) / length_m;
+        // Manning's formula, the channel's depth standing in for its hydraulic radius.
+        let speed = (libm::cbrtf(dig * dig) * slope.sqrt() / BED_ROUGHNESS)
+            .clamp(STREAM_M_S.0, STREAM_M_S.1);
+        let [ux, uz] = meandered_along(x_m, z_m, (amount_m, long), ab);
+        Some((surface, [ux * speed, uz * speed]))
+    }
 }
 
 /// Per window node, whether it lies in a basin some node of which is deeper than a lake's least
@@ -695,6 +886,49 @@ fn take_channel(
     if surface > f32::MIN {
         *level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
     }
+}
+
+/// A stream's channel down one segment, as [`Drainage::channel_flow`] reads it.
+#[derive(Clone, Copy)]
+struct Channel {
+    /// Its width at the segment's upper and lower node, before any mouth widens it.
+    widths_m: (f32, f32),
+    /// Whether it widens into a mouth near the sea.
+    mouth: bool,
+    /// How far up its banks its water stands, against its dig.
+    band: f32,
+}
+
+impl Channel {
+    /// A delta's distributary of `width_m`, as [`Drainage::side_channel`] cuts it.
+    fn side(width_m: f32) -> Self {
+        Channel {
+            widths_m: (width_m, width_m),
+            mouth: true,
+            band: 2.0,
+        }
+    }
+}
+
+/// The unit direction down segment `ab` at `(x_m, z_m)`, turned to follow the meander: a channel
+/// is where the warped point lies on the segment, so it runs across the gradient of the warped
+/// point's distance from the segment's line.
+fn meandered_along(x_m: f32, z_m: f32, (amount_m, long): (f32, f32), ab: [f32; 2]) -> [f32; 2] {
+    const H_M: f32 = 0.5;
+    let q = |x: f32, z: f32| meander_at(x, z, amount_m, long);
+    let off = |(x, z): (f32, f32)| x * -ab[1] + z * ab[0];
+    let gx = (off(q(x_m + H_M, z_m)) - off(q(x_m - H_M, z_m))) / (2.0 * H_M);
+    let gz = (off(q(x_m, z_m + H_M)) - off(q(x_m, z_m - H_M))) / (2.0 * H_M);
+    let (mut tx, mut tz) = (gz, -gx);
+    if tx * ab[0] + tz * ab[1] < 0.0 {
+        (tx, tz) = (-tx, -tz);
+    }
+    let len = (tx * tx + tz * tz).sqrt();
+    if len < 1e-6 {
+        let len = (ab[0] * ab[0] + ab[1] * ab[1]).sqrt();
+        return [ab[0] / len, ab[1] / len];
+    }
+    [tx / len, tz / len]
 }
 
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
@@ -1069,5 +1303,119 @@ mod tests {
             }
         }
         assert!(wet > 1000 && cut > 1000, "{wet} wet points, {cut} cuts");
+    }
+
+    /// Points jittered off the lattice over the four regions round the origin.
+    fn jittered(n: i32, step_m: f32) -> impl Iterator<Item = (f32, f32)> {
+        (-n..n).flat_map(move |j| {
+            (-n..n).map(move |i| {
+                let h = crate::noise::cell_hash(i, j, 0x5f1);
+                ((i as f32 + h[0]) * step_m, (j as f32 + h[1]) * step_m)
+            })
+        })
+    }
+
+    fn speed(f: [f32; 2]) -> f32 {
+        (f[0] * f[0] + f[1] * f[1]).sqrt()
+    }
+
+    #[test]
+    fn flow_runs_down_every_stream_and_dry_ground_has_none() {
+        let d = drainage();
+        let (mut streams, mut down) = (0, 0);
+        for (x, z) in jittered(400, 5.0) {
+            let f = d.flow(x, z);
+            let Some(level) = d.wet(x, z, f32::MIN).level_m else {
+                assert_eq!(f, [0.0; 2], "flow on dry ground at {x},{z}");
+                continue;
+            };
+            if d.lake_level_at(x, z) == Some(level) {
+                continue;
+            }
+            let v = speed(f);
+            assert!(
+                (STREAM_M_S.0 - 1e-3..=STREAM_M_S.1 + 1e-3).contains(&v),
+                "{v} m/s at {x},{z}"
+            );
+            let (ux, uz) = (f[0] / v, f[1] / v);
+            let ahead = d.wet(x + ux, z + uz, f32::MIN).level_m;
+            let behind = d.wet(x - ux, z - uz, f32::MIN).level_m;
+            if let (Some(a), Some(b)) = (ahead, behind) {
+                streams += 1;
+                down += usize::from(a <= level + 1e-4 && b >= level - 1e-4);
+            }
+        }
+        assert!(
+            streams > 1000 && down * 100 >= streams * 98,
+            "{down} of {streams} stream points flow downhill"
+        );
+    }
+
+    /// Whether every lake corner of the lattice cell holding `(x_m, z_m)` drains by a spill its
+    /// window sees.
+    fn seen_whole(d: &Drainage, x_m: f32, z_m: f32) -> bool {
+        let (i0, j0) = ((x_m / NODE_M).floor() as i32, (z_m / NODE_M).floor() as i32);
+        let key = [i0.div_euclid(REGION_NODES), j0.div_euclid(REGION_NODES)];
+        let region = d.region(key);
+        [(0, 0), (1, 0), (0, 1), (1, 1)]
+            .map(|(di, dj)| region.node(i0 + di, j0 + dj, key))
+            .iter()
+            .all(|n| !n.is_lake() || n.is_spilled())
+    }
+
+    #[test]
+    fn a_lake_drifts_slowly_toward_its_outlet() {
+        let d = drainage();
+        let outlets: Vec<[f32; 2]> = (-2..=2)
+            .flat_map(|j| (-2..=2).map(move |i| [i, j]))
+            .flat_map(|key| region_nodes(&d, key))
+            .filter(|&(i, j, n)| {
+                n.is_lake() && n.down != NO_PARENT && {
+                    let (di, dj) = STEPS[n.down as usize];
+                    let key = [
+                        (i + di).div_euclid(REGION_NODES),
+                        (j + dj).div_euclid(REGION_NODES),
+                    ];
+                    !d.region(key).node(i + di, j + dj, key).is_lake()
+                }
+            })
+            .map(|(i, j, _)| [i as f32 * NODE_M, j as f32 * NODE_M])
+            .collect();
+        let (mut lake, mut whole, mut reached) = (0, 0, 0);
+        for (x0, z0) in jittered(40, 50.0) {
+            let Some(level) = d.lake_level_at(x0, z0).filter(|&l| l > SEA_M) else {
+                continue;
+            };
+            if d.wet(x0, z0, f32::MIN).level_m != Some(level) {
+                continue;
+            }
+            lake += 1;
+            let v = speed(d.flow(x0, z0));
+            assert!(v > 0.0 && v <= LAKE_DRIFT_M_S.1 + 1e-3, "{v} m/s on a lake");
+            let (mut x, mut z) = (x0, z0);
+            for _ in 0..4000 {
+                if d.lake_level_at(x, z).is_none() {
+                    break;
+                }
+                let f = d.flow(x, z);
+                let v = speed(f).max(1e-6);
+                (x, z) = (x + 4.0 * f[0] / v, z + 4.0 * f[1] / v);
+            }
+            // A drift that turns back, as across a border two windows drain apart, never leaves.
+            assert!(
+                d.lake_level_at(x, z).is_none(),
+                "the drift from {x0},{z0} is held at {x},{z}"
+            );
+            // A lake held at the coarse solve's level drifts toward that solve's outlet instead.
+            if seen_whole(&d, x0, z0) {
+                whole += 1;
+                let near = |o: &[f32; 2]| (o[0] - x).hypot(o[1] - z) < 2.0 * NODE_M;
+                reached += usize::from(outlets.iter().any(near));
+            }
+        }
+        assert!(
+            lake > 20 && whole * 2 > lake && reached * 100 >= whole * 95,
+            "{reached} of {whole} lake points seen whole, of {lake}, drift out by an outlet"
+        );
     }
 }

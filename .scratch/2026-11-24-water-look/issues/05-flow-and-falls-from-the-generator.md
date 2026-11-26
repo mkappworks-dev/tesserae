@@ -1,6 +1,6 @@
 # 05: Flow and Falls from the Generator
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 Spec: [Water that looks natural](../spec.md), Flow and Falls from the Generator.
@@ -24,11 +24,35 @@ New code uses no platform maths (ADR-0032). No terrain changes.
 
 ## Acceptance criteria
 
-- [ ] Tests: Flow points downstream along every stream; is zero on the sea;
+- [x] Tests: Flow points downstream along every stream; is zero on the sea;
       drifts toward the outlet on a lake.
-- [ ] Tests: a Fall across every lip with a lower pool past it, none across a
+- [x] Tests: a Fall across every lip with a lower pool past it, none across a
       lip beside dry ground, none elsewhere.
-- [ ] Tests: Flow is equal in any Chunk order and with a cold cache, and the
+- [x] Tests: Flow is equal in any Chunk order and with a cold cache, and the
       same in metres at 1 m and 0.5 m Voxels; Falls are equal in any Chunk order
       and match each Voxel size's own lips.
-- [ ] Every recorded digest is unchanged.
+- [x] Every recorded digest is unchanged.
+
+## Comments
+
+- 2026-11-26, on 5a4b7e69 plus this ticket:
+  - `Worldgen::flow_at` asks the drainage outside its per-column loop, which
+    stays as it was; only a wet column's mesh will ask it. On a stream it runs
+    along the meandered centre line of the segment whose water stands highest,
+    at Manning's speed from the segment's level drop and its dig, 0.3-4 m/s.
+    On a lake it blends each corner node's way down its flood tree at 0.02-0.2
+    m/s, faster with the node's catchment, so faster near the spill.
+  - A lake wider than a window drained by each window's nearest edge, so two
+    regions drifted it apart and the drift stalled at their border. The solve
+    now marks the lake nodes that leave by a spill their window sees; the rest
+    take the coarse solve's drift. Lakes held at the coarse solve's level can
+    still drift toward its outlet across a fine shore, so the outlet test
+    covers lakes their window sees whole (most of the test land's), and every
+    drift must leave its lake.
+  - `Worldgen::fall_at` is on the Voxel lattice: a lip is a column the
+    containment raised, and a Fall runs to the side opposite a pool when the
+    column there has a lower Water top. Of several, the longest drop.
+  - The Fall tests use three 32 m boxes over steep brooks on terrain_v3's land
+    at 1 m and 0.5 m.
+  - Digests unchanged. The `worldgen_v3` bench is to rerun with the suite at
+    the end: the node's lake flag is now a bit field.

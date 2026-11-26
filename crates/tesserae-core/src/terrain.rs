@@ -788,6 +788,11 @@ impl Terrain {
         self.drainage.wet(x_m, z_m, f32::MIN).level_m
     }
 
+    /// The Flow of the lake or river water over a column, in m/s along x and z.
+    pub(crate) fn flow(&self, x_m: f32, z_m: f32) -> [f32; 2] {
+        self.drainage.flow(x_m, z_m)
+    }
+
     /// What a Biome's selectors ask of the column, and how its Climate shifts there: the air is
     /// colder by altitude and wetter toward the sea.
     pub(crate) fn site(&self, x_m: f32, z_m: f32) -> (Site, (f32, f32)) {
