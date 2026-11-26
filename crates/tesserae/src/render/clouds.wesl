@@ -18,11 +18,15 @@ struct Clouds {
 @group(constants::MATERIAL_BIND_GROUP) @binding(0)
 var<uniform> clouds: Clouds;
 
-// Lattice cells across one noise period in the coarse octave: 640 m each over the 20 480 m
-// period. The fine octave has four times as many. Whole numbers, so both repeat with the period.
-const CELLS: f32 = 32.0;
+// Lattice cells across one noise period in the coarse octave: 160 m each over the 20 480 m
+// period, so a view straight up or down spans several. The fine octave has four times as many.
+// Whole numbers, so both repeat with the period.
+const CELLS: f32 = 128.0;
 const FINE: f32 = 4.0;
 const FINE_SHARE: f32 = 0.35;
+// Two octaves of value noise bunch about 0.5; stretched by this, they spread near enough evenly
+// over 0 to 1 that a cover of 0.4 covers about 40% of the sky.
+const CONTRAST: f32 = 2.5;
 
 // Samples along the ray inside the slab: enough for a sense of thickness, few enough to stay
 // within the Cloud layer's 0.2 ms.
@@ -31,6 +35,8 @@ const SAMPLES: u32 = 4u;
 const MAX_MARCH_M: f32 = 1500.0;
 // Light lost per metre through the densest cloud: 30 m of it hides nearly all behind it.
 const EXTINCTION_PER_M: f32 = 0.1;
+// How far round the Eye the cloud it stands in fogs the view.
+const IN_CLOUD_M: f32 = 60.0;
 // How far past the cover's threshold the noise climbs before a column fills the slab's thickness.
 const BILLOW: f32 = 0.3;
 // How soft a cloud's top and bottom are, as a share of the thickness.
@@ -42,6 +48,8 @@ const UNDERSIDE_AMBIENT: f32 = 0.8;
 // The silver round a cloud seen toward the light.
 const FORWARD_SCATTER: f32 = 0.4;
 const FORWARD_POWER: f32 = 8.0;
+
+const INSIDE_SPAN: f32 = 16.0;
 
 // The slab fades out over the last quarter of the reach, so its square edge never shows.
 const EDGE_FADE_FROM: f32 = 0.75;
@@ -62,11 +70,12 @@ struct CloudOutput {
 // and scaled to the reach; every transform is ignored.
 @vertex
 fn vertex(in: Vertex) -> CloudOutput {
-    let reach = clouds.field.z;
+    let eye = view.world_position.xyz;
+    let span = face_span(eye);
     let world = vec3<f32>(
-        view.world_position.x + in.position.x * reach,
+        eye.x + in.position.x * span,
         clouds.slab.y + in.position.y * clouds.slab.w,
-        view.world_position.z + in.position.z * reach,
+        eye.z + in.position.z * span,
     );
     var out: CloudOutput;
     out.clip = view.clip_from_world * vec4<f32>(world, 1.0);
@@ -103,7 +112,8 @@ fn value_noise(q: vec2<f32>, cells: f32) -> f32 {
 // The cloud field at `m`, metres in the noise's own frame.
 fn field(m: vec2<f32>) -> f32 {
     let q = fract(m / clouds.period_m);
-    return mix(value_noise(q, CELLS), value_noise(q, CELLS * FINE), FINE_SHARE);
+    let n = mix(value_noise(q, CELLS), value_noise(q, CELLS * FINE), FINE_SHARE);
+    return clamp((n - 0.5) * CONTRAST + 0.5, 0.0, 1.0);
 }
 
 // How dense the cloud is where the field reads `n`, at `h` from 0 (the base) to 1 (the top): a
@@ -127,6 +137,28 @@ fn scattering(direction: vec3<f32>) -> vec3<f32> {
     return glow;
 }
 
+// How far round the Eye the faces reach. From inside, a ray near level meets neither face within
+// the reach: spread far beyond it, the gap at the horizon is under a pixel.
+fn face_span(eye: vec3<f32>) -> f32 {
+    let inside = eye.y > clouds.slab.y && eye.y < clouds.slab.y + clouds.slab.w;
+    return select(1.0, INSIDE_SPAN, inside) * clouds.field.z;
+}
+
+// A cloud's colour, linear, `along` metres down `direction` at `height` from 0 (its base) to 1.
+fn shade(direction: vec3<f32>, height: f32, along: f32) -> vec3<f32> {
+    let toward = max(dot(direction, clouds.toward_light.xyz), 0.0);
+    let sunlit = mix(UNDERSIDE_LIGHT, 1.0, height) + FORWARD_SCATTER * pow(toward, FORWARD_POWER);
+    var colour = vec4<f32>(
+        clouds.light.rgb * sunlit + clouds.ambient.rgb * mix(UNDERSIDE_AMBIENT, 1.0, height),
+        1.0,
+    );
+    // fog.rs always sets ExponentialSquared; fogged at the cloud seen, not at the face drawn.
+    @if(DISTANCE_FOG) {
+        colour = exponential_squared_fog(fog, colour, along, scattering(direction));
+    }
+    return colour.rgb;
+}
+
 @fragment
 fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
     let eye = view.world_position.xyz;
@@ -142,42 +174,51 @@ fn fragment(in: CloudOutput) -> @location(0) vec4<f32> {
     let leave = min(max(to_base, to_top), enter + MAX_MARCH_M);
     let spacing = max(leave - enter, 0.0) / f32(SAMPLES);
 
+    let span = face_span(eye);
+    let across = length(in.world.xz - eye.xz);
+    let edge = 1.0 - smoothstep(EDGE_FADE_FROM * span, span, across);
+
     // Relative to the Eye the origin was taken under, so no large coordinate enters the noise.
     let under_eye = clouds.field.xy + (eye.xz - clouds.slab.xz);
-    var amount = 0.0;
+    // Metres of the densest cloud the ray crosses, and what it sees weighted by them.
+    var depth_m = 0.0;
     var height = 0.0;
     var along = 0.0;
     for (var i: u32 = 0u; i < SAMPLES; i = i + 1u) {
         let t = enter + (f32(i) + 0.5) * spacing;
         let h = clamp((eye.y + direction.y * t - base) / thickness, 0.0, 1.0);
-        let d = density(field(under_eye + direction.xz * t), h);
-        amount += d;
-        height += d * h;
-        along += d * t;
+        let m = density(field(under_eye + direction.xz * t), h) * spacing * edge;
+        depth_m += m;
+        height += m * h;
+        along += m * t;
     }
-    if amount <= 0.0 {
+    // Inside the slab the cloud round the Eye fogs every ray, which samples spread along a long
+    // ray would step over. It stands in front of them, so it is not fogged by their distance.
+    var near_m = 0.0;
+    let eye_h = clamp((eye.y - base) / thickness, 0.0, 1.0);
+    if enter <= 0.0 {
+        near_m = density(field(under_eye), eye_h) * min(leave, IN_CLOUD_M);
+    }
+    if depth_m + near_m <= 0.0 {
         discard;
     }
-    height /= amount;
-    along /= amount;
-    let alpha = 1.0 - exp(-EXTINCTION_PER_M * amount * spacing);
-
-    let toward = max(dot(direction, clouds.toward_light.xyz), 0.0);
-    let sunlit = mix(UNDERSIDE_LIGHT, 1.0, height) + FORWARD_SCATTER * pow(toward, FORWARD_POWER);
+    let far_alpha = 1.0 - exp(-EXTINCTION_PER_M * depth_m);
+    let near_alpha = 1.0 - exp(-EXTINCTION_PER_M * near_m);
+    var far = vec3<f32>(0.0);
+    if depth_m > 0.0 {
+        far = shade(direction, height / depth_m, along / depth_m);
+    }
+    var near = vec3<f32>(0.0);
+    if near_m > 0.0 {
+        near = shade(direction, eye_h, 0.5 * min(leave, IN_CLOUD_M));
+    }
+    let alpha = 1.0 - (1.0 - near_alpha) * (1.0 - far_alpha);
     var colour = vec4<f32>(
-        clouds.light.rgb * sunlit + clouds.ambient.rgb * mix(UNDERSIDE_AMBIENT, 1.0, height),
+        (near * near_alpha + far * far_alpha * (1.0 - near_alpha)) / alpha,
         1.0,
     );
-    // fog.rs always sets ExponentialSquared; fogged at the cloud seen, not at the face drawn.
-    @if(DISTANCE_FOG) {
-        colour = exponential_squared_fog(fog, colour, along, scattering(direction));
-    }
     @if(TONEMAP_IN_SHADER) {
         colour = tone_mapping(colour, view.color_grading);
     }
-
-    let reach = clouds.field.z;
-    let across = length(in.world.xz - eye.xz);
-    let edge = 1.0 - smoothstep(EDGE_FADE_FROM * reach, reach, across);
-    return vec4<f32>(colour.rgb, alpha * edge);
+    return vec4<f32>(colour.rgb, alpha);
 }

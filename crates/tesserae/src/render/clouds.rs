@@ -20,7 +20,9 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use bevy::transform::TransformSystems;
 
-use tesserae_core::sky::{CLOUD_PERIOD_M, CloudLayer, SkyState, cloud_noise_origin_m};
+use tesserae_core::sky::{
+    CLOUD_PERIOD_M, CloudLayer, LightSource, SkyState, cloud_noise_origin_m, srgb_to_linear,
+};
 
 use super::fog::{self, FogSettings};
 use super::sky::shows;
@@ -30,10 +32,18 @@ use crate::client::time_of_day::ClientTimeOfDay;
 use crate::server::streaming::StreamingSettings;
 use crate::session::SessionApp;
 
-/// How much of the light's colour a cloud's sunlit top shows, and of the ambient's, so a noon
-/// cloud tonemaps to a soft white rather than the flat shoulder. First values for the captures.
+/// How much of the light's colour a cloud's sunlit top shows, so a noon cloud tonemaps to a soft
+/// white rather than the flat shoulder. First values for the captures.
 const LIGHT_SHARE: f32 = 0.9;
-const AMBIENT_SHARE: f32 = 0.55;
+
+/// A cloud is lit by the sky round it as well as the ambient dome: the fog colour carries the
+/// Day curve's dusk warmth, which the ambient alone turns brown.
+const AMBIENT_SHARE: f32 = 0.35;
+const SKY_SHARE: f32 = 0.45;
+
+/// The sun's share of Daylight a cloud keeps while the light fades at the horizon: high up, it
+/// still catches the low sun.
+const LOW_SUN: f32 = 0.6;
 
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone, PartialEq)]
 pub struct CloudMaterial {
@@ -59,14 +69,19 @@ impl CloudMaterial {
     /// `eye` in metres; `reach_m` is how far the slab reaches round it.
     pub fn new(layer: &CloudLayer, state: &SkyState, eye: Vec3, reach_m: f32) -> Self {
         let [u, v] = cloud_noise_origin_m([eye.x, eye.z], state.cloud_drift_m);
-        let shade = |light: tesserae_core::sky::Light, share: f32| {
-            (Vec3::from(light.colour) * light.strength * share).extend(0.0)
+        let strength = match state.light_source {
+            LightSource::Sun => state.light.strength.max(LOW_SUN * state.daylight),
+            LightSource::Moon => state.light.strength,
         };
+        let light = Vec3::from(state.light.colour) * strength * LIGHT_SHARE;
+        let sky = Vec3::from(state.fog.map(srgb_to_linear));
+        let ambient = Vec3::from(state.ambient.colour) * state.ambient.strength * AMBIENT_SHARE
+            + sky * SKY_SHARE;
         Self {
             slab: Vec4::new(eye.x, layer.altitude_m, eye.z, layer.thickness_m),
             field: Vec4::new(u, v, reach_m, state.cloud_cover),
-            light: shade(state.light, LIGHT_SHARE),
-            ambient: shade(state.ambient, AMBIENT_SHARE),
+            light: light.extend(0.0),
+            ambient: ambient.extend(0.0),
             toward_light: Vec3::from(state.toward_light).extend(0.0),
             period_m: CLOUD_PERIOD_M as f32,
         }
@@ -418,7 +433,10 @@ mod tests {
         assert_eq!(got.field.w, state.cloud_cover);
         assert!(got.field.w > 0.0);
         let light = Vec3::from(state.light.colour) * state.light.strength * LIGHT_SHARE;
-        assert!(got.light.truncate().distance(light) < 1e-6);
+        assert!(
+            got.light.truncate().distance(light) < 1e-6,
+            "the afternoon sun"
+        );
     }
 
     #[test]

@@ -118,3 +118,14 @@ spec), and no captures or frame times taken, so the boxes stay unticked.
   Voxels). `clouds.wesl` is read, not compiled, until the first run.
 
 The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
+- Review fix: the empty views from above, inside and overhead were no
+  geometry bug (a debug pass showed faces, entry and exit right); the noise was
+  too coarse (640 m cells, so a near view saw one cell, often a gap) and bunched
+  about 0.5, so a cover of 0.4 showed about 20%. Now 160 m cells, stretched by
+  2.5 so the cover is about the share of sky. Inside, the cloud at the Eye
+  fogs every ray over 60 m, unfogged by the samples' distance, and the faces
+  spread 16 times the reach so no line shows at the horizon. Dusk: clouds are
+  lit by the fog colour (0.45) beside the ambient (0.35), and keep 0.6 of
+  Daylight of the sun's colour while its light fades at the horizon, so they
+  read peach, not brown. Stacked samples still show faint terraced rims at a
+  distance; left for the look pass.
