@@ -1,6 +1,6 @@
 # 09: Terra's day, reviewed whole
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03, 05, 06, 07, 08
 
 Spec: [Day and night cycle](../spec.md).
@@ -19,9 +19,9 @@ records brought up to date.
 
 ## Acceptance
 
-- [ ] The user approved the full day.
+- [x] The user approved the full day.
 - [x] Frame time within budget, recorded in Comments.
-- [ ] DESIGN.md updated; the spec's Status set to done.
+- [x] DESIGN.md updated; the spec's Status set to done.
 
 ## Comments
 
@@ -41,3 +41,8 @@ against noon: `flight` 4.488 and 4.600 ms (p95 9.83 and 9.99), `stationary`
 
 The first A/B, before 45c1e246 and 591ac51a, had the branch 1.2 to 1.3 ms over
 `main`; tickets 06 and 07 record the two fixes.
+
+2026-11-26: captures from the far Eye at 06:00, 07:00, 09:00, 12:00, 15:00,
+17:00, 18:00, 18:30 and at full-moon midnight, new-moon midnight and new-moon
+03:00, and from the near Eye at noon, 18:00 and both midnights. No tuning was
+needed. The user approved the full day on 2026-11-26.

@@ -1,6 +1,6 @@
 # 06: Moon and stars in the sky
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 Spec: [Day and night cycle](../spec.md).
@@ -19,7 +19,7 @@ The night sky.
 
 - [x] Captures at dusk and at full-moon and new-moon midnight, approved by the
       user; the moon's phase reads at a glance.
-- [ ] The reach's edge stays hidden at every hour.
+- [x] The reach's edge stays hidden at every hour.
 - [x] GPU frame time of the sky on `flight` at noon and midnight, interleaved
       against `main`, at most 0.1 ms over it, recorded in Comments.
 
@@ -98,3 +98,7 @@ per-run p50 GPU frame (`frame_start` to `frame_end`), 6 runs a cell.
 
 The sky's share is level with none, within the 0.1 ms. The reach's edge is
 checked in ticket 09's captures.
+
+2026-11-26: in ticket 09's whole-day captures the reach's edge stays hidden at
+every hour from 06:00 to new-moon 03:00, dusk included, where the terrain's own
+fog glow (45c1e246) meets the sky's.

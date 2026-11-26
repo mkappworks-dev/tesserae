@@ -1,6 +1,6 @@
 # Day and night cycle
 
-Status: ready-for-agent
+Status: done
 
 Source: branch `feat/day-night-cycle`, cut from `main` at `0b03c594`. Builds on
 the colour spec, `.scratch/2026-11-23-colour-art-and-shader/spec.md` on branch
