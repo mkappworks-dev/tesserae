@@ -21,8 +21,7 @@ freezes the set chosen at Create, dependencies included.
 **Data-only Mod** — a Mod whose Declaration is supplied as data, with no guest
 code. It may be the World's Game or add content alongside other Mods.
 
-**Look pack** — a Mod that supplies rendering appearance only: materials and
-post-process settings. The equivalent of a Minecraft shaderpack.
+**Look pack** — a Mod that changes how the World looks, never what it is.
 
 **Manifest** — a Mod's identity, version, contract line, dependencies and
 requested limits; marks whether it is a Game.
@@ -134,8 +133,16 @@ a World with no Game, have no sea.
 **Water surface** — the height in metres of standing or running water at a
 column, if there is any: the sea at Sea level, a lake at its own flat level, a
 river stepping down its course. One answer per column that Settlements, bridges,
-the Waterline, coarse levels and spawn all ask. A Game that declares no fluid
-still has the basins, dry.
+coarse levels and spawn all ask. A Game that declares no fluid still has the
+basins, dry.
+
+**Flow** — the direction and speed, in metres per second, at which water moves
+at a column, worked out from the World and never stored. It is seen, and moves
+nothing: no body is carried by it. Not **Flowing**, which is fluid a Source
+supports; a generated river is all Sources and still has a Flow. _Avoid_:
+current
+
+**Fall** — where water drops a Voxel or more from one Water surface to the next.
 
 **Landform** — the large-scale shape of the ground (ocean, coast, plain, hills,
 plateau, canyon, mountain range) that fields of the seed and a position in
@@ -214,6 +221,9 @@ Never produces a mesh.
 function of the seed and a position in metres. They choose the Biome; they are
 not a Biome. Temperature falls with altitude and humidity rises toward the sea,
 and Weather reads the same Climate.
+
+**Wind** — the direction and strength at which air moves over the World. Drawn
+waves read it.
 
 **Biome** — a region type a Game or Mod declares and Climate selects. It owns
 the ground Materials, surface features, ores, cave tuning and the sky and fog
@@ -434,9 +444,9 @@ Material like lava, so a World with no Game has no fluid. A Voxel holds at most
 one fluid Material.
 
 **Source** — fluid that stays: generated lake fluid, and fluid a player or a Mod
-places. It feeds flow without losing volume, and only an Edit, a Command or a
-reaction removes it. Flow never becomes one. Removing one drops its Item; no
-Edit aims at flow, so it drops nothing.
+places. It feeds Flowing fluid without losing volume, and only an Edit, a
+Command or a reaction removes it. Flowing fluid never becomes one. Removing one
+drops its Item; no Edit aims at Flowing fluid, so it drops nothing.
 
 **Flowing** — fluid a source supports, carrying its remaining reach and its
 descent since the reach was last renewed. It recedes when nothing supports it.
