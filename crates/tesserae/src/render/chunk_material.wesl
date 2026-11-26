@@ -15,6 +15,8 @@ import bevy_pbr::render::{
     },
     mesh_view_bindings as view_bindings,
 };
+@if(DISTANCE_FOG)
+import bevy_pbr::render::fog::exponential_squared_fog;
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
 import bevy_pbr::render::mesh_view_bindings::{screen_space_ambient_occlusion_texture, view};
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
@@ -172,6 +174,30 @@ fn apply_haze(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(mix(color.rgb, fog.rgb, haze), color.a);
 }
 
+// bevy_pbr's own fog samples the shadow map again for this glow, a second full shadow lookup per
+// pixel for about 0.3 ms at 1080p; unshadowed, as the sky's and the clouds' glow is, it shows no
+// difference: the glow is strongest far out, past the last cascade, where Bevy's lookup is 1 anyway.
+fn fog_glow(direction: vec3<f32>) -> vec3<f32> {
+    let fog = view_bindings::fog;
+    if fog.directional_light_color.a <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    var glow = vec3<f32>(0.0);
+    for (var i: u32 = 0u; i < view_bindings::lights.n_directional_lights; i = i + 1u) {
+        let light = view_bindings::lights.directional_lights[i];
+        let toward = max(dot(direction, light.direction_to_light), 0.0);
+        glow += pow(toward, fog.directional_light_exponent) * light.color.rgb;
+    }
+    return glow * view_bindings::view.exposure;
+}
+
+// fog.rs always sets ExponentialSquared.
+fn apply_fog(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
+    let toward = world_position - view_bindings::view.world_position.xyz;
+    let distance = length(toward);
+    return exponential_squared_fog(view_bindings::fog, color, distance, fog_glow(toward / distance));
+}
+
 @vertex
 fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
     return transform_vertex(in);
@@ -289,8 +315,10 @@ fn fragment(
     }
     @if(DISTANCE_FOG)
     if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u {
-        out.color = apply_haze(out.color, in.world_position.xyz);
+        out.color = apply_fog(apply_haze(out.color, in.world_position.xyz), in.world_position.xyz);
     }
+    // Fogged above; Bevy's own fog would sample the shadow map again.
+    pbr_input.material.flags &= ~STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }
