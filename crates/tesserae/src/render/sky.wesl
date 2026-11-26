@@ -66,6 +66,9 @@ const STAR_MARGIN: f32 = 0.15;
 // star turning across the pixel grid keeps its brightness and never shimmers.
 const STAR_REACH_PX: f32 = 2.0;
 const STAR_BRIGHTNESS: f32 = 1.4;
+// A full moon high up takes this much off every star, so the faint two thirds vanish and the bright
+// ones dim; a new moon or a set one takes nothing.
+const MOON_WASH: f32 = 0.15;
 
 const PI: f32 = 3.14159265358979;
 
@@ -127,7 +130,7 @@ fn unit(bits: u32) -> f32 {
 
 // The light of the one star in the cube-map cell `toward` falls in, if it holds one. The face is
 // warped equi-angular, so cells are near enough the same size that no face's corners crowd.
-fn star_light(toward: vec3<f32>, pixel_rad: f32) -> vec3<f32> {
+fn star_light(toward: vec3<f32>, pixel_rad: f32, washed: f32) -> vec3<f32> {
     let a = abs(toward);
     var face: u32;
     var across: vec2<f32>;
@@ -161,7 +164,7 @@ fn star_light(toward: vec3<f32>, pixel_rad: f32) -> vec3<f32> {
     let brightness = pow(unit(first >> 16u), 6.0);
     let warmth = unit(third) - 0.5;
     let tint = vec3<f32>(1.0 + 0.3 * warmth, 1.0, 1.0 - 0.3 * warmth);
-    return tint * (STAR_BRIGHTNESS * brightness * near * near);
+    return tint * (max(STAR_BRIGHTNESS * brightness - washed, 0.0) * near * near);
 }
 
 // Where the pixel looking `direction` falls on the moon's disc, in the disc's radii.
@@ -216,15 +219,16 @@ fn fragment(in: SkyOutput) -> @location(0) vec4<f32> {
     // One pixel's angle at the middle of the screen; a pixel at the edge spans less.
     let pixel_rad = 2.0 / (view.clip_from_view[1][1] * view.viewport.w);
     let moonward = dot(direction, sky.toward_moon.xyz);
+    let fullness = 0.5 - 0.5 * dot(sky.moon_light.xyz, sky.toward_moon.xyz);
     if moonward > MOON_GLOW_FROM {
-        let fullness = 0.5 - 0.5 * dot(sky.moon_light.xyz, sky.toward_moon.xyz);
         let moon_glow = MOON_GLOW * fullness * pow(moonward, MOON_GLOW_POWER);
         colour += seen(MOON_COLOUR * moon_glow) * haze;
     }
     let behind_the_moon = colour;
     if sky.stars > 0.004 {
         let among_stars = (sky.stars_from_world * vec4<f32>(direction, 0.0)).xyz;
-        colour += star_light(among_stars, pixel_rad) * (sky.stars * up);
+        let washed = MOON_WASH * fullness * smoothstep(0.0, 0.3, sky.toward_moon.y);
+        colour += star_light(among_stars, pixel_rad, washed) * (sky.stars * up);
     }
     if moonward > cos(MOON_RADIUS_RAD) - 1e-4 {
         let face = moon_face(behind_the_moon, direction, moonward);

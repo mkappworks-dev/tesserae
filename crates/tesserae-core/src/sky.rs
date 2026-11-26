@@ -13,8 +13,8 @@
 mod state;
 
 pub use state::{
-    Air, CAVE_FLOOR, DEFAULT_DAY_CURVE, DayKey, Light, LightSource, SkyInputs, SkyState, Tint,
-    day_curve_at, linear_to_srgb, sky_state, sky_state_on, srgb_to_linear,
+    Air, CAVE_FLOOR, DEFAULT_DAY_CURVE, DayKey, Light, LightSource, STARLIGHT_SHARE, SkyInputs,
+    SkyState, Tint, day_curve_at, linear_to_srgb, sky_state, sky_state_on, srgb_to_linear,
 };
 
 use crate::flow::{STEP_S, Step};

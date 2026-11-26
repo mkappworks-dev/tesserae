@@ -116,6 +116,9 @@ impl DayKey {
     }
 }
 
+/// The share of the night's ambient left at new moon: starlight, with no moon up.
+pub const STARLIGHT_SHARE: f32 = 0.35;
+
 const MOONLIGHT: Light = Light {
     colour: [0.62, 0.72, 1.0],
     strength: 0.15,
@@ -337,7 +340,7 @@ pub fn sky_state_on(curve: &[DayKey], inputs: &SkyInputs) -> SkyState {
         light_source,
         toward_light,
         light,
-        ambient: key.ambient,
+        ambient: night_ambient(key.ambient, daylight(sun_deg), fullness),
         sky: key.sky_tint.scaled(open).apply(inputs.air.sky),
         fog: key.fog_tint.scaled(open).apply(inputs.air.fog),
         stars: key.stars,
@@ -385,6 +388,23 @@ fn noon(air: Air) -> SkyState {
 fn horizon_fade(elevation_deg: f32) -> f32 {
     let t = (elevation_deg / TWILIGHT_DEG).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// The curve's ambient, its night share following the Moon's phase down to starlight; never under
+/// the cave floor, which validation keeps every key's ambient above.
+fn night_ambient(ambient: Light, daylight: f32, fullness: f32) -> Light {
+    let night = 1.0 - daylight;
+    let share = 1.0 - night * (1.0 - STARLIGHT_SHARE) * (1.0 - fullness);
+    let darkest = ambient.colour.into_iter().fold(f32::INFINITY, f32::min);
+    let floor = if darkest > 0.0 {
+        CAVE_FLOOR / darkest
+    } else {
+        0.0
+    };
+    Light {
+        strength: (ambient.strength * share).max(floor.min(ambient.strength)),
+        ..ambient
+    }
 }
 
 fn moon_fullness(phase: u8) -> f32 {

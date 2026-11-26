@@ -73,3 +73,10 @@ spec), and no captures or frame times taken, so the boxes stay unticked.
   the repo, so `sky.wesl` is read, not compiled, until the first run.
 
 The tests pass in the full `scripts/cargo-ci` run of 2026-11-26.
+
+2026-11-26: the night's ambient follows the Moon. Its night share falls with
+the phase to `STARLIGHT_SHARE` (0.35) at new moon, never under the cave floor
+(`night_ambient` in `sky/state.rs`). A full moon high up takes `MOON_WASH`
+(0.15) off every star in `sky.wesl`, so the faint two thirds vanish and the
+bright ones dim. Captures: `far-full-midnight-v2`, `far-new-midnight-v2`,
+`sky-full-midnight`, `sky-new-midnight`.

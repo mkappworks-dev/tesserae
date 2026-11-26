@@ -6,8 +6,8 @@
 use tesserae_core::flow::STEP_S;
 use tesserae_core::sky::{
     Air, CAVE_FLOOR, CLOUD_PERIOD_M, Clock, CloudLayer, DEFAULT_DAY_CURVE, DayKey, Light,
-    LightSource, SkyInputs, SkyParams, SkyState, TimeOfDay, Tint, cloud_noise_origin_m,
-    day_curve_at, linear_to_srgb, sky_state, sky_state_on, srgb_to_linear,
+    LightSource, STARLIGHT_SHARE, SkyInputs, SkyParams, SkyState, TimeOfDay, Tint,
+    cloud_noise_origin_m, day_curve_at, linear_to_srgb, sky_state, sky_state_on, srgb_to_linear,
 };
 
 const TERRA: SkyParams = SkyParams {
@@ -165,10 +165,33 @@ fn a_full_moon_lights_the_night_more_than_a_new_one() {
     assert_eq!((full.moon_fullness, new.moon_fullness), (1.0, 0.0));
     let half = midnight(2);
     assert!(new.light.strength < half.light.strength && half.light.strength < full.light.strength);
-    assert_eq!(
-        full.ambient, new.ambient,
-        "the ambient is the curve's, whatever the phase"
+    assert_eq!(full.ambient.colour, new.ambient.colour);
+    let darkest = new.ambient.colour.into_iter().fold(f32::INFINITY, f32::min);
+    let starlight = (full.ambient.strength * STARLIGHT_SHARE).max(CAVE_FLOOR / darkest);
+    assert!(
+        (new.ambient.strength - starlight).abs() < 1e-4,
+        "a new moon leaves starlight's share of the night's ambient, above the cave floor"
     );
+    assert!(
+        new.ambient.strength < half.ambient.strength
+            && half.ambient.strength < full.ambient.strength
+    );
+}
+
+#[test]
+fn the_moon_phase_leaves_the_days_ambient_alone() {
+    let noon = |phase| sky_state(&at(12.0, phase, Some(&TERRA), DRY));
+    assert_eq!(noon(FULL).ambient, noon(NEW).ambient);
+}
+
+#[test]
+fn a_new_moon_never_takes_the_ambient_under_the_cave_floor() {
+    for hour in [18.5, 21.0, 0.0, 3.0, 5.5] {
+        let state = sky_state(&at(hour, NEW, Some(&TERRA), DRY));
+        for c in state.ambient.colour {
+            assert!(c * state.ambient.strength >= CAVE_FLOOR - 1e-6, "{hour}");
+        }
+    }
 }
 
 #[test]
