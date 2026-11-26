@@ -227,7 +227,7 @@ fields do not establish power-loss safety, GPU cost or present latency.
 
 ## Streaming fixtures
 
-`--fixtures` also accepts eight streaming fixtures and five water fixtures, all
+`--fixtures` also accepts eight streaming fixtures and seven water fixtures, all
 on Terra's default seed and measured in the same 22–32 s phase:
 
 - `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
@@ -269,6 +269,8 @@ captures before and after a water change compare the same view:
   looking across its floor.
 - `slope`: 15 m over the head of a brook on a mountain 5 km north-east of spawn,
   looking down it as it falls 40 m to the valley.
+- `estuary` and `delta`: 46 m over two river mouths, 2.7 km and 9 km from spawn,
+  looking down on the channels where they meet the sea.
 
 `restart` and `revisit` need a `TESSERAE_WORLD_DIR` that does not exist yet and
 refuse to start otherwise; the runner gives each run a `world` folder inside its

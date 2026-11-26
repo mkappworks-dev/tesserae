@@ -82,6 +82,18 @@ const LONG_BEND_WIDTH_M: f32 = 20.0;
 const MEANDER_M: f32 = 14.0;
 
 const NO_PARENT: u8 = 8;
+const INLAND: u8 = u8::MAX;
+/// Steps from the sea over which a river's channel widens into its mouth.
+const MOUTH_NODES: u8 = 2;
+/// How many times its channel's width a river's mouth is at the sea.
+const MOUTH_WIDEN: f32 = 3.0;
+/// The channel width from which a river reaching the sea fans into distributaries.
+const DELTA_WIDTH_M: f32 = 10.0;
+/// A distributary's width against its river's.
+const DISTRIBUTARY: f32 = 0.5;
+/// The farthest any channel cuts from its centre line: a 48 m river's half width and whole
+/// reach, which the stencil holds. A mouth wider than that reaches less past its banks.
+const CHANNEL_REACH_M: f32 = 24.0 + VALLEY_REACH_M;
 const MEANDER_SEED: u32 = 0x1a4d_00b1;
 const STEPS: [(i32, i32); 8] = [
     (-1, -1),
@@ -105,6 +117,11 @@ struct Node {
     down: u8,
     /// In a basin deep enough to be a lake, shallow margins included, so the lake reaches its shore.
     lake: bool,
+    /// Steps downstream to the sea, 0 at the sea; [`INLAND`] past [`MOUTH_NODES`] or where the
+    /// stream leaves the window.
+    to_sea: u8,
+    /// One bit per step in [`STEPS`] its river also flows down as a delta's distributary.
+    delta: u8,
 }
 
 pub(crate) struct Region {
@@ -312,12 +329,49 @@ impl Drainage {
             }
         }
         let lake = lakes(&height, &level);
+        // In flood order a node's parent comes first, so one pass counts every node's steps.
+        let mut to_sea = vec![INLAND; size];
+        for &at in &order {
+            to_sea[at] = if parent[at] == NO_PARENT {
+                if height[at] <= self.sea_m { 0 } else { INLAND }
+            } else {
+                let (di, dj) = STEPS[parent[at] as usize];
+                let p = idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj);
+                match to_sea[p] {
+                    INLAND => INLAND,
+                    k if k >= MOUTH_NODES => INLAND,
+                    k => k + 1,
+                }
+            };
+        }
         let mut catchment = vec![1u32; size];
         for &at in order.iter().rev() {
             if parent[at] != NO_PARENT {
                 let (di, dj) = STEPS[parent[at] as usize];
                 let p = idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj);
                 catchment[p] += catchment[at];
+            }
+        }
+        let inside = |i: i32, j: i32| (0..WINDOW).contains(&i) && (0..WINDOW).contains(&j);
+        let mut delta = vec![0u8; size];
+        for at in 0..size {
+            let (ci, cj) = ((at as i32) % WINDOW, (at as i32) / WINDOW);
+            if to_sea[at] == INLAND
+                || to_sea[at] == 0
+                || parent[at] == NO_PARENT
+                || river_width_m(catchment[at]) < DELTA_WIDTH_M
+            {
+                continue;
+            }
+            for (k, (di, dj)) in STEPS.iter().enumerate() {
+                let (qi, qj) = (ci + di, cj + dj);
+                if k != parent[at] as usize
+                    && inside(qi, qj)
+                    && to_sea[idx(qi, qj)] <= 1
+                    && level[idx(qi, qj)] < level[at]
+                {
+                    delta[at] |= 1 << k;
+                }
             }
         }
         let mut nodes = Vec::with_capacity((STORED * STORED) as usize);
@@ -331,6 +385,8 @@ impl Drainage {
                     catchment: catchment[at],
                     down: parent[at],
                     lake: lake[at],
+                    to_sea: to_sea[at],
+                    delta: delta[at],
                 });
             }
         }
@@ -359,7 +415,28 @@ impl Drainage {
             for di in -STENCIL + 1..=STENCIL {
                 let (ni, nj) = (i0 + di, j0 + dj);
                 let n = region.node(ni, nj, key);
-                if n.down == NO_PARENT || n.catchment < STREAM_NODES {
+                if n.down == NO_PARENT {
+                    continue;
+                }
+                if n.catchment < STREAM_NODES {
+                    // Too small for a stream of its own, but a step from the sea a delta beside
+                    // it may still feed it a distributary.
+                    if n.to_sea == 1 {
+                        if let Some(w) = delta_fed_m(&region, key, (ni, nj)) {
+                            let (si, sj) = STEPS[n.down as usize];
+                            let p = region.node(ni + si, nj + sj, key);
+                            let c = self.side_channel(
+                                (ni, nj),
+                                n,
+                                (si, sj),
+                                p,
+                                w,
+                                (x_m, z_m),
+                                ground_m,
+                            );
+                            take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut level_m);
+                        }
+                    }
                     continue;
                 }
                 let (si, sj) = STEPS[n.down as usize];
@@ -388,10 +465,34 @@ impl Drainage {
                 let (cx, cz) = (a[0] + ab[0] * t, a[1] + ab[1] * t);
                 let (dx, dz) = (qx - cx, qz - cz);
                 let d = (dx * dx + dz * dz).sqrt();
-                let width = river_width_m(n.catchment) * (1.0 - t) + river_width_m(p.catchment) * t;
+                let mut width =
+                    river_width_m(n.catchment) * (1.0 - t) + river_width_m(p.catchment) * t;
+                let near_sea = n.to_sea != INLAND;
+                if near_sea {
+                    width = mouth_width_m(width, sea_steps(n, p, t));
+                }
                 let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
                 let edge = (d - width / 2.0).max(0.0);
-                let reach_m = valley_reach_m(width);
+                let mut reach_m = valley_reach_m(width);
+                if near_sea {
+                    reach_m = reach_m.min(CHANNEL_REACH_M - width / 2.0);
+                }
+                if n.delta != 0 {
+                    let branch_m = river_width_m(n.catchment) * DISTRIBUTARY;
+                    for (di, dj) in distributaries(n) {
+                        let q = region.node(ni + di, nj + dj, key);
+                        let c = self.side_channel(
+                            (ni, nj),
+                            n,
+                            (di, dj),
+                            q,
+                            branch_m,
+                            (x_m, z_m),
+                            ground_m,
+                        );
+                        take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut level_m);
+                    }
+                }
                 if edge >= reach_m {
                     continue;
                 }
@@ -416,6 +517,51 @@ impl Drainage {
             cut_m,
             river_cut_m,
         }
+    }
+
+    /// The cut and water level a delta's distributary of `width_m`, from node `n` at `at` down
+    /// `step` to `p`, makes at `(x_m, z_m)` over ground at `ground_m`; the water level is
+    /// `f32::MIN` outside its channel. Out of line and cold: few nodes have one, and the stream
+    /// loop above stays as small as it was without deltas.
+    #[allow(clippy::too_many_arguments, reason = "one segment's own description")]
+    #[cold]
+    #[inline(never)]
+    fn side_channel(
+        &self,
+        at: (i32, i32),
+        n: Node,
+        (si, sj): (i32, i32),
+        p: Node,
+        width_m: f32,
+        (x_m, z_m): (f32, f32),
+        ground_m: f32,
+    ) -> (f32, f32) {
+        let a = [at.0 as f32 * self.node_m, at.1 as f32 * self.node_m];
+        let ab = [si as f32 * self.node_m, sj as f32 * self.node_m];
+        let along = |x: f32, z: f32| {
+            (((x - a[0]) * ab[0] + (z - a[1]) * ab[1]) / (ab[0] * ab[0] + ab[1] * ab[1]))
+                .clamp(0.0, 1.0)
+        };
+        let (amount_m, long) = meander_m(width_m);
+        let (qx, qz) = meander_at(x_m, z_m, amount_m, long);
+        let t = along(qx, qz);
+        let (cx, cz) = (a[0] + ab[0] * t, a[1] + ab[1] * t);
+        let d = (qx - cx).hypot(qz - cz);
+        let width = mouth_width_m(width_m, sea_steps(n, p, t));
+        let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
+        let edge = (d - width / 2.0).max(0.0);
+        let reach_m = valley_reach_m(width).min(CHANNEL_REACH_M - width / 2.0);
+        if edge >= reach_m {
+            return (0.0, f32::MIN);
+        }
+        let dig = dig_m(width);
+        let target = surface - dig + edge * BANK_SLOPE;
+        let fade = 1.0 - smoothstep(0.66 * reach_m, reach_m, edge);
+        let wet = edge * BANK_SLOPE < dig * 2.0;
+        (
+            (ground_m - target).max(0.0) * fade,
+            if wet { surface } else { f32::MIN },
+        )
     }
 }
 
@@ -490,6 +636,65 @@ fn valley_reach_m(width_m: f32) -> f32 {
     let least_m = river_width_m(RIVER_NODES);
     let t = ((width_m - BROOK_WIDTH_M) / (least_m - BROOK_WIDTH_M)).min(1.0);
     BROOK_REACH_M + t * (VALLEY_REACH_M - BROOK_REACH_M)
+}
+
+/// A channel of `width_m` widened into its mouth, `steps` downstream from the sea: as it was
+/// [`MOUTH_NODES`] out, [`MOUTH_WIDEN`] times as wide at the sea.
+#[inline]
+fn mouth_width_m(width_m: f32, steps: f32) -> f32 {
+    let near = 1.0 - (steps / MOUTH_NODES as f32).clamp(0.0, 1.0);
+    width_m * (1.0 + (MOUTH_WIDEN - 1.0) * near)
+}
+
+/// Steps to the sea at `t` along the segment from `n` to `p`.
+#[inline]
+fn sea_steps(n: Node, p: Node, t: f32) -> f32 {
+    let steps = |k: u8| if k == INLAND { f32::INFINITY } else { k as f32 };
+    if n.to_sea == INLAND {
+        return f32::INFINITY;
+    }
+    steps(n.to_sea) * (1.0 - t) + steps(p.to_sea) * t
+}
+
+/// The steps a node's river also flows down as a delta: past its own, to each lower neighbour at
+/// the sea or a step from it, while it is wide enough and near enough to fan out. A neighbour a
+/// step out carries the distributary on to the sea itself ([`delta_fed_m`]).
+fn distributaries(n: Node) -> impl Iterator<Item = (i32, i32)> {
+    (0..STEPS.len())
+        .filter(move |&k| n.delta & (1 << k) != 0)
+        .map(|k| STEPS[k])
+}
+
+/// The width of the distributary node `at` carries down its last step to the sea, if a delta
+/// beside it fans into it. Asked only a step from the sea, so the node keeps no field for it:
+/// the stencil reads 64 nodes a column, and a wider one costs every column.
+fn delta_fed_m(region: &Region, key: [i32; 2], at: (i32, i32)) -> Option<f32> {
+    STEPS
+        .iter()
+        .enumerate()
+        .filter_map(|(k, &(di, dj))| {
+            let m = region.node(at.0 + di, at.1 + dj, key);
+            (m.delta & (1 << opposite(k)) != 0).then(|| river_width_m(m.catchment) * DISTRIBUTARY)
+        })
+        .reduce(f32::max)
+}
+
+/// Folds one channel's cut and water level into a column's.
+#[inline]
+fn take_channel(
+    (cut, surface): (f32, f32),
+    river: bool,
+    cut_m: &mut f32,
+    river_cut_m: &mut f32,
+    level_m: &mut Option<f32>,
+) {
+    *cut_m = cut_m.max(cut);
+    if river {
+        *river_cut_m = river_cut_m.max(cut);
+    }
+    if surface > f32::MIN {
+        *level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
+    }
 }
 
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
@@ -697,6 +902,44 @@ mod tests {
             let (qx, qz) = meander_at(x, z, MEANDER_M, (k % 11) as f32 / 10.0);
             assert!((qx - x).hypot(qz - z) <= MEANDER_M * 2f32.sqrt() + 1e-2);
         }
+    }
+
+    #[test]
+    fn rivers_widen_into_mouths_and_wide_ones_fan_into_deltas() {
+        let d = drainage();
+        let (mut mouths, mut deltas) = (0, 0);
+        for key in [[0, 0], [1, 0], [0, 1], [1, 1]] {
+            let region = d.solve(key);
+            for (i, j, n) in region_nodes(&d, key) {
+                let inner =
+                    |k: i32, o: i32| (2..REGION_NODES - 2).contains(&(k - o * REGION_NODES));
+                if !inner(i, key[0]) || !inner(j, key[1]) {
+                    continue;
+                }
+                if n.catchment < RIVER_NODES || n.down == NO_PARENT {
+                    continue;
+                }
+                let (si, sj) = STEPS[n.down as usize];
+                let p = region.node(i + si, j + sj, key);
+                if p.to_sea != 0 {
+                    continue;
+                }
+                mouths += 1;
+                let channel = river_width_m(n.catchment);
+                assert!(
+                    mouth_width_m(channel, sea_steps(n, p, 1.0)) > channel,
+                    "the river at {i},{j} meets the sea no wider than its channel"
+                );
+                if channel >= DELTA_WIDTH_M {
+                    deltas += 1;
+                    assert!(
+                        distributaries(n).next().is_some(),
+                        "the {channel} m river at {i},{j} meets the sea in one channel"
+                    );
+                }
+            }
+        }
+        assert!(mouths > 3 && deltas > 0, "{mouths} mouths, {deltas} deltas");
     }
 
     #[test]
