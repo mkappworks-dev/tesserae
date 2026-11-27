@@ -272,8 +272,9 @@ pub fn water_columns(
             out[water_index(x, z)] = WaterColumn::new(flow, depth_m, flags);
         }
     }
-    // The job holds only face neighbours, so an apron corner is the Generator's where it has
-    // water and otherwise repeats the held column beside it along z.
+    // The job holds only face neighbours, so an apron corner is the Generator's where its water
+    // tops out in this Chunk's height, and otherwise repeats the held column beside it along z: a
+    // pond high above the sea is not given the sea's depth at its corners.
     for (x, z, held_z) in [
         (-1, -1, 0),
         (SIDE, -1, 0),
@@ -283,6 +284,7 @@ pub fn water_columns(
         let column = [base[0] + x, base[2] + z];
         out[water_index(x, z)] = answers
             .water_top(column)
+            .filter(|&(_, k)| (base[1]..base[1] + SIDE).contains(&k))
             .map_or(out[water_index(x, held_z)], |(level_m, k)| {
                 generated(column, level_m, k)
             });

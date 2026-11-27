@@ -29,9 +29,9 @@ import super::{
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
     water::{
-        SeaWaves, WATER_REFLECTANCE, ambient_specular, column_depth_m, column_point,
-        falling_foam, flow_cycle, fresnel, is_water, sea_waves, sky_reflection, water_body,
-        water_flow, water_foam_share, water_gradient, water_shape, water_surface, water_view,
+        FOAM_DEPTH_M, STILL_M_S, SeaWaves, WATER_REFLECTANCE, ambient_specular, column_depth_m,
+        column_point, falling_foam, flow_cycle, fresnel, is_water, sea_waves, sky_reflection,
+        water_body, water_foam_share, water_gradient, water_shape, water_surface, water_view,
     },
 };
 
@@ -310,36 +310,44 @@ fn fragment(
     var water_alpha = 1.0;
     if water {
         // From under the surface there is no sky to reflect, and the depth is not what the view
-        // crosses; the underwater fog does the rest. Coarse levels carry no columns.
+        // crosses; the underwater fog does the rest.
         let from_below = pbr_input.world_normal.y < -0.5;
         let columns = in.water != 0u && !from_below;
         var depth_m = 0.0;
         var flow = vec2<f32>(0.0);
         var foam = 0.0;
         var waves = SeaWaves(vec2<f32>(0.0), 0.0, 0.0);
-        let cycle = flow_cycle(in.world_position.xz);
+        var cycle = 0.0;
         if columns {
             let point = column_point(in.voxel, in.uv);
             // Depth, Flow and foam are the top's: a wall of water stands at its column's edge,
             // where the filtered depth runs out as at a shore, so it takes its own column's.
             if abs(pbr_input.world_normal.y) > 0.5 {
-                let shape = water_shape(in.water, point, in.level);
+                let shape = water_shape(in.water, point, in.level, in.world_position.xyz);
                 depth_m = shape.depth_m;
-                flow = water_flow(in.water, point, in.world_position.xyz);
+                flow = shape.flow;
                 waves = sea_waves(in.world_position.xz, water_grad, shape, water_view.wind);
+                // Only running water, foam and falling water move with the flow cycle; still
+                // water skips its noise lookup.
+                if length(flow) >= STILL_M_S || depth_m < FOAM_DEPTH_M || shape.landing > 0.0
+                    || waves.breaking > 0.0
+                {
+                    cycle = flow_cycle(in.world_position.xz);
+                }
                 foam = water_foam_share(
                     in.world_position.xz,
                     water_grad,
                     depth_m,
                     flow,
                     cycle,
-                    waves.breaking,
+                    max(waves.breaking, shape.landing),
                 );
             } else {
                 depth_m = column_depth_m(in.water, vec2<i32>(floor(point)));
             }
         }
         if abs(pbr_input.world_normal.y) <= 0.5 {
+            cycle = flow_cycle(in.world_position.xz);
             foam = falling_foam(in.world_position.xyz, pbr_input.world_normal, cycle);
         }
         let calm = select(1.0, smoothstep(0.0, CALM_DEPTH_M, depth_m), columns);

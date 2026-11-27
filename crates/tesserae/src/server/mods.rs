@@ -3507,7 +3507,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         let water = loaded
             .registry
             .id_of(Kind::Material, "terra:water")
-            .expect("Terra's water") as usize;
+            .expect("Terra's water");
         let rows = table(&loaded.water_looks);
         assert_eq!(
             rows[water * ROWS_PER_SLOT],

@@ -388,9 +388,13 @@ pub(in crate::server) fn build_mesh(
     let mut mesh = mesh_chunk(lit(center), neighbors, tables);
     let coord = [coord.x, coord.y, coord.z];
     mesh.water = water_columns(coord, lit(center), neighbors, &tables.fluids, worldgen);
-    mesh.blended
-        .quads
-        .extend(fall_sheets(coord, lit(center), worldgen));
+    // A Fall pours between two pools, so a Chunk with no water in it or its apron has none; the
+    // lips are asked only where there is.
+    if !mesh.water.is_empty() {
+        mesh.blended
+            .quads
+            .extend(fall_sheets(coord, lit(center), worldgen));
+    }
     Built {
         mesh,
         #[cfg(any(feature = "dev", feature = "profiling"))]

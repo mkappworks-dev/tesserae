@@ -191,6 +191,8 @@ pub fn column_shader_defs() -> Vec<ShaderDefVal> {
     ]
 }
 
+const WATER_ANISOTROPY: u16 = 4;
+
 /// Texels along each edge of the normal map: a broad layer's 4.5 m at about 2 cm a texel.
 pub const NORMAL_TEXELS: u32 = 256;
 const NORMAL_LEVELS: u32 = NORMAL_TEXELS.ilog2() + 1;
@@ -308,7 +310,9 @@ pub fn normal_map() -> Image {
         mag_filter: ImageFilterMode::Linear,
         min_filter: ImageFilterMode::Linear,
         mipmap_filter: ImageFilterMode::Linear,
-        anisotropy_clamp: 16,
+        // Water is seen at grazing angles over much of the screen, where 16 taps cost the lake
+        // fixture 0.47 ms of GPU frame against 4; 1 saves nothing more.
+        anisotropy_clamp: WATER_ANISOTROPY,
         ..default()
     });
     image
@@ -395,7 +399,7 @@ pub fn foam_mask() -> Image {
         mag_filter: ImageFilterMode::Linear,
         min_filter: ImageFilterMode::Linear,
         mipmap_filter: ImageFilterMode::Linear,
-        anisotropy_clamp: 16,
+        anisotropy_clamp: WATER_ANISOTROPY,
         ..default()
     });
     image
@@ -512,7 +516,7 @@ mod tests {
         assert_eq!(chain.len(), (top * 4 - 1) / 3);
         let level = &chain[..top];
         assert!(level.iter().all(|v| (0.0..=1.0).contains(v)));
-        assert!(level.iter().any(|&v| v == 0.0) && level.iter().any(|&v| v == 1.0));
+        assert!(level.contains(&0.0) && level.contains(&1.0));
         let image = foam_mask();
         assert_eq!(image.texture_descriptor.mip_level_count, FOAM_LEVELS);
         assert_eq!(image.data.as_ref().unwrap().len(), chain.len());

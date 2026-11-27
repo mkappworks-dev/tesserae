@@ -98,75 +98,82 @@ fn column_depth_m(water: u32, column: vec2<i32>) -> f32 {
     return f32((word >> 16u) & 0xffu) * bitcast<f32>(constants::CHUNK_WATER_DEPTH_STEP_M);
 }
 
-fn column_sea(water: u32, column: vec2<i32>) -> f32 {
-    return select(0.0, 1.0, ((column_word(water, column) >> 24u) & constants::CHUNK_WATER_SEA) != 0u);
+fn word_depth_m(word: u32) -> f32 {
+    return f32((word >> 16u) & 0xffu) * bitcast<f32>(constants::CHUNK_WATER_DEPTH_STEP_M);
 }
 
-// The water under a fragment, filtered between column centres: its depth, how the depth slopes
-// in metres per metre along x and z, and how much of it is the sea.
-struct WaterShape {
-    depth_m: f32,
-    slope: vec2<f32>,
-    sea: f32,
+fn word_flag(word: u32, flag: u32) -> f32 {
+    return select(0.0, 1.0, ((word >> 24u) & flag) != 0u);
 }
 
-// The apron holds the neighbours' columns, so two Chunks of one lake meet with no step. A dry
-// column stands as deep below as the wet ones beside it are above, so the depth runs out to
-// nothing at the waterline and not half a column short of it.
-// `level` is the layer's LOD level: its cells are 2^level Voxels across.
-fn water_shape(water: u32, point: vec2<f32>, level: u32) -> WaterShape {
-    let q = point - 0.5;
-    let last = i32(constants::CHUNK_CELLS) - 1;
-    let i = clamp(vec2<i32>(floor(q)), vec2<i32>(-1), vec2<i32>(last));
-    let f = clamp(q - vec2<f32>(i), vec2<f32>(0.0), vec2<f32>(1.0));
-    var depth = vec4<f32>(
-        column_depth_m(water, i),
-        column_depth_m(water, i + vec2<i32>(1, 0)),
-        column_depth_m(water, i + vec2<i32>(0, 1)),
-        column_depth_m(water, i + vec2<i32>(1, 1)),
-    );
-    let sea = vec4<f32>(
-        column_sea(water, i),
-        column_sea(water, i + vec2<i32>(1, 0)),
-        column_sea(water, i + vec2<i32>(0, 1)),
-        column_sea(water, i + vec2<i32>(1, 1)),
-    );
-    let wet = vec4<f32>(depth > vec4<f32>(0.0));
-    let wet_mean = dot(depth, wet) / max(dot(wet, vec4<f32>(1.0)), 1.0);
-    depth = select(vec4<f32>(-wet_mean), depth, depth > vec4<f32>(0.0));
-    let filtered = mix(mix(depth.x, depth.y, f.x), mix(depth.z, depth.w, f.x), f.y);
-    let per_voxel = vec2<f32>(
-        mix(depth.y - depth.x, depth.w - depth.z, f.y),
-        mix(depth.z - depth.x, depth.w - depth.y, f.x),
-    );
-    let sea_share = mix(mix(sea.x, sea.y, f.x), mix(sea.z, sea.w, f.x), f.y);
-    let cell_m = water_view.flow_fade_m.z * exp2(f32(level));
-    return WaterShape(max(filtered, 0.0), per_voxel / cell_m, sea_share);
-}
-
-// `WaterColumn`'s Flow at column `x`, `z`, in m/s along x and z: two signed bytes.
-fn column_flow(water: u32, column: vec2<i32>) -> vec2<f32> {
-    let word = column_word(water, column);
+// Flow in m/s along x and z: two signed bytes.
+fn word_flow(word: u32) -> vec2<f32> {
     let steps = vec2<i32>(bitcast<i32>(word << 24u) >> 24u, bitcast<i32>(word << 16u) >> 24u);
     return vec2<f32>(steps) * bitcast<f32>(constants::CHUNK_WATER_FLOW_STEP_M_S);
 }
 
-// Flow filtered between column centres as depth is, faded to calm toward the edge of level 0,
-// so it meets coarse water, which carries none, without a step.
-fn water_flow(water: u32, point: vec2<f32>, world_position: vec3<f32>) -> vec2<f32> {
+// The water under a fragment, filtered between column centres: its depth, how the depth slopes
+// in metres per metre along x and z, how much of it is the sea, how much a Fall lands in, and its
+// Flow, faded to calm toward the edge of level 0 so it meets coarse water, which carries none,
+// without a step.
+struct WaterShape {
+    depth_m: f32,
+    slope: vec2<f32>,
+    sea: f32,
+    landing: f32,
+    flow: vec2<f32>,
+}
+
+// Four column values, x then z, at `f` between their centres.
+fn bilinear(v: vec4<f32>, f: vec2<f32>) -> f32 {
+    return mix(mix(v.x, v.y, f.x), mix(v.z, v.w, f.x), f.y);
+}
+
+// Each of the four columns around the fragment is read once. The apron holds the neighbours'
+// columns, so two Chunks of one lake meet with no step. A dry column stands as deep below as the
+// wet ones beside it are above, so the depth runs out to nothing at the waterline and not half a
+// column short of it. `level` is the layer's LOD level: its cells are 2^level Voxels across.
+fn water_shape(water: u32, point: vec2<f32>, level: u32, world_position: vec3<f32>) -> WaterShape {
     let q = point - 0.5;
     let last = i32(constants::CHUNK_CELLS) - 1;
     let i = clamp(vec2<i32>(floor(q)), vec2<i32>(-1), vec2<i32>(last));
     let f = clamp(q - vec2<f32>(i), vec2<f32>(0.0), vec2<f32>(1.0));
-    let low = mix(column_flow(water, i), column_flow(water, i + vec2<i32>(1, 0)), f.x);
-    let high = mix(
-        column_flow(water, i + vec2<i32>(0, 1)),
-        column_flow(water, i + vec2<i32>(1, 1)),
-        f.x,
+    let words = vec4<u32>(
+        column_word(water, i),
+        column_word(water, i + vec2<i32>(1, 0)),
+        column_word(water, i + vec2<i32>(0, 1)),
+        column_word(water, i + vec2<i32>(1, 1)),
     );
+    var depth = vec4<f32>(0.0);
+    var sea = vec4<f32>(0.0);
+    var landing = vec4<f32>(0.0);
+    var flow_x = vec4<f32>(0.0);
+    var flow_z = vec4<f32>(0.0);
+    for (var c = 0u; c < 4u; c++) {
+        depth[c] = word_depth_m(words[c]);
+        sea[c] = word_flag(words[c], constants::CHUNK_WATER_SEA);
+        landing[c] = word_flag(words[c], constants::CHUNK_WATER_FOAM);
+        let flow = word_flow(words[c]);
+        flow_x[c] = flow.x;
+        flow_z[c] = flow.y;
+    }
+    let wet = vec4<f32>(depth > vec4<f32>(0.0));
+    let wet_mean = dot(depth, wet) / max(dot(wet, vec4<f32>(1.0)), 1.0);
+    depth = select(vec4<f32>(-wet_mean), depth, depth > vec4<f32>(0.0));
+    let per_voxel = vec2<f32>(
+        mix(depth.y - depth.x, depth.w - depth.z, f.y),
+        mix(depth.z - depth.x, depth.w - depth.y, f.x),
+    );
+    let cell_m = water_view.flow_fade_m.z * exp2(f32(level));
     let distance = length(world_position - view.world_position.xyz);
-    let fade = 1.0 - smoothstep(water_view.flow_fade_m.x, water_view.flow_fade_m.y, distance);
-    return mix(low, high, f.y) * fade;
+    let calm = 1.0 - smoothstep(water_view.flow_fade_m.x, water_view.flow_fade_m.y, distance);
+    return WaterShape(
+        max(bilinear(depth, f), 0.0),
+        per_voxel / cell_m,
+        bilinear(sea, f),
+        bilinear(landing, f),
+        vec2<f32>(bilinear(flow_x, f), bilinear(flow_z, f)) * calm,
+    );
 }
 
 // Scale of the slow noise that staggers the flow cycle from place to place, so the cross-fade's
@@ -224,7 +231,8 @@ const WHITE_FROM_M_S: f32 = 3.0;
 const WHITE_AT_M_S: f32 = 3.9;
 
 // How much of the surface is foam: a band along the shore, white water where it runs fast, and
-// the sea's `breaking`, each broken up by the mask, which runs with the Flow.
+// `breaking`, the sea's breakers or a Fall's landing, each broken up by the mask, which runs with
+// the Flow.
 fn water_foam_share(
     xz: vec2<f32>,
     gradient: WaterGradient,

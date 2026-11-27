@@ -1,6 +1,6 @@
 # Water that looks natural
 
-Status: ready-for-agent
+Status: done
 
 Source: branch `feat/water-look`, cut from `main` at `0b03c594`. Decisions
 settled in a grilling round on 2026-11-24 and 2026-11-25. Tickets:

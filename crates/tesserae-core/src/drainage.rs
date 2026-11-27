@@ -448,21 +448,14 @@ impl Drainage {
                 if n.catchment < STREAM_NODES {
                     // Too small for a stream of its own, but a step from the sea a delta beside
                     // it may still feed it a distributary.
-                    if n.to_sea == 1 {
-                        if let Some(w) = delta_fed_m(&region, key, (ni, nj)) {
-                            let (si, sj) = STEPS[n.down as usize];
-                            let p = region.node(ni + si, nj + sj, key);
-                            let c = self.side_channel(
-                                (ni, nj),
-                                n,
-                                (si, sj),
-                                p,
-                                w,
-                                (x_m, z_m),
-                                ground_m,
-                            );
-                            take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut level_m);
-                        }
+                    if n.to_sea == 1
+                        && let Some(w) = delta_fed_m(&region, key, (ni, nj))
+                    {
+                        let (si, sj) = STEPS[n.down as usize];
+                        let p = region.node(ni + si, nj + sj, key);
+                        let c =
+                            self.side_channel((ni, nj), n, (si, sj), p, w, (x_m, z_m), ground_m);
+                        take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut level_m);
                     }
                     continue;
                 }
@@ -573,7 +566,7 @@ impl Drainage {
         let (qx, qz) = meander_at(x_m, z_m, amount_m, long);
         let t = along(qx, qz);
         let (cx, cz) = (a[0] + ab[0] * t, a[1] + ab[1] * t);
-        let d = (qx - cx).hypot(qz - cz);
+        let d = libm::hypotf(qx - cx, qz - cz);
         let width = mouth_width_m(width_m, sea_steps(n, p, t));
         let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
         let edge = (d - width / 2.0).max(0.0);
@@ -1134,7 +1127,7 @@ mod tests {
         for k in 0..2000 {
             let (x, z) = (k as f32 * 977.3 - 9e5, k as f32 * -611.9 + 4e5);
             let (qx, qz) = meander_at(x, z, MEANDER_M, (k % 11) as f32 / 10.0);
-            assert!((qx - x).hypot(qz - z) <= MEANDER_M * 2f32.sqrt() + 1e-2);
+            assert!(libm::hypotf(qx - x, qz - z) <= MEANDER_M * 2f32.sqrt() + 1e-2);
         }
     }
 
@@ -1409,7 +1402,7 @@ mod tests {
             // A lake held at the coarse solve's level drifts toward that solve's outlet instead.
             if seen_whole(&d, x0, z0) {
                 whole += 1;
-                let near = |o: &[f32; 2]| (o[0] - x).hypot(o[1] - z) < 2.0 * NODE_M;
+                let near = |o: &[f32; 2]| libm::hypotf(o[0] - x, o[1] - z) < 2.0 * NODE_M;
                 reached += usize::from(outlets.iter().any(near));
             }
         }

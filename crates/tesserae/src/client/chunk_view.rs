@@ -322,14 +322,17 @@ fn receive_wind(
     }
 }
 
+/// What [`follow_view`] reads of the World's settings.
+type ViewSettings<'w> = (
+    Option<Res<'w, FogSettings>>,
+    Option<Res<'w, StreamingSettings>>,
+    Option<Res<'w, WorldSettings>>,
+);
+
 /// Keeps what water reflects in step with the sky's zenith, where its Flow fades with the reach,
 /// and the Wind its waves run along. Only the blended layer draws water.
 fn follow_view(
-    (settings, streaming, world): (
-        Option<Res<FogSettings>>,
-        Option<Res<StreamingSettings>>,
-        Option<Res<WorldSettings>>,
-    ),
+    (settings, streaming, world): ViewSettings,
     (terrain, wind): (Res<TerrainMaterial>, Res<CurrentWind>),
     mut materials: ResMut<Assets<ChunkMaterial>>,
 ) {
