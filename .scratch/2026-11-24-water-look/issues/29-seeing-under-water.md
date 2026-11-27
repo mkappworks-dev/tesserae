@@ -26,8 +26,8 @@ near; a thin white line crosses the view looking down.
 - [x] Under water reads as clear water with a light blue tint at any distance:
       a floor 5 m off and one 30 m off both keep their colours, tinted; only
       near the edge of what is streamed does the view fade to the water.
-- [ ] A shallow floor lit brighter than a deep one, by the water above it.
-- [ ] Caustics move on the floor near the surface and fade with depth.
+- [ ] ~~A shallow floor lit brighter than a deep one, by the water above it.~~ (dropped by the user)
+- [ ] ~~Caustics move on the floor near the surface and fade with depth.~~ (dropped by the user)
 - [x] No white line across the view under water.
 - [ ] Captures at the four angles, before and after, shown to the user.
 
@@ -51,3 +51,5 @@ near; a thin white line crosses the view looking down.
   Voxel's edges round the whole view, on `main` too. The ray now passes
   through the fluid it starts in (`from_under_water_remove_reaches_the_bed_through_the_water`);
   `/tmp/tesserae-water-look-captures/32-lines/fixed.png`.
+- 2026-11-27: the user dropped caustics and the light from above, which lean
+  to a physical look over the clear one chosen.
