@@ -19,8 +19,8 @@ Material draw falling Flow, so a Settlement's simulated waterfall (Terra's
 - [x] Meshing tests: a lip with a lower pool past it emits one sheet spanning
       the two surfaces; a lip beside dry ground emits none; the pool below is
       flagged for foam.
-- [ ] Captures at the river fixture and a Settlement waterfall, shown to the
-      user.
+- [x] Captures at the river fixture and a sea-cliff Fall, shown to the user
+      (amended by the user).
 - [x] At the river fixture, how many frames a blended mesh waits for its sort,
       against 11, in Comments.
 
@@ -49,3 +49,5 @@ Material draw falling Flow, so a Settlement's simulated waterfall (Terra's
   thin bright curves at every step of the brook, the sheets and their streaks
   seen almost edge-on from above. A Settlement waterfall is not captured: no
   fixture stands at one. They wait on the user's review.
+- 2026-11-27: the user accepted the sea-cliff Fall, now running down its
+  ledges (ticket 31), in place of a Settlement waterfall.

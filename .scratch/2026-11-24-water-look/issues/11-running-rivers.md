@@ -19,7 +19,8 @@ multiples of the clock's, as in 08.
 - [x] Captures over several seconds at the river fixture show the surface moving
       downstream with no visible pulse or reset, and white water on steep
       reaches; shown to the user.
-- [ ] Water poured on a slope runs down it in a capture.
+- [x] Water poured on a block runs in a capture, on the `active` fixture's
+      flat ground (amended by the user).
 - [x] Flow fades to calm water by the edge of level 0.
 - [x] The frequency unit test from 08 covers the flow phase.
 
@@ -56,3 +57,5 @@ multiples of the clock's, as in 08.
   first criterion. Poured water on a true slope is not captured: the `active`
   block stands on flat ground.
 - 2026-11-27: the user reviewed the captures and approved them.
+- 2026-11-27: the user accepted the `active` fixture's poured block in place
+  of a slope.
