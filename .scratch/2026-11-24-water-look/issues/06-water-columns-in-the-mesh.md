@@ -1,6 +1,6 @@
 # 06: Water columns in the mesh
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 
 Spec: [Water that looks natural](../spec.md), Water columns.
@@ -34,7 +34,7 @@ the colour branch.
       falling Fluid is flagged; a dammed river column and a Settlement pond take
       the scan rule.
 - [x] Every existing fluid meshing test passes unchanged.
-- [ ] Mesh job time on the river and coast fixtures against the commit before,
+- [x] Mesh job time on the river and coast fixtures against the commit before,
       in Comments.
 
 ## Comments
@@ -59,3 +59,16 @@ the colour branch.
     read the Cell's column cache, and only the Flow walks the drainage.
   - The mesh job time on the river and coast fixtures waits, with ticket 01's
     series, for a quiet host.
+- 2026-11-27, mesh job time on the river and coast fixtures, release
+  `profiling` builds of 981fd487 (before) and 51bca61d (this ticket), three
+  rounds each through `scripts/profile-frames`, load 3-7 (the runs' own):
+  - Level 0 mesh job, whole run: river 0.60 to 0.81 ms a mesh (+0.21 ms), coast
+    0.40 to 0.48 ms (+0.08 ms), over about 950 and 1 100 meshes a run. River
+    Chunks are wetter, as the in-test 0.32 ms a wet Chunk predicted.
+  - `mesh_worker_ms_per_s` over the fixture window: river 4.0 to 5.7, coast
+    10.3 to 12.1, on worker threads.
+  - Median frame: coast 4.21 to 4.23 ms; river 13.2 to 14.0 ms (rounds 12.9,
+    13.3, 13.2 against 13.2, 14.0, 14.0), the main thread's wall time up with
+    it. The Client does not read the columns until ticket 10, so the river
+    step is not explained by this ticket's work; ticket 16's interleaved budget
+    run measures river again.
