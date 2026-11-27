@@ -340,6 +340,9 @@ Terra builds the same scenes in metres at each:
 TESSERAE_VOXEL_SIZE_M=0.25 cargo dev
 ```
 
+`TESSERAE_SEED` sets a new World's seed, so a spot a player reports can be
+generated afresh: their own save keeps the Chunks it generated before a change.
+
 The water is Terra's own, `terra:water`, declared with its fluid row and colour
 as its lava and mud are: it fills the lakes of the Terra World, which stand at
 25.5 m in valleys well away from the scenes, and it is the water every scene
