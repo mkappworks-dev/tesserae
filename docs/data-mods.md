@@ -50,6 +50,13 @@ every Material of every loaded Mod that carries the tag, solid ones for soil and
 fluids for water. A tag that matches none is a load error naming the Plant, so a
 shared Mod can say `#soil` and grow in any Game whose ground carries it.
 
+A water Material, a blended Fluid, may add a `[[water-looks]]` row: `material`
+(its local name), and optional `absorption-per-m = [r, g, b]` (how fast each
+colour fades with depth, per metre), `scatter` and `foam` (three sRGB bytes
+each) and `roughness`. Whatever is left out is pure water's; a Material tagged
+`water` with no row draws as pure water too. A row naming anything but a blended
+Fluid is a load error naming the Mod and row.
+
 An appearance row may add `texture = "art/rock.png"`: a PNG inside the Mod
 directory, exactly 48 by 16 pixels (three 16 by 16 faces), used for Material
 surfaces and item previews. A Game's `[world.character]` takes `pixel-m`,

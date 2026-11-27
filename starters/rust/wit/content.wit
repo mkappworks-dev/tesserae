@@ -88,6 +88,24 @@ interface content {
         variation: tile-variation,
     }
 
+    /// How light behaves in one of this Mod's water Materials, which must be a
+    /// blended Fluid. Every value is optional; the engine's pure water fills
+    /// the rest. A Look pack may replace it as it replaces `appearance`.
+    record water-look {
+        /// The Material's local name.
+        material: string,
+        /// Per metre, for red, green and blue: how fast each colour fades with
+        /// depth. Each from 0 to 100. Pure water's is 0.34, 0.0565, 0.0092.
+        absorption-per-m: option<tuple<f32, f32, f32>>,
+        /// sRGB, the colour light scattered back out of the body takes; alpha
+        /// is ignored.
+        scatter: option<srgba>,
+        /// The surface's roughness before ripples, from 0.02 to 1.
+        roughness: option<f32>,
+        /// sRGB, the colour of foam; alpha is ignored.
+        foam: option<srgba>,
+    }
+
     /// How a Material's tile varies across its Voxels, keyed on each one's
     /// position in the World, so a wide surface does not repeat every Voxel.
     /// Closed in 0.3.
@@ -1549,5 +1567,7 @@ interface content {
         /// At most 16 in a World, from any Mod, named `<mod id>:<name>`. Names
         /// resolve after every Mod has declared.
         settlements: list<settlement-def>,
+        /// At most 16 rows, one per water Material.
+        water-looks: list<water-look>,
     }
 }

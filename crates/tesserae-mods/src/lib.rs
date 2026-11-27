@@ -39,7 +39,7 @@ mod underground;
 pub use adapt::Line;
 pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
 pub use bindings::tesserae::mods::content::{
-    Declaration, MapPolicy, MovementPolicy, TileVariation,
+    Declaration, MapPolicy, MovementPolicy, TileVariation, WaterLook,
 };
 pub use character::{
     Bone, Character, Cube, MAX_BONES, MAX_CUBES, Motion, Role, SKIN_BYTES, SKIN_EDGE,

@@ -80,6 +80,7 @@ fn fire(fuel: &str, residue: Option<&str>) -> CombustionDef {
 
 pub(super) fn empty() -> Declaration {
     Declaration {
+        water_looks: Vec::new(),
         materials: vec![],
         shapes: vec![],
         appearance: vec![],

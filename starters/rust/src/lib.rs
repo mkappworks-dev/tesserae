@@ -166,6 +166,7 @@ impl Guest for Starter {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
+            water_looks: Vec::new(),
             templates: vec![hut()],
             settlements: Vec::new(),
             voxel_uses: vec![

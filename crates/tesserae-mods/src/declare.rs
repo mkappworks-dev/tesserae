@@ -140,6 +140,32 @@ impl From<content::ViewParams> for ViewParams {
     }
 }
 
+/// A Mod's water looks, one per water Material.
+pub const MAX_WATER_LOOKS_PER_MOD: usize = 16;
+
+/// Absorption past this, per metre, hides the floor under a few centimetres: not water.
+const MAX_ABSORPTION_PER_M: f32 = 100.0;
+
+fn check_water_look(look: &content::WaterLook) -> Result<(), ParamError> {
+    if let Some((r, g, b)) = look.absorption_per_m
+        && ![r, g, b]
+            .iter()
+            .all(|a| (0.0..=MAX_ABSORPTION_PER_M).contains(a))
+    {
+        return Err(ParamError {
+            field: "absorption-per-m",
+            rule: "must be finite and from 0 to 100",
+        });
+    }
+    if look.roughness.is_some_and(|r| !(0.02..=1.0).contains(&r)) {
+        return Err(ParamError {
+            field: "roughness",
+            rule: "must be finite and from 0.02 to 1",
+        });
+    }
+    Ok(())
+}
+
 /// What the Game chose that is not a table row, and the rows that wait for
 /// every Mod's names before [`resolve`] registers them.
 #[derive(Clone, PartialEq, Debug, Default)]
@@ -149,6 +175,9 @@ pub struct Applied {
     pub contact_damage: Vec<(MaterialId, f32)>,
     /// Validated appearance data, transferred without copying texture pixels.
     pub appearance: Vec<content::Appearance>,
+    /// Validated water looks, by local Material name; whether each names a blended Fluid is known
+    /// only once every Mod's Fluids are.
+    pub water_looks: Vec<content::WaterLook>,
     /// With no lake: [`resolve`] returns the one it names.
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
@@ -274,6 +303,11 @@ pub fn apply(
             declaration.appearance.len(),
             MAX_BEHAVIOURS_PER_MOD,
         ),
+        (
+            "water look",
+            declaration.water_looks.len(),
+            MAX_WATER_LOOKS_PER_MOD,
+        ),
         ("fluid", declaration.fluids.len(), MAX_BEHAVIOURS_PER_MOD),
         (
             "reaction",
@@ -341,6 +375,13 @@ pub fn apply(
                 bytes: pixels.len(),
             });
         }
+    }
+    for look in &declaration.water_looks {
+        check_water_look(look).map_err(|source| ModError::Params {
+            id: id(),
+            what: "water look",
+            source,
+        })?;
     }
     for (row, item) in declaration.items.iter().enumerate() {
         if let Some(pixels) = &item.texture
@@ -544,6 +585,7 @@ pub fn apply(
         remove_times,
         contact_damage,
         appearance: declaration.appearance,
+        water_looks: declaration.water_looks,
         world,
         view,
         movement,
