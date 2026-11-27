@@ -28,6 +28,12 @@ pub trait WaterAnswers {
     fn flow(&self, column: [i32; 2]) -> [f32; 2];
     /// The Fall over a column, if it is a lip with a lower pool past it.
     fn fall(&self, column: [i32; 2]) -> Option<Fall>;
+    /// The Fall over lip `column` toward `toward` as well, if its water pours that way too: a lip
+    /// on a slanting edge has two open faces.
+    fn fall_toward(&self, column: [i32; 2], toward: [i32; 2]) -> Option<Fall> {
+        let _ = (column, toward);
+        None
+    }
     /// The sea's Water surface in metres, `None` in a World without a sea.
     fn sea_level_m(&self) -> Option<f32>;
 }
@@ -121,72 +127,81 @@ pub fn fall_sheets(
     let apron = fall_reach(size) - 1;
     for lz in -apron..SIDE + apron {
         for lx in -apron..SIDE + apron {
-            let Some(fall) = answers.fall([base[0] + lx, base[2] + lz]) else {
+            let lip = [base[0] + lx, base[2] + lz];
+            let Some(main) = answers.fall(lip) else {
                 continue;
             };
-            let [dx, dz] = fall.toward;
-            let pool = in_chunk(fall.to_m);
-            let reach = i32::from(fall.reach.max(1));
-            // Step by step from the lip down each ledge to the pool: the water runs over every
-            // ledge's top and down its face, or a ledge hides the rest of the Fall behind it.
-            for j in 0..reach {
-                let (x, z) = (lx + j * dx, lz + j * dz);
-                if !inside(x, z) {
-                    continue;
-                }
-                let top = if j == 0 {
-                    in_chunk(fall.from_m)
-                } else {
-                    ground_top(x, z)
-                };
-                let bottom = if j + 1 < reach {
-                    ground_top(x + dx, z + dz).max(pool)
-                } else {
-                    pool
-                };
-                // The water runs over the lip's top, and each ledge's, as a film a sixteenth over
-                // the rock, so a step reads as water spilling and not as a dam across the river.
-                let film = if j == 0 {
-                    (crate::worldgen::level_index(fall.from_m, size) + 1 - base[1]) * sub
-                } else {
-                    top
-                };
-                if (1..=SIDE * sub).contains(&film) {
-                    let over = [x, (film - 1) / sub + 1, z];
-                    let light = if over[1] < SIDE {
-                        light_at(over)
+            let [mx, mz] = main.toward;
+            let sides = [[mz, mx], [-mz, -mx]].map(|t| answers.fall_toward(lip, t));
+            for (k, fall) in std::iter::once(Some(main))
+                .chain(sides)
+                .flatten()
+                .enumerate()
+            {
+                let [dx, dz] = fall.toward;
+                let pool = in_chunk(fall.to_m);
+                let reach = i32::from(fall.reach.max(1));
+                // Step by step from the lip down each ledge to the pool: the water runs over every
+                // ledge's top and down its face, or a ledge hides the rest of the Fall behind it.
+                for j in 0..reach {
+                    let (x, z) = (lx + j * dx, lz + j * dz);
+                    if !inside(x, z) {
+                        continue;
+                    }
+                    let top = if j == 0 {
+                        in_chunk(fall.from_m)
                     } else {
-                        Light::new(MAX_LIGHT, 0)
+                        ground_top(x, z)
                     };
-                    sheets.push(Quad::face(
-                        POS_Y,
-                        film + 1,
-                        along(z),
-                        along(x),
-                        u32::from(water),
-                        light,
-                    ));
+                    let bottom = if j + 1 < reach {
+                        ground_top(x + dx, z + dz).max(pool)
+                    } else {
+                        pool
+                    };
+                    // The water runs over the lip's top, and each ledge's, as a film a sixteenth over
+                    // the rock, so a step reads as water spilling and not as a dam across the river.
+                    let film = if j == 0 {
+                        (crate::worldgen::level_index(fall.from_m, size) + 1 - base[1]) * sub
+                    } else {
+                        top
+                    };
+                    if (1..=SIDE * sub).contains(&film) && (k == 0 || j > 0) {
+                        let over = [x, (film - 1) / sub + 1, z];
+                        let light = if over[1] < SIDE {
+                            light_at(over)
+                        } else {
+                            Light::new(MAX_LIGHT, 0)
+                        };
+                        sheets.push(Quad::face(
+                            POS_Y,
+                            film + 1,
+                            along(z),
+                            along(x),
+                            u32::from(water),
+                            light,
+                        ));
+                    }
+                    let (low, high) = (bottom.max(0), top.min(SIDE * sub));
+                    if low >= high {
+                        continue;
+                    }
+                    let (face, plane) = match (dx, dz) {
+                        (1, 0) => (POS_X, (x + 1) * sub + 1),
+                        (-1, 0) => (NEG_X, x * sub - 1),
+                        (0, 1) => (POS_Z, (z + 1) * sub + 1),
+                        _ => (NEG_Z, z * sub - 1),
+                    };
+                    let height = [low as u16, high as u16];
+                    // A face's u and v are its next two axes in turn: y then z across x, x then y
+                    // across z.
+                    let (u, v) = if dx != 0 {
+                        (height, along(z))
+                    } else {
+                        (along(x), height)
+                    };
+                    let light = light_at([x + dx, (high - 1) / sub, z + dz]);
+                    sheets.push(Quad::face(face, plane, u, v, u32::from(water), light));
                 }
-                let (low, high) = (bottom.max(0), top.min(SIDE * sub));
-                if low >= high {
-                    continue;
-                }
-                let (face, plane) = match (dx, dz) {
-                    (1, 0) => (POS_X, (x + 1) * sub + 1),
-                    (-1, 0) => (NEG_X, x * sub - 1),
-                    (0, 1) => (POS_Z, (z + 1) * sub + 1),
-                    _ => (NEG_Z, z * sub - 1),
-                };
-                let height = [low as u16, high as u16];
-                // A face's u and v are its next two axes in turn: y then z across x, x then y
-                // across z.
-                let (u, v) = if dx != 0 {
-                    (height, along(z))
-                } else {
-                    (along(x), height)
-                };
-                let light = light_at([x + dx, (high - 1) / sub, z + dz]);
-                sheets.push(Quad::face(face, plane, u, v, u32::from(water), light));
             }
         }
     }
@@ -484,6 +499,8 @@ mod tests {
         sea_m: Option<f32>,
         /// Columns whose ground stands off [`FLOOR`].
         ledges: Vec<([i32; 2], f32)>,
+        /// A lip's Falls toward its other open faces.
+        sides: Vec<([i32; 2], Fall)>,
     }
 
     impl WaterAnswers for Double {
@@ -513,6 +530,12 @@ mod tests {
         }
         fn sea_level_m(&self) -> Option<f32> {
             self.sea_m
+        }
+        fn fall_toward(&self, column: [i32; 2], toward: [i32; 2]) -> Option<Fall> {
+            self.sides
+                .iter()
+                .find(|(c, f)| *c == column && f.toward == toward)
+                .map(|(_, f)| *f)
         }
     }
 
@@ -586,6 +609,7 @@ mod tests {
             falls: Vec::new(),
             sea_m: None,
             ledges: Vec::new(),
+            sides: Vec::new(),
         }
     }
 
@@ -747,6 +771,37 @@ mod tests {
                 (7.0 + 1.0 / 16.0, (13.0, 17.0)),
                 (8.0 + 1.0 / 16.0, (9.25, 13.0)),
             ]
+        );
+    }
+
+    /// A lip on a slanting edge has two open faces, and the water pours over both under one film.
+    #[test]
+    fn a_lip_on_a_slant_pours_over_both_its_open_faces() {
+        let chunk = ground();
+        let light = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mut answers = generator(Some((9.6, 9)));
+        let fall = |toward| Fall {
+            toward,
+            from_m: 11.5,
+            to_m: 9.25,
+            reach: 1,
+        };
+        answers.falls.push(([5, 7], fall([1, 0])));
+        answers.sides.push(([5, 7], fall([0, -1])));
+        let quads = fall_sheets([0, 0, 0], LitChunk::new(&chunk, &light), &answers);
+        let corners = |q: &Quad| q.corners().map(|c| c.position);
+        let flat = |q: &Quad| corners(q).iter().all(|p| p[1] == corners(q)[0][1]);
+        let (films, sheets): (Vec<Quad>, Vec<Quad>) = quads.iter().partition(|q| flat(q));
+        assert_eq!((films.len(), sheets.len()), (1, 2));
+        assert!(
+            sheets
+                .iter()
+                .any(|q| corners(q).iter().all(|p| p[0] == 6.0 + 1.0 / 16.0))
+        );
+        assert!(
+            sheets
+                .iter()
+                .any(|q| corners(q).iter().all(|p| p[2] == 7.0 - 1.0 / 16.0))
         );
     }
 

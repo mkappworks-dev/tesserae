@@ -128,6 +128,17 @@ impl crate::water_columns::WaterAnswers for Worldgen {
         self.fall_at(gx, gz)
     }
 
+    fn fall_toward(&self, [gx, gz]: [i32; 2], [tx, tz]: [i32; 2]) -> Option<Fall> {
+        let from_m = self.surface_over(gx - tx, gz - tz)?;
+        let (reach, to_m) = self.lower_pool([gx, gz], [-tx, -tz], from_m)?;
+        Some(Fall {
+            toward: [tx, tz],
+            from_m,
+            to_m,
+            reach: reach as u8,
+        })
+    }
+
     fn sea_level_m(&self) -> Option<f32> {
         self.water_level_of(None)
     }
