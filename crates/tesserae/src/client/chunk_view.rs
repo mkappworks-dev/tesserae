@@ -231,7 +231,7 @@ impl Built {
     fn new(mesh: &ChunkMesh, level: u32, voxel_size: f32) -> Self {
         Self {
             opaque: ChunkQuads::pack(&mesh.opaque, level),
-            blended: ChunkQuads::pack(&mesh.blended, level),
+            blended: ChunkQuads::pack(&mesh.blended, level).map(|q| q.with_water(&mesh.water)),
             order: BlendOrder::new(&mesh.blended, voxel_size),
             cutout: ChunkQuads::pack(&mesh.cutout, level),
         }
@@ -355,8 +355,10 @@ fn add_material(
     for message in water_looks.read() {
         extension.water = crate::render::water::table(&message.0);
     }
-    extension.water_normals =
-        images.map(|mut images| images.add(crate::render::water::normal_map()));
+    if let Some(mut images) = images {
+        extension.water_normals = Some(images.add(crate::render::water::normal_map()));
+        extension.water_foam = Some(images.add(crate::render::water::foam_mask()));
+    }
     let drawn = buffers.add(ShaderBuffer::new(vec![0u32], RenderAssetUsages::default()));
     let quads = QuadBuffer::new(&mut buffers);
     let opaque = ChunkMaterial {
@@ -1309,7 +1311,7 @@ mod tests {
                 .filter(|slot| extension.water[slot * ROWS_PER_SLOT].w == 1.0)
                 .collect();
             assert_eq!(water, [5]);
-            assert!(extension.water_normals.is_some());
+            assert!(extension.water_normals.is_some() && extension.water_foam.is_some());
         }
     }
 

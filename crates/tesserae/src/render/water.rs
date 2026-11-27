@@ -90,6 +90,32 @@ pub fn ripple_shader_defs() -> Vec<ShaderDefVal> {
     defs
 }
 
+/// How `water.wesl` reads a layer's water columns: their side, the Chunk's and the apron, and
+/// each word's units and flags, as `tesserae_core::water_columns` packs them.
+pub fn column_shader_defs() -> Vec<ShaderDefVal> {
+    use tesserae_core::water_columns::{WATER_SIDE, WaterColumn};
+    vec![
+        ShaderDefVal::UInt(
+            "CHUNK_CELLS".into(),
+            tesserae_core::chunk::CHUNK_SIZE as u32,
+        ),
+        ShaderDefVal::UInt("CHUNK_WATER_SIDE".into(), WATER_SIDE as u32),
+        ShaderDefVal::UInt(
+            "CHUNK_WATER_DEPTH_STEP_M".into(),
+            WaterColumn::DEPTH_STEP_M.to_bits(),
+        ),
+        ShaderDefVal::UInt(
+            "CHUNK_WATER_FLOW_STEP_M_S".into(),
+            WaterColumn::FLOW_STEP_M_S.to_bits(),
+        ),
+        ShaderDefVal::UInt(
+            "CHUNK_WATER_FALLING".into(),
+            u32::from(WaterColumn::FALLING),
+        ),
+        ShaderDefVal::UInt("CHUNK_WATER_FOAM".into(), u32::from(WaterColumn::FOAM)),
+    ]
+}
+
 /// Texels along each edge of the normal map: a broad layer's 4.5 m at about 2 cm a texel.
 pub const NORMAL_TEXELS: u32 = 256;
 const NORMAL_LEVELS: u32 = NORMAL_TEXELS.ilog2() + 1;
@@ -141,7 +167,10 @@ fn slope_at(q: Vec2, waves: &[(Vec2, f32, f32)]) -> Vec2 {
         })
 }
 
-fn halve(level: &[Vec2], edge: usize) -> Vec<Vec2> {
+fn halve<T>(level: &[T], edge: usize) -> Vec<T>
+where
+    T: Copy + std::ops::Add<Output = T> + std::ops::Div<f32, Output = T>,
+{
     let half = edge / 2;
     (0..half * half)
         .map(|i| {
@@ -174,15 +203,7 @@ pub fn bake_normals() -> Vec<Vec2> {
         .iter()
         .map(|s| s.abs().max_element())
         .fold(0.0, f32::max);
-    let mut chain: Vec<Vec2> = level.iter().map(|s| *s / steepest).collect();
-    let mut above = chain.clone();
-    let mut edge = edge;
-    while edge > 1 {
-        above = halve(&above, edge);
-        edge /= 2;
-        chain.extend_from_slice(&above);
-    }
-    chain
+    with_mips(level.iter().map(|s| *s / steepest).collect(), edge)
 }
 
 /// The normal map as a repeating, mipmapped texture of slopes: red along x, green along z.
@@ -207,6 +228,93 @@ pub fn normal_map() -> Image {
     );
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         label: Some("water normals".into()),
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: 16,
+        ..default()
+    });
+    image
+}
+
+/// Texels along each edge of the foam mask: a 3 m repeat at about 2.5 cm a texel.
+pub const FOAM_TEXELS: u32 = 128;
+const FOAM_LEVELS: u32 = FOAM_TEXELS.ilog2() + 1;
+const FOAM_WAVES: u32 = 12;
+
+/// Foam's coverage over one repeat, 0 to 1: bright along the ridges where waves of a few crests
+/// a repeat cross, so it breaks into streaks and patches rather than a smooth band.
+pub fn bake_foam() -> Vec<f32> {
+    let waves: Vec<(Vec2, f32)> = (0..FOAM_WAVES)
+        .map(|i| {
+            let first = hash(i.wrapping_add(0x9e37));
+            let angle = unit(first) * TAU;
+            let crests = 2.0 + 6.0 * unit(first >> 16);
+            let k = (Vec2::new(angle.cos(), angle.sin()) * crests).round();
+            (k, unit(hash(first)) * TAU)
+        })
+        .filter(|(k, _)| *k != Vec2::ZERO)
+        .collect();
+    let edge = FOAM_TEXELS as usize;
+    let mut level: Vec<f32> = (0..edge * edge)
+        .map(|i| {
+            let q = (Vec2::new((i % edge) as f32, (i / edge) as f32) + 0.5) / edge as f32;
+            let sum: f32 = waves
+                .iter()
+                .map(|&(k, phase)| (TAU * k.dot(q) + phase).sin())
+                .sum();
+            sum / waves.len() as f32
+        })
+        .collect();
+    let (lo, hi) = level
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+    for v in &mut level {
+        *v = (*v - lo) / (hi - lo);
+    }
+    with_mips(level, edge)
+}
+
+/// `level`, `edge` square, and its mips down to one texel, largest first, each the mean of the
+/// four above it.
+fn with_mips<T>(level: Vec<T>, edge: usize) -> Vec<T>
+where
+    T: Copy + std::ops::Add<Output = T> + std::ops::Div<f32, Output = T>,
+{
+    let mut chain = level.clone();
+    let mut above = level;
+    let mut edge = edge;
+    while edge > 1 {
+        above = halve(&above, edge);
+        edge /= 2;
+        chain.extend_from_slice(&above);
+    }
+    chain
+}
+
+/// The foam mask as a repeating, mipmapped single-channel texture.
+pub fn foam_mask() -> Image {
+    let mut image = Image::new_uninit(
+        Extent3d {
+            width: FOAM_TEXELS,
+            height: FOAM_TEXELS,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        TextureFormat::R8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_descriptor.mip_level_count = FOAM_LEVELS;
+    image.data = Some(
+        bake_foam()
+            .iter()
+            .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+            .collect(),
+    );
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        label: Some("water foam".into()),
         address_mode_u: ImageAddressMode::Repeat,
         address_mode_v: ImageAddressMode::Repeat,
         mag_filter: ImageFilterMode::Linear,
@@ -299,6 +407,19 @@ mod tests {
         assert_eq!(sampler.address_mode_u, ImageAddressMode::Repeat);
         assert_eq!(sampler.address_mode_v, ImageAddressMode::Repeat);
         assert_eq!(sampler.mipmap_filter, ImageFilterMode::Linear);
+    }
+
+    #[test]
+    fn the_foam_mask_spans_its_range_and_has_every_mip() {
+        let chain = bake_foam();
+        let top = (FOAM_TEXELS * FOAM_TEXELS) as usize;
+        assert_eq!(chain.len(), (top * 4 - 1) / 3);
+        let level = &chain[..top];
+        assert!(level.iter().all(|v| (0.0..=1.0).contains(v)));
+        assert!(level.iter().any(|&v| v == 0.0) && level.iter().any(|&v| v == 1.0));
+        let image = foam_mask();
+        assert_eq!(image.texture_descriptor.mip_level_count, FOAM_LEVELS);
+        assert_eq!(image.data.as_ref().unwrap().len(), chain.len());
     }
 
     #[test]

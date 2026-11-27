@@ -35,6 +35,8 @@ struct ChunkVertexOutput {
     @location(14) @interpolate(flat) voxel: u32,
     // The share of the sky dome the quad faces, by `sky_view`.
     @location(15) @interpolate(flat) sky_view: f32,
+    // Where the layer's water columns start in `quads`, or 0 for none.
+    @location(16) @interpolate(flat) water: u32,
 }
 
 // The record's fields, as tesserae_core::mesh::layout lays them out.
@@ -230,5 +232,7 @@ fn transform_vertex(in: ChunkVertex) -> ChunkVertexOutput {
     out.light = quad.light;
     out.level = quad.level;
     out.sky_view = sky_view(quad.normal, quad.cross);
+    let water = quads[at + constants::CHUNK_HEADER_WATER];
+    out.water = select(0u, at + water, water != 0u);
     return out;
 }

@@ -5,7 +5,10 @@ import bevy_pbr::render::{
     pbr_lighting::{EnvBRDFApprox, F_AB},
     pbr_types::PbrInput,
 };
-import super::sky_colour::sky_before_tonemap;
+import super::{
+    chunk_vertex::{KEY_AXIS_SHIFT, KEY_CELL_MASK, KEY_DEPTH_SHIFT, KEY_V_SHIFT, quads},
+    sky_colour::sky_before_tonemap,
+};
 
 // water::table's rows, three per palette slot.
 @group(constants::MATERIAL_BIND_GROUP) @binding(107)
@@ -22,6 +25,10 @@ struct WaterSky {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(110)
 var<uniform> water_sky: WaterSky;
+@group(constants::MATERIAL_BIND_GROUP) @binding(111)
+var water_foam: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(112)
+var water_foam_sampler: sampler;
 
 // F0 0.02, water's reflectance at normal incidence from its index of refraction of 1.33, as
 // bevy_pbr's `reflectance`: F0 = 0.16 reflectance².
@@ -50,6 +57,104 @@ fn is_water(slot: u32) -> bool {
 
 fn roughness_of(slot: u32) -> f32 {
     return water_table[slot * 3u + 1u].w;
+}
+
+// A Chunk is a whole number of cells from the origin and 1024 is a multiple of its side, so a
+// Voxel key's cells, wrapped to the Chunk, are the Voxel's place in it.
+const CHUNK_CELL_MASK: u32 = constants::CHUNK_CELLS - 1u;
+
+// The fragment's place in its Chunk's water columns, in Voxels along x and z: the quad's first
+// Voxel plus how far across the quad the fragment is. Not stepped Voxel by Voxel as `voxel_at`
+// does: a fragment at a quad's far edge would step into the next Chunk and wrap to this one's
+// near side.
+fn column_point(key: u32, uv: vec2<f32>) -> vec2<f32> {
+    let along_u = f32(key & KEY_CELL_MASK & CHUNK_CELL_MASK) + uv.x;
+    let along_v = f32((key >> KEY_V_SHIFT) & KEY_CELL_MASK & CHUNK_CELL_MASK) + uv.y;
+    let behind = f32((key >> KEY_DEPTH_SHIFT) & KEY_CELL_MASK & CHUNK_CELL_MASK) + 0.5;
+    // A face's u and v follow its normal's axis: y and z for x, z and x for y, x and y for z.
+    switch key >> KEY_AXIS_SHIFT {
+        case 0u: {
+            return vec2<f32>(behind, along_v);
+        }
+        case 1u: {
+            return vec2<f32>(along_v, along_u);
+        }
+        default: {
+            return vec2<f32>(along_u, behind);
+        }
+    }
+}
+
+// `tesserae_core::water_columns::WaterColumn`'s depth, at column `x`, `z` of the apron'd grid.
+fn column_depth_m(water: u32, column: vec2<i32>) -> f32 {
+    let side = i32(constants::CHUNK_WATER_SIDE);
+    let word = quads[water + u32((column.y + 1) * side + column.x + 1)];
+    return f32((word >> 16u) & 0xffu) * bitcast<f32>(constants::CHUNK_WATER_DEPTH_STEP_M);
+}
+
+// Depth filtered between column centres. The apron holds the neighbours' columns, so two Chunks
+// of one lake meet with no step. A dry column stands as deep below as the wet ones beside it are
+// above, so the depth runs out to nothing at the waterline and not half a column short of it.
+fn water_depth_m(water: u32, point: vec2<f32>) -> f32 {
+    let q = point - 0.5;
+    let last = i32(constants::CHUNK_CELLS) - 1;
+    let i = clamp(vec2<i32>(floor(q)), vec2<i32>(-1), vec2<i32>(last));
+    let f = clamp(q - vec2<f32>(i), vec2<f32>(0.0), vec2<f32>(1.0));
+    var depth = vec4<f32>(
+        column_depth_m(water, i),
+        column_depth_m(water, i + vec2<i32>(1, 0)),
+        column_depth_m(water, i + vec2<i32>(0, 1)),
+        column_depth_m(water, i + vec2<i32>(1, 1)),
+    );
+    let wet = vec4<f32>(depth > vec4<f32>(0.0));
+    let wet_mean = dot(depth, wet) / max(dot(wet, vec4<f32>(1.0)), 1.0);
+    depth = select(vec4<f32>(-wet_mean), depth, depth > vec4<f32>(0.0));
+    let filtered = mix(mix(depth.x, depth.y, f.x), mix(depth.z, depth.w, f.x), f.y);
+    return max(filtered, 0.0);
+}
+
+// Shallower than this, the water foams where the mask says.
+const FOAM_DEPTH_M: f32 = 0.6;
+// One repeat of the foam mask.
+const FOAM_TILE_M: f32 = 3.0;
+// How soft the foam's edge is, in the mask's units.
+const FOAM_EDGE: f32 = 0.12;
+
+// How much of the surface is foam at `depth_m`: a band along the shore whose inner edge the mask
+// breaks into streaks.
+fn shore_foam(xz: vec2<f32>, gradient: WaterGradient, depth_m: f32) -> f32 {
+    let band = 1.0 - smoothstep(0.03, FOAM_DEPTH_M, depth_m);
+    if band <= 0.0 {
+        return 0.0;
+    }
+    let mask = textureSampleGrad(
+        water_foam,
+        water_foam_sampler,
+        xz / FOAM_TILE_M,
+        gradient.ddx / FOAM_TILE_M,
+        gradient.ddy / FOAM_TILE_M,
+    ).r;
+    return smoothstep(1.0 - band, 1.0 - band + FOAM_EDGE, mask);
+}
+
+// The body of water under a fragment, premultiplied: what it sends toward the eye as albedo, and
+// how much of what lies behind it it hides.
+struct WaterBody {
+    albedo: vec3<f32>,
+    alpha: f32,
+}
+
+// Each channel keeps exp(-absorption x path) of the floor, the path being the depth over the
+// cosine of the view; what is lost is replaced by the scatter tint. The floor is blended by one
+// alpha, so alpha follows the mean of the three.
+fn water_body(slot: u32, depth_m: f32, cos_view: f32, foam: f32) -> WaterBody {
+    let absorption = water_table[slot * 3u].xyz;
+    let scatter = water_table[slot * 3u + 1u].xyz;
+    let path = depth_m / max(cos_view, 0.05);
+    let lost = vec3<f32>(1.0) - exp(-absorption * path);
+    let body = WaterBody(scatter * lost, (lost.x + lost.y + lost.z) / 3.0);
+    let foam_colour = water_table[slot * 3u + 2u].xyz;
+    return WaterBody(mix(body.albedo, foam_colour, foam), mix(body.alpha, 1.0, foam));
 }
 
 // The world's x and z's screen-space derivatives. Taken at the top of the fragment stage, before
@@ -96,11 +201,13 @@ struct WaterSurface {
 
 // `normal` faces the viewer, as bevy_pbr's double-sided flip leaves it. Ripples move only the
 // tops and undersides; a wall of water keeps its face's normal.
+// `calm` scales the ripples: 0 flat, 1 full.
 fn water_surface(
     slot: u32,
     world_position: vec3<f32>,
     gradient: WaterGradient,
     normal: vec3<f32>,
+    calm: f32,
 ) -> WaterSurface {
     let base = roughness_of(slot);
     if abs(normal.y) < 0.5 {
@@ -122,7 +229,7 @@ fn water_surface(
         bitcast<f32>(constants::CHUNK_RIPPLE1_STRENGTH),
     );
     let turned_back = vec2<f32>(-b.slope.y, b.slope.x);
-    let slope = a.slope + turned_back;
+    let slope = (a.slope + turned_back) * calm;
     let up = sign(normal.y);
     let rippled = normalize(vec3<f32>(-slope.x, 1.0, -slope.y) * vec3<f32>(1.0, up, 1.0));
     // Beckmann's alpha squared is twice the slope variance; bevy_pbr's alpha is roughness squared.

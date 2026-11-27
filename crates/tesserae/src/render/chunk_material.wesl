@@ -29,8 +29,8 @@ import super::{
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
     water::{
-        WATER_REFLECTANCE, ambient_specular, fresnel, is_water, sky_reflection, water_gradient,
-        water_surface,
+        WATER_REFLECTANCE, ambient_specular, column_point, fresnel, is_water, shore_foam,
+        sky_reflection, water_body, water_depth_m, water_gradient, water_surface,
     },
 };
 
@@ -108,6 +108,9 @@ fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
     }
     return false;
 }
+
+// Ripples calm toward the shore over this depth.
+const CALM_DEPTH_M: f32 = 1.0;
 
 const TINT_STRENGTH: f32 = 0.55;
 
@@ -305,17 +308,34 @@ fn fragment(
     var reflection = vec3<f32>(0.0);
     var water_alpha = 1.0;
     if water {
-        let surface = water_surface(slot, in.world_position.xyz, water_grad, pbr_input.N);
-        pbr_input.N = surface.normal;
-        pbr_input.material.perceptual_roughness = surface.perceptual_roughness;
-        pbr_input.material.reflectance = vec3<f32>(WATER_REFLECTANCE);
-        // From under the surface there is no sky to reflect; the underwater fog does the rest.
+        // From under the surface there is no sky to reflect, and the depth is not what the view
+        // crosses; the underwater fog does the rest. Coarse levels carry no columns.
         let from_below = pbr_input.world_normal.y < -0.5;
-        let mirrored = select(fresnel(dot(surface.normal, pbr_input.V)), 0.0, from_below);
-        let body = (1.0 - mirrored) * pbr_input.material.base_color.a;
-        pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * body, 1.0);
+        let columns = in.water != 0u && !from_below;
+        var depth_m = 0.0;
+        var foam = 0.0;
+        if columns {
+            depth_m = water_depth_m(in.water, column_point(in.voxel, in.uv));
+            foam = shore_foam(in.world_position.xz, water_grad, depth_m);
+        }
+        let calm = select(1.0, smoothstep(0.0, CALM_DEPTH_M, depth_m), columns);
+        let surface = water_surface(slot, in.world_position.xyz, water_grad, pbr_input.N, calm);
+        pbr_input.N = surface.normal;
+        pbr_input.material.perceptual_roughness = mix(surface.perceptual_roughness, 1.0, foam);
+        pbr_input.material.reflectance = vec3<f32>(WATER_REFLECTANCE);
+        let facing = dot(surface.normal, pbr_input.V);
+        let mirrored = select(fresnel(facing), 0.0, from_below) * (1.0 - foam);
+        var albedo = pbr_input.material.base_color.rgb * pbr_input.material.base_color.a;
+        var hides = pbr_input.material.base_color.a;
+        if columns {
+            let cos_view = abs(dot(pbr_input.world_normal, pbr_input.V));
+            let body = water_body(slot, depth_m, cos_view, foam);
+            albedo = body.albedo;
+            hides = body.alpha;
+        }
+        pbr_input.material.base_color = vec4<f32>(albedo * (1.0 - mirrored), 1.0);
         reflection = mirrored * sky * sky_reflection(pbr_input.V, surface.normal);
-        water_alpha = body + mirrored;
+        water_alpha = hides * (1.0 - mirrored) + mirrored;
     }
 
     // Block light is a local source, so it is emissive: tinted by the Voxel's

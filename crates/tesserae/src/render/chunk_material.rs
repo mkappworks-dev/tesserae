@@ -120,6 +120,10 @@ pub struct ChunkMaterialExtension {
     pub water_normals: Option<Handle<Image>>,
     #[uniform(110)]
     pub water_sky: WaterSky,
+    /// `water::foam_mask`; `None` until the Client has built it.
+    #[texture(111)]
+    #[sampler(112)]
+    pub water_foam: Option<Handle<Image>>,
     /// Whether the pipeline holds the coverage test's `discard`. A Chunk no
     /// finer level draws any of takes a material without it: on Apple's
     /// tile-based GPUs a pipeline that may discard defeats hidden-surface
@@ -169,6 +173,7 @@ impl Default for ChunkMaterialExtension {
             water: [Vec4::ZERO; water::TABLE_LEN],
             water_normals: None,
             water_sky: WaterSky::default(),
+            water_foam: None,
             coverage_test: true,
         }
     }
@@ -219,6 +224,7 @@ impl MaterialExtension for ChunkMaterialExtension {
             ShaderDefVal::UInt("CHUNK_WATER_ROWS".into(), water::TABLE_LEN as u32),
         ];
         defs.extend(water::ripple_shader_defs());
+        defs.extend(water::column_shader_defs());
         defs.extend(super::texture_atlas::face_word_shader_defs());
         defs.extend(quad_layout_defs());
         defs.extend(super::fog::haze_shader_defs());
@@ -277,8 +283,8 @@ fn casts_the_suns_shadow(descriptor: &RenderPipelineDescriptor) -> bool {
 /// What `chunk_vertex.wesl` decodes a layer's words by.
 fn quad_layout_defs() -> Vec<ShaderDefVal> {
     use chunk_mesh::{
-        HEADER_LEVEL, HEADER_QUADS, HEADER_STRIDE, HEADER_TABLE_LEN, HEADER_WORDS, LIGHT_SHIFT,
-        VERTICES_PER_QUAD, WIDE,
+        HEADER_LEVEL, HEADER_QUADS, HEADER_STRIDE, HEADER_TABLE_LEN, HEADER_WATER, HEADER_WORDS,
+        LIGHT_SHIFT, VERTICES_PER_QUAD, WIDE,
     };
     use tesserae_core::mesh::layout::*;
     let uint = |name: &str, value: u32| ShaderDefVal::UInt(format!("CHUNK_{name}").into(), value);
@@ -289,6 +295,7 @@ fn quad_layout_defs() -> Vec<ShaderDefVal> {
         uint("HEADER_TABLE_LEN", HEADER_TABLE_LEN),
         uint("HEADER_STRIDE", HEADER_STRIDE),
         uint("HEADER_QUADS", HEADER_QUADS),
+        uint("HEADER_WATER", HEADER_WATER),
         uint("WIDE_STRIDE", WIDE),
         uint("LIGHT_SHIFT", LIGHT_SHIFT),
         uint("PAINT_SHIFT", PAINT_SHIFT),

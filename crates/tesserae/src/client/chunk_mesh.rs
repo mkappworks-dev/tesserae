@@ -1,6 +1,7 @@
 //! A Chunk layer's quads as the quad buffer holds them: a header, a table of
 //! the layer's (Material, light) pairs, then one record per quad, which
-//! `chunk_vertex.wesl` expands from the vertex index. See
+//! `chunk_vertex.wesl` expands from the vertex index, and for a wet blended
+//! layer its water columns, one word each, which `water.wesl` reads. See
 //! `docs/adr/0034-a-chunk-mesh-is-one-record-per-quad.md`.
 //!
 //! This conversion lives in `tesserae` and never in `tesserae-core`, which must
@@ -21,6 +22,7 @@ use tesserae_core::light::Light;
 use tesserae_core::mesh::Corner;
 use tesserae_core::mesh::layout::{GEOMETRY_MASK, PAINT_SHIFT, PAINT_SLOTS, mask};
 use tesserae_core::mesh::{QUAD_CORNERS, Quad};
+use tesserae_core::water_columns::WaterColumn;
 
 use crate::render::quad_buffer::QuadBuffer;
 
@@ -41,12 +43,14 @@ pub const LIGHT_SHIFT: u32 = 24;
 const MATERIAL_MASK: u32 = mask(LIGHT_SHIFT);
 
 /// The header's words: the LOD level, the table's length, the words a record
-/// takes and the layer's quads, past which its bucket's placeholder only pads.
-pub const HEADER_WORDS: u32 = 4;
+/// takes, the layer's quads, past which its bucket's placeholder only pads,
+/// and where its water columns start, or 0 for none.
+pub const HEADER_WORDS: u32 = 5;
 pub const HEADER_LEVEL: u32 = 0;
 pub const HEADER_TABLE_LEN: u32 = 1;
 pub const HEADER_STRIDE: u32 = 2;
 pub const HEADER_QUADS: u32 = 3;
+pub const HEADER_WATER: u32 = 4;
 
 /// The geometry, with the table index in the second word's top bits.
 const NARROW: u32 = 2;
@@ -123,6 +127,19 @@ impl ChunkQuads {
         })
     }
 
+    /// The layer with `water` after its records, as `WaterColumn`'s bytes in
+    /// one word each; none for a dry Chunk.
+    pub fn with_water(mut self, water: &[WaterColumn]) -> Self {
+        if !water.is_empty() {
+            self.words[HEADER_WATER as usize] = self.words.len() as u32;
+            self.words.extend(water.iter().map(|c| {
+                let [x, z] = c.flow.map(|f| f as u8);
+                u32::from_le_bytes([x, z, c.depth, c.flags])
+            }));
+        }
+        self
+    }
+
     #[cfg(test)]
     pub fn words(&self) -> &[u32] {
         &self.words
@@ -186,7 +203,8 @@ impl ChunkQuads {
     /// The layer's quads, read back from its words.
     pub fn quads(&self) -> impl Iterator<Item = Quad> + '_ {
         let table = &self.words[HEADER_WORDS as usize..self.records_at() as usize];
-        self.words[self.records_at() as usize..]
+        let end = self.records_at() + self.quad_count() * self.stride();
+        self.words[self.records_at() as usize..end as usize]
             .chunks(self.stride() as usize)
             .map(move |record| {
                 let geometry = [record[0], record[1] & GEOMETRY_MASK];
@@ -403,6 +421,7 @@ pub fn expand(buffer: &[u32], at: u32, vertex: u32) -> Option<Expanded> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::render::storage::ShaderBuffer;
     use tesserae_core::light::MAX_LIGHT;
     use tesserae_core::shape::examples;
     use tesserae_core::testgen::fixtures;
@@ -646,6 +665,44 @@ mod tests {
         let packed = ChunkQuads::pack(&layer, 0).unwrap();
         assert_eq!(packed.stride(), WIDE);
         assert_expands_exactly(&layer, "wide");
+    }
+
+    #[test]
+    fn the_header_names_where_the_water_columns_start_and_they_land_whole() {
+        let mesh = every_kind_of_face(&tables());
+        let water: Vec<WaterColumn> = (0..34 * 34)
+            .map(|i| WaterColumn {
+                flow: [-3, i as i8],
+                depth: (i % 200) as u8 + 1,
+                flags: WaterColumn::FOAM,
+            })
+            .collect();
+        let packed = ChunkQuads::pack(&mesh.blended, 0)
+            .unwrap()
+            .with_water(&water);
+        let start = packed.words()[HEADER_WATER as usize] as usize;
+        let records = (packed.records_at() + packed.quad_count() * packed.stride()) as usize;
+        assert_eq!(start, records, "right after the records");
+        assert_eq!(packed.words().len(), start + water.len());
+        for (word, column) in packed.words()[start..].iter().zip(&water) {
+            let [x, z, depth, flags] = word.to_le_bytes();
+            assert_eq!([x as i8, z as i8], column.flow);
+            assert_eq!((depth, flags), (column.depth, column.flags));
+        }
+        assert_eq!(packed.quads().count(), mesh.blended.quad_count());
+
+        let mut buffer = QuadBuffer::new(&mut Assets::<ShaderBuffer>::default());
+        let mut landed = packed.clone();
+        landed.land(&mut buffer);
+        assert_eq!(
+            &buffer.mirror[landed.at as usize..][..packed.words().len()],
+            packed.words(),
+            "the columns land with the quads"
+        );
+
+        let dry = ChunkQuads::pack(&mesh.blended, 0).unwrap().with_water(&[]);
+        assert_eq!(dry.words()[HEADER_WATER as usize], 0);
+        assert_eq!(dry.words().len(), records);
     }
 
     #[test]
