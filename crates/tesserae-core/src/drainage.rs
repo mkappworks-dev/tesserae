@@ -184,6 +184,18 @@ struct Node {
     off: [i8; 2],
 }
 
+#[cfg(test)]
+const POOL_SLOPE: f32 = 0.005;
+
+#[cfg(test)]
+struct StreamSegment {
+    at: (i32, i32),
+    n: Node,
+    p: Node,
+    pa: (i32, i32),
+    below: Option<(Node, (i32, i32))>,
+}
+
 pub(crate) struct Region {
     nodes: Vec<Node>,
 }
@@ -491,6 +503,124 @@ impl Drainage {
             }
         }
         (streams, beside)
+    }
+
+    /// Every flowing stream segment of a region's own nodes, with the segment below it where that
+    /// one flows too: `(at, n, p, below)`.
+    #[cfg(test)]
+    fn segments(&self, key: [i32; 2]) -> Vec<StreamSegment> {
+        let region = self.solve(key);
+        let flowing = |n: Node| n.is_stream() && !n.is_lake() && n.down != NO_PARENT;
+        let down = |(i, j): (i32, i32), n: Node| {
+            let (di, dj) = STEPS[n.down as usize];
+            (i + di, j + dj)
+        };
+        let base = key.map(|k| k * REGION_NODES);
+        let mut out = Vec::new();
+        for j in base[1]..base[1] + REGION_NODES {
+            for i in base[0]..base[0] + REGION_NODES {
+                let n = region.node(i, j, key);
+                if !flowing(n) {
+                    continue;
+                }
+                let pa = down((i, j), n);
+                let p = region.node(pa.0, pa.1, key);
+                let below = flowing(p).then(|| {
+                    let qa = down(pa, p);
+                    (pa, region.node(qa.0, qa.1, key), qa)
+                });
+                out.push(StreamSegment {
+                    at: (i, j),
+                    n,
+                    p,
+                    pa,
+                    below: below.map(|(_, q, qa)| (q, qa)),
+                });
+            }
+        }
+        out
+    }
+
+    /// The most a stream's surface rises downstream, within a segment or where one segment hands
+    /// on to the next, over a region's streams, and how many segments were checked.
+    #[cfg(test)]
+    pub(crate) fn surface_rise_m(&self, key: [i32; 2]) -> (u32, f32) {
+        let length = |a: [f32; 2], b: [f32; 2]| libm::hypotf(b[0] - a[0], b[1] - a[1]);
+        let (mut checked, mut rise) = (0, f32::MIN);
+        for s in self.segments(key) {
+            let (a, b) = (
+                self.node_at(s.n, s.at.0, s.at.1),
+                self.node_at(s.p, s.pa.0, s.pa.1),
+            );
+            let len = length(a, b);
+            let at = |t: f32| water_surface_m(s.n, s.p, s.at, t, len);
+            for k in 0..16 {
+                rise = rise.max(at((k + 1) as f32 / 16.0) - at(k as f32 / 16.0));
+            }
+            if let Some((q, qa)) = s.below {
+                let c = self.node_at(q, qa.0, qa.1);
+                let next = water_surface_m(s.p, q, s.pa, 0.0, length(b, c));
+                rise = rise.max(next - at(1.0));
+            }
+            checked += 1;
+        }
+        (checked, rise)
+    }
+
+    /// The speed of each pool (a reach under 0.5% steep) and each delta's head under 1%, over a
+    /// region's streams; a mouth down a steeper reach is a rapid.
+    #[cfg(test)]
+    pub(crate) fn pool_speeds_m_s(&self, key: [i32; 2]) -> Vec<f32> {
+        self.segments(key)
+            .into_iter()
+            .filter_map(|s| {
+                let (a, b) = (
+                    self.node_at(s.n, s.at.0, s.at.1),
+                    self.node_at(s.p, s.pa.0, s.pa.1),
+                );
+                let slope =
+                    (s.n.level_m - s.p.level_m).max(0.0) / libm::hypotf(b[0] - a[0], b[1] - a[1]);
+                (slope < POOL_SLOPE || (s.n.delta != 0 && slope < 2.0 * POOL_SLOPE)).then(|| {
+                    let area_km2 = s.n.catchment as f32 * self.node_m * self.node_m * 1e-6;
+                    stream_m_s(area_km2, slope, dig_m(river_width_m(s.n.catchment)))
+                })
+            })
+            .collect()
+    }
+
+    /// River mouths on a low coast (a stream wide enough for a delta, a step from the sea and
+    /// under 3 m above it), and how many of them fan into a delta.
+    #[cfg(test)]
+    pub(crate) fn low_mouths(&self, key: [i32; 2]) -> (u32, u32) {
+        let (mut mouths, mut deltas) = (0, 0);
+        for s in self.segments(key) {
+            if s.n.to_sea == 1
+                && s.n.level_m < self.sea_m + 3.0
+                && river_width_m(s.n.catchment) >= DELTA_WIDTH_M
+            {
+                mouths += 1;
+                deltas += (s.n.delta != 0) as u32;
+            }
+        }
+        (mouths, deltas)
+    }
+
+    /// Bends where a channel passes through a node, and how many run straight on within 2 degrees.
+    #[cfg(test)]
+    pub(crate) fn straight_bends(&self, key: [i32; 2]) -> (u32, u32) {
+        let (mut bends, mut straight) = (0, 0);
+        for s in self.segments(key) {
+            let Some((q, qa)) = s.below else { continue };
+            let a = self.node_at(s.n, s.at.0, s.at.1);
+            let b = self.node_at(s.p, s.pa.0, s.pa.1);
+            let c = self.node_at(q, qa.0, qa.1);
+            let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]);
+            let sin =
+                (u[0] * v[1] - u[1] * v[0]) / (libm::hypotf(u[0], u[1]) * libm::hypotf(v[0], v[1]));
+            bends += 1;
+            straight += (sin.abs() < 0.035 && u[0] * v[0] + u[1] * v[1] > 0.0) as u32;
+        }
+        (bends, straight)
     }
 
     fn solve(&self, key: [i32; 2]) -> Region {
@@ -1056,12 +1186,7 @@ impl Drainage {
         let slope = (n.level_m - p.level_m).max(0.0) / length_m;
         let catchment = n.catchment as f32 * (1.0 - t) + p.catchment as f32 * t;
         let area_km2 = catchment * self.node_m * self.node_m * 1e-6;
-        let pool = POOL_M_S_PER_KM2 * libm::powf(area_km2, POOL_SPEED_EXPONENT);
-        let riffle = 1.0 + (RIFFLE_GAIN - 1.0) * (slope / RIFFLE_SLOPE).min(1.0);
-        let froude = MOST_FROUDE * libm::sqrtf(GRAVITY_M_S2 * dig);
-        let speed = (pool * riffle)
-            .min(froude)
-            .clamp(STREAM_M_S.0, STREAM_M_S.1);
+        let speed = stream_m_s(area_km2, slope, dig);
         let [ux, uz] = meandered_along(x_m, z_m, (amount_m, long), ab);
         Some((surface, [ux * speed, uz * speed]))
     }
@@ -1208,6 +1333,17 @@ fn opposite(step: usize) -> u8 {
 }
 
 /// A stream's width from its spring pool, a fraction `t` down its first segment `ab`.
+/// A stream's speed from its catchment, its reach's slope and its depth: a pool's from discharge,
+/// faster down a riffle, never past Froude 0.9.
+fn stream_m_s(area_km2: f32, slope: f32, dig_m: f32) -> f32 {
+    let pool = POOL_M_S_PER_KM2 * libm::powf(area_km2, POOL_SPEED_EXPONENT);
+    let riffle = 1.0 + (RIFFLE_GAIN - 1.0) * (slope / RIFFLE_SLOPE).min(1.0);
+    let froude = MOST_FROUDE * libm::sqrtf(GRAVITY_M_S2 * dig_m);
+    (pool * riffle)
+        .min(froude)
+        .clamp(STREAM_M_S.0, STREAM_M_S.1)
+}
+
 /// Whether an inland segment from `n` to `p` is too far from `(x, z)` to cut it however its
 /// meander bends, at `s` along it unbent: the meander's noise is the costliest part of a column,
 /// and most segments in the stencil are far from it.

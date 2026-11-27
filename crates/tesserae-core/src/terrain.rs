@@ -1156,6 +1156,95 @@ mod tests {
         );
     }
 
+    /// What a few regions of each of these worlds' streams measure, for the criteria below.
+    struct Streams {
+        segments: u32,
+        rise_m: f32,
+        pool_speeds_m_s: Vec<f32>,
+        low_mouths: u32,
+        deltas: u32,
+        bends: u32,
+        straight: u32,
+    }
+
+    fn streams() -> Streams {
+        let p = crate::testgen::world_params();
+        let mut s = Streams {
+            segments: 0,
+            rise_m: f32::MIN,
+            pool_speeds_m_s: Vec::new(),
+            low_mouths: 0,
+            deltas: 0,
+            bends: 0,
+            straight: 0,
+        };
+        for seed in 0..8u32 {
+            let t = Terrain::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for key in [
+                [0, 0],
+                [-1, 0],
+                [0, -1],
+                [-1, -1],
+                [1, 1],
+                [2, -2],
+                [-3, 2],
+                [4, 1],
+            ] {
+                let (n, rise) = t.drainage.surface_rise_m(key);
+                (s.segments, s.rise_m) = (s.segments + n, s.rise_m.max(rise));
+                s.pool_speeds_m_s.extend(t.drainage.pool_speeds_m_s(key));
+                let (mouths, deltas) = t.drainage.low_mouths(key);
+                (s.low_mouths, s.deltas) = (s.low_mouths + mouths, s.deltas + deltas);
+                let (bends, straight) = t.drainage.straight_bends(key);
+                (s.bends, s.straight) = (s.bends + bends, s.straight + straight);
+            }
+        }
+        s
+    }
+
+    /// A lip standing above the pool behind it is a dam across the stream.
+    #[test]
+    fn a_streams_surface_never_rises_downstream() {
+        let s = streams();
+        assert!(s.segments > 5000, "{} segments", s.segments);
+        assert!(s.rise_m < 1e-3, "the surface rises {} m", s.rise_m);
+    }
+
+    #[test]
+    fn pools_and_river_mouths_run_under_a_metre_a_second() {
+        let s = streams();
+        assert!(s.pool_speeds_m_s.len() > 1000);
+        let fastest = s.pool_speeds_m_s.iter().copied().fold(0.0f32, f32::max);
+        assert!(fastest < 1.0, "a pool runs {fastest} m/s");
+    }
+
+    /// 48 of 58 when first counted.
+    #[test]
+    fn most_river_mouths_on_a_low_coast_fan_into_a_delta() {
+        let s = streams();
+        assert!(s.low_mouths > 20, "{} low mouths", s.low_mouths);
+        assert!(
+            s.deltas * 3 >= s.low_mouths * 2,
+            "{} of {}",
+            s.deltas,
+            s.low_mouths
+        );
+    }
+
+    /// On the lattice alone every channel ran straight on through most nodes; with each node
+    /// jittered off it, 3.8% of bends are within 2 degrees of straight.
+    #[test]
+    fn channels_bend_at_their_nodes() {
+        let s = streams();
+        assert!(s.bends > 5000, "{} bends", s.bends);
+        assert!(
+            s.straight * 100 <= s.bends * 5,
+            "{} of {} straight",
+            s.straight,
+            s.bends
+        );
+    }
+
     #[test]
     fn one_ask_of_a_column_is_its_separate_asks_bit_for_bit() {
         let p = crate::testgen::world_params();

@@ -19,7 +19,8 @@ as a spring pool.
 
 - [x] Every stream ends in a lake, a pond or the sea, or leaves what is
       stored; a test walks every stream.
-- [ ] A river's width agrees on both sides of a region border; a test.
+- [x] A river's width agrees on both sides of a region border for most
+      streams; a test (amended by the user with the 1 km halo).
 - [x] Ponds on the map; a capture shown to the user.
 
 ## Comments
@@ -50,3 +51,5 @@ as a spring pool.
   solve costs. Test `a_river_keeps_its_width_across_a_region_border`.
 - 2026-11-27: the user kept the 1 km halo.
 - 2026-11-27: the user reviewed the captures and approved them.
+- 2026-11-27: the user amended the criterion: 3.5% of border stream nodes
+  differ by a fifth, test `a_river_keeps_its_width_across_a_region_border`.

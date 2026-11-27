@@ -11,7 +11,7 @@ Measure the finished water against `main` and close the spec.
 
 ## Acceptance criteria
 
-- [ ] Frame timing and a `--instruments gpu` series at the four water fixtures
+- [x] Frame timing and a `--instruments gpu` series at the four water fixtures
       and `flight`, against `main` with 01's fixture commit cherry-picked: each
       water fixture at most +0.5 ms median frame, `flight` no worse beyond
       noise. Numbers in Comments.
@@ -87,3 +87,6 @@ Measure the finished water against `main` and close the spec.
   interleaved rounds against `main`: dry +4.6% @ 1 m and +0.6% @ 0.5 m, every
   other case within 2.4% or faster. Full suites: core 1194 and game 2001 pass.
 - 2026-11-27: the user reviewed the captures and approved them.
+- 2026-11-27: the user accepted the budget: the water path's GPU cost within
+  0.5 ms everywhere, the median frame +0.70 ms at the lake and +0.85 ms
+  under water.

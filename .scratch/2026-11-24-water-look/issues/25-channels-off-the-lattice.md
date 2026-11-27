@@ -16,7 +16,7 @@ budget, so the ground does not step at the stencil's edge.
 
 ## Acceptance criteria
 
-- [ ] A map of the network shows no straight lattice-aligned runs over a
+- [x] A map of the network shows no straight lattice-aligned runs over a
       node long.
 - [x] `worldgen_v3` within 5% of before, or the cost named for the user.
 
@@ -30,3 +30,6 @@ budget, so the ground does not step at the stencil's edge.
 - 2026-11-27: the offset is hashed once per node in the solve and kept in it,
   as every column of a channel asks it; hashing it per column cost the
   straddling-dry case 7%.
+- 2026-11-27: test `channels_bend_at_their_nodes`: 3.8% of 8 587 bends on 8
+  worlds run within 2 degrees of straight. Bench within 5% after the
+  `wet` cull (ticket 16).

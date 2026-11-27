@@ -18,8 +18,8 @@ and carries a spill sheet, so no step reads as a dam.
 
 ## Acceptance criteria
 
-- [ ] No lip stands above the upper pool's surface.
-- [ ] A Fall of 4 m or more on the slope fixture, with a plunge pool; captures
+- [x] No lip stands above the upper pool's surface.
+- [x] A Fall of 4 m or more on the slope fixture, with a plunge pool; captures
       shown to the user.
 - [x] Containment still leaves no generated water beside open air, except the
       Fall's own face.
@@ -37,3 +37,7 @@ and carries a spill sheet, so no step reads as a dam.
   with the rock behind. Falling water is full of air, so at least 0.6 of the
   wall is white, in long fine strands 0.8 m across and 12 m down, falling at
   6 m/s. `/tmp/tesserae-water-look-captures/22-falls2/fall.png`.
+- 2026-11-27: test `a_streams_surface_never_rises_downstream`, within each
+  segment and where one hands on to the next, over 9 288 segments on 8
+  worlds. The slope fixture has no Fall of 4 m; the user accepted the sea
+  cliffs' 13 m Falls in its place and approved the captures.

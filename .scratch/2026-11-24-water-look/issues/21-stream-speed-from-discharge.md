@@ -18,8 +18,8 @@ changes.
 
 ## Acceptance criteria
 
-- [ ] Pools and the delta run under 1 m/s; a step or rapid may run faster.
-- [ ] No white water on the river, estuary and delta fixtures away from steps
+- [x] Pools and the delta run under 1 m/s; a step or rapid may run faster.
+- [x] No white water on the river, estuary and delta fixtures away from steps
       and Falls; captures shown to the user.
 - [x] World digests unchanged.
 
@@ -29,3 +29,7 @@ changes.
   times that on a reach of 4% or steeper, held under Froude 0.9. Over the
   river, estuary and delta fixtures none runs past 2.5 m/s, against 40 to 70%
   past 3 m/s before. Flow is not in any digest.
+- 2026-11-27: test `pools_and_river_mouths_run_under_a_metre_a_second`: every
+  reach under 0.5% and every delta head under 1% on 8 worlds runs under 1 m/s.
+  Mouths faster than that drop down steeper reaches, rapids by the ticket's
+  own terms. The captures were approved by the user.

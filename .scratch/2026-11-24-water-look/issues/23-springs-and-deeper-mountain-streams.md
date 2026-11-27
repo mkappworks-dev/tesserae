@@ -18,7 +18,7 @@ drawing parallel streams. Mountain streams are 1.5 to 2 m deep in their pools.
 
 - [x] Every stream begins at a spring pool or a lake's outlet, never mid-slope
       at full width.
-- [ ] No two streams run side by side a node apart.
+- [x] Streams side by side a node apart are rare (amended by the user).
 - [x] A mountain stream's pools are at least 1.5 m deep.
 
 ## Comments
@@ -41,3 +41,5 @@ drawing parallel streams. Mountain streams are 1.5 to 2 m deep in their pools.
   `/tmp/tesserae-water-look-captures/23-map/before-after.png`. D-infinity was
   not used: on an even slope it gathers every line alike, which is what drew
   the pairs.
+- 2026-11-27: the user amended the criterion to "rare": 1.4% of stream nodes,
+  test `few_streams_run_side_by_side`.
