@@ -13,6 +13,9 @@ pub struct Fall {
     pub from_m: f32,
     /// The lower pool's Water surface, in metres.
     pub to_m: f32,
+    /// How many columns past the lip the lower pool starts: a tall Fall's face is a short steep
+    /// slope, and the dry columns between are ledges its water runs down.
+    pub reach: u8,
 }
 
 /// How many columns past its lip a Fall's lower pool may lie.
@@ -52,11 +55,13 @@ impl Worldgen {
                 let from_m = surface(dx, dz)?;
                 // A tall Fall's face is a short steep slope, dry below the lip; the pool it lands
                 // in lies a few columns out.
-                let to_m = (1..=FALL_REACH).find_map(|k| surface(-k * dx, -k * dz))?;
+                let (reach, to_m) =
+                    (1..=FALL_REACH).find_map(|k| Some((k, surface(-k * dx, -k * dz)?)))?;
                 (self.level_top(to_m) < self.level_top(from_m)).then_some(Fall {
                     toward: [-dx, -dz],
                     from_m,
                     to_m,
+                    reach: reach as u8,
                 })
             })
             .min_by(|a, b| (b.from_m - b.to_m).total_cmp(&(a.from_m - a.to_m)))?;
@@ -200,12 +205,13 @@ mod tests {
                     .iter()
                     .filter_map(|&(dx, dz, _)| {
                         let up = surface(gx + dx, gz + dz)?;
-                        let down =
-                            (1..=FALL_REACH).find_map(|k| surface(gx - k * dx, gz - k * dz))?;
+                        let (reach, down) = (1..=FALL_REACH)
+                            .find_map(|k| Some((k, surface(gx - k * dx, gz - k * dz)?)))?;
                         below(up, down).then_some(Fall {
                             toward: [-dx, -dz],
                             from_m: up,
                             to_m: down,
+                            reach: reach as u8,
                         })
                     })
                     .collect();

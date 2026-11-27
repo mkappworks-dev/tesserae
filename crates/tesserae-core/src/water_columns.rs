@@ -9,7 +9,7 @@ use crate::mesh::{LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z, Quad};
 use crate::occupants::{Fluid, Occupants};
 use crate::shape::SUBDIV;
 use crate::voxel::MaterialId;
-use crate::worldgen::Fall;
+use crate::worldgen::{FALL_REACH, Fall};
 
 /// Columns along a side of a Chunk's water columns: the Chunk's and its apron.
 pub const WATER_SIDE: usize = CHUNK_SIZE + 2;
@@ -98,63 +98,96 @@ pub fn fall_sheets(
     let sub = SUBDIV as i32;
     let size = answers.voxel_size();
     let base = [coord[0] * SIDE, coord[1] * SIDE, coord[2] * SIDE];
+    let in_chunk = |m: f32| (((m / size) - base[1] as f32) * sub as f32).round() as i32;
+    // The top of a column's generated ground, in the Chunk's sixteenths.
+    let ground_top = |x: i32, z: i32| {
+        let top =
+            crate::worldgen::top_index(answers.ground_m([base[0] + x, base[2] + z]), 0.0, size);
+        (top + 1 - base[1]) * sub
+    };
+    let light_at = |at: [i32; 3]| {
+        if at.iter().all(|&c| (0..SIDE).contains(&c)) {
+            center
+                .light
+                .get(at[0] as usize, at[1] as usize, at[2] as usize)
+        } else {
+            Light::new(MAX_LIGHT, 0)
+        }
+    };
+    let along = |c: i32| [(c * sub) as u16, ((c + 1) * sub) as u16];
+    let inside = |x: i32, z: i32| (0..SIDE).contains(&x) && (0..SIDE).contains(&z);
     let mut sheets = Vec::new();
-    for z in 0..SIDE {
-        for x in 0..SIDE {
-            let Some(fall) = answers.fall([base[0] + x, base[2] + z]) else {
+    // A Fall's ledges may lie in this Chunk while its lip lies in the next.
+    let apron = FALL_REACH - 1;
+    for lz in -apron..SIDE + apron {
+        for lx in -apron..SIDE + apron {
+            let Some(fall) = answers.fall([base[0] + lx, base[2] + lz]) else {
                 continue;
             };
-            let in_chunk = |m: f32| (((m / size) - base[1] as f32) * sub as f32).round() as i32;
-            let low = in_chunk(fall.to_m).max(0);
-            let high = in_chunk(fall.from_m).min(SIDE * sub);
-            if low >= high {
-                continue;
-            }
             let [dx, dz] = fall.toward;
-            let (face, plane) = match (dx, dz) {
-                (1, 0) => (POS_X, (x + 1) * sub + 1),
-                (-1, 0) => (NEG_X, x * sub - 1),
-                (0, 1) => (POS_Z, (z + 1) * sub + 1),
-                _ => (NEG_Z, z * sub - 1),
-            };
-            let along = |c: i32| [(c * sub) as u16, ((c + 1) * sub) as u16];
-            let height = [low as u16, high as u16];
-            // A face's u and v are its next two axes in turn: y then z across x, x then y across z.
-            let (u, v) = if dx != 0 {
-                (height, along(z))
-            } else {
-                (along(x), height)
-            };
-            // The water runs over the lip's top as a film a sixteenth over the rock, flush with the
-            // pool behind it, so a step reads as water spilling and not as a dam across the river.
-            let lip_top = (crate::worldgen::level_index(fall.from_m, size) + 1 - base[1]) * sub;
-            if (1..=SIDE * sub).contains(&lip_top) {
-                let over = [x, (lip_top - 1) / sub + 1, z];
-                let light = if over[1] < SIDE {
-                    center
-                        .light
-                        .get(over[0] as usize, over[1] as usize, over[2] as usize)
+            let pool = in_chunk(fall.to_m);
+            let reach = i32::from(fall.reach.max(1));
+            // Step by step from the lip down each ledge to the pool: the water runs over every
+            // ledge's top and down its face, or a ledge hides the rest of the Fall behind it.
+            for j in 0..reach {
+                let (x, z) = (lx + j * dx, lz + j * dz);
+                if !inside(x, z) {
+                    continue;
+                }
+                let top = if j == 0 {
+                    in_chunk(fall.from_m)
                 } else {
-                    Light::new(MAX_LIGHT, 0)
+                    ground_top(x, z)
                 };
-                sheets.push(Quad::face(
-                    POS_Y,
-                    lip_top + 1,
-                    along(z),
-                    along(x),
-                    u32::from(water),
-                    light,
-                ));
+                let bottom = if j + 1 < reach {
+                    ground_top(x + dx, z + dz).max(pool)
+                } else {
+                    pool
+                };
+                // The water runs over the lip's top, and each ledge's, as a film a sixteenth over
+                // the rock, so a step reads as water spilling and not as a dam across the river.
+                let film = if j == 0 {
+                    (crate::worldgen::level_index(fall.from_m, size) + 1 - base[1]) * sub
+                } else {
+                    top
+                };
+                if (1..=SIDE * sub).contains(&film) {
+                    let over = [x, (film - 1) / sub + 1, z];
+                    let light = if over[1] < SIDE {
+                        light_at(over)
+                    } else {
+                        Light::new(MAX_LIGHT, 0)
+                    };
+                    sheets.push(Quad::face(
+                        POS_Y,
+                        film + 1,
+                        along(z),
+                        along(x),
+                        u32::from(water),
+                        light,
+                    ));
+                }
+                let (low, high) = (bottom.max(0), top.min(SIDE * sub));
+                if low >= high {
+                    continue;
+                }
+                let (face, plane) = match (dx, dz) {
+                    (1, 0) => (POS_X, (x + 1) * sub + 1),
+                    (-1, 0) => (NEG_X, x * sub - 1),
+                    (0, 1) => (POS_Z, (z + 1) * sub + 1),
+                    _ => (NEG_Z, z * sub - 1),
+                };
+                let height = [low as u16, high as u16];
+                // A face's u and v are its next two axes in turn: y then z across x, x then y
+                // across z.
+                let (u, v) = if dx != 0 {
+                    (height, along(z))
+                } else {
+                    (along(x), height)
+                };
+                let light = light_at([x + dx, (high - 1) / sub, z + dz]);
+                sheets.push(Quad::face(face, plane, u, v, u32::from(water), light));
             }
-            let past = [x + dx, (high - 1) / sub, z + dz];
-            let light = if past.iter().all(|&c| (0..SIDE).contains(&c)) {
-                center
-                    .light
-                    .get(past[0] as usize, past[1] as usize, past[2] as usize)
-            } else {
-                Light::new(MAX_LIGHT, 0)
-            };
-            sheets.push(Quad::face(face, plane, u, v, u32::from(water), light));
         }
     }
     sheets
@@ -252,7 +285,7 @@ pub fn water_columns(
             !in_apron || scans[water_index(x, z)].is_none()
         };
         let foam = CARDINALS.iter().any(|&[dx, dz]| {
-            (1..=crate::worldgen::FALL_REACH)
+            (1..=FALL_REACH)
                 .take_while(|&k| k == 1 || dry(column[0] - (k - 1) * dx, column[1] - (k - 1) * dz))
                 .any(|k| {
                     answers
@@ -449,6 +482,8 @@ mod tests {
         flow: [f32; 2],
         falls: Vec<([i32; 2], Fall)>,
         sea_m: Option<f32>,
+        /// Columns whose ground stands off [`FLOOR`].
+        ledges: Vec<([i32; 2], f32)>,
     }
 
     impl WaterAnswers for Double {
@@ -461,8 +496,11 @@ mod tests {
         fn water_top(&self, _: [i32; 2]) -> Option<(f32, i32)> {
             self.top
         }
-        fn ground_m(&self, _: [i32; 2]) -> f32 {
-            FLOOR as f32
+        fn ground_m(&self, column: [i32; 2]) -> f32 {
+            self.ledges
+                .iter()
+                .find(|(c, _)| *c == column)
+                .map_or(FLOOR as f32, |&(_, m)| m)
         }
         fn flow(&self, _: [i32; 2]) -> [f32; 2] {
             self.flow
@@ -547,6 +585,7 @@ mod tests {
             flow: [0.5, -0.25],
             falls: Vec::new(),
             sea_m: None,
+            ledges: Vec::new(),
         }
     }
 
@@ -573,6 +612,7 @@ mod tests {
             toward: [1, 0],
             from_m: 11.6,
             to_m: 9.6,
+            reach: 1,
         };
         answers.falls.push(([5, 5], fall));
         let got = columns(&chunk, &lake, &answers);
@@ -627,6 +667,7 @@ mod tests {
                 toward: [1, 0],
                 from_m: 11.5,
                 to_m: 9.25,
+                reach: 1,
             },
         ));
         answers.falls.push((
@@ -635,6 +676,7 @@ mod tests {
                 toward: [0, -1],
                 from_m: 12.0,
                 to_m: 10.0,
+                reach: 1,
             },
         ));
         let quads = fall_sheets([0, 0, 0], LitChunk::new(&chunk, &light), &answers);
@@ -657,6 +699,57 @@ mod tests {
         assert!(quads.iter().all(|q| q.material == u32::from(water())));
     }
 
+    /// A tall Fall's pool lies past ledges of its steep face: the water runs over each ledge and
+    /// down its face to the pool, or the first ledge hides the rest behind it.
+    #[test]
+    fn a_fall_runs_down_every_ledge_to_its_pool() {
+        let chunk = ground();
+        let light = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mut answers = generator(Some((9.6, 9)));
+        answers.falls.push((
+            [5, 7],
+            Fall {
+                toward: [1, 0],
+                from_m: 20.5,
+                to_m: 9.25,
+                reach: 3,
+            },
+        ));
+        answers.ledges = vec![([6, 7], 16.5), ([7, 7], 12.5)];
+        let quads = fall_sheets([0, 0, 0], LitChunk::new(&chunk, &light), &answers);
+        let corners = |q: &Quad| q.corners().map(|c| c.position);
+        let span = |q: &Quad, k: usize| {
+            let v: Vec<f32> = corners(q).iter().map(|p| p[k]).collect();
+            (
+                v.iter().copied().fold(f32::MAX, f32::min),
+                v.iter().copied().fold(f32::MIN, f32::max),
+            )
+        };
+        let (films, sheets): (Vec<Quad>, Vec<Quad>) =
+            quads.iter().partition(|q| span(q, 1).0 == span(q, 1).1);
+        // Lip, then each ledge's top: Voxels 16 and 12 are the ledges' highest.
+        let mut film_y: Vec<f32> = films.iter().map(|q| span(q, 1).0).collect();
+        film_y.sort_by(f32::total_cmp);
+        assert_eq!(
+            film_y,
+            [13.0 + 1.0 / 16.0, 17.0 + 1.0 / 16.0, 21.0 + 1.0 / 16.0]
+        );
+        // Each face from the next ledge's top, and the last down to the pool.
+        let mut faces: Vec<(f32, (f32, f32))> = sheets
+            .iter()
+            .map(|q| (corners(q)[0][0], span(q, 1)))
+            .collect();
+        faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(
+            faces,
+            [
+                (6.0 + 1.0 / 16.0, (17.0, 20.5)),
+                (7.0 + 1.0 / 16.0, (13.0, 17.0)),
+                (8.0 + 1.0 / 16.0, (9.25, 13.0)),
+            ]
+        );
+    }
+
     #[test]
     fn a_lip_beside_dry_ground_pours_nothing() {
         let chunk = ground();
@@ -671,6 +764,7 @@ mod tests {
                     toward: [1, 0],
                     from_m: 11.5,
                     to_m: 9.25,
+                    reach: 1,
                 },
             ));
             answers
