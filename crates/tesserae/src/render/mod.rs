@@ -11,6 +11,7 @@ pub(crate) mod texture_mips;
 pub(crate) mod tile_icon;
 mod view_caches;
 pub mod water;
+pub mod wobble;
 
 use bevy::asset::embedded_asset;
 use bevy::pbr::MaterialPlugin;
@@ -41,5 +42,6 @@ pub fn plugin(app: &mut App) {
         quad_buffer::plugin,
         sky::plugin,
         view_caches::plugin,
+        wobble::plugin,
     ));
 }

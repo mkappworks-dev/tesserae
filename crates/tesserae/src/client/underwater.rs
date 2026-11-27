@@ -22,6 +22,7 @@ use super::sky::SkyNow;
 use super::tile_preview::AtlasCamera;
 use crate::content::{MaterialPalette, MaterialWaterLooks, WaterLook};
 use crate::render::fog::{self, FogSettings};
+use crate::render::wobble::Wobble;
 use crate::server::quality::DeclaredStreaming;
 use crate::server::streaming::StreamingSettings;
 
@@ -54,25 +55,56 @@ fn range_m(dimming: u8) -> f32 {
     (MAX_RANGE_M / (1.0 + f32::from(dimming)).powi(2)).max(MIN_RANGE_M)
 }
 
-/// What scattering adds to a water look's absorption in the view's extinction. Pure water's blue
-/// alone would carry past the streamed reach and show its edge; with this, blue is down to a
-/// fiftieth by 200 m, and a clear lake's floor still shows some 50 m off.
-const WATER_SCATTERING_PER_M: f32 = 0.01;
+/// The share of the streamed reach water is seen clear through before it fades: the user chose
+/// clear water at any distance over a physical fade, and the fade only hides the reach's edge.
+const CLEAR_SHARE: f32 = 0.6;
 
-/// Fog that takes each channel by its own extinction, red first and blue last, and puts back
-/// the in-scattered colour, `hue`, in its place.
-fn water_fog(look: &WaterLook, hue: [f32; 3]) -> DistanceFog {
-    let extinction = Vec3::from(look.absorption_per_m) + WATER_SCATTERING_PER_M;
+/// Fog that leaves water clear to [`CLEAR_SHARE`] of `reach_m` and fades to `hue` by it.
+fn water_fog(hue: [f32; 3], reach_m: f32) -> DistanceFog {
     DistanceFog {
         color: {
             let [r, g, b] = fog::fog_toward(hue);
             Color::srgb(r, g, b)
         },
-        falloff: FogFalloff::Atmospheric {
-            extinction,
-            inscattering: extinction,
+        falloff: FogFalloff::Linear {
+            start: CLEAR_SHARE * reach_m,
+            end: reach_m,
         },
         ..default()
+    }
+}
+
+/// How far the view shimmers under water, as a share of its height.
+const WOBBLE_STRENGTH: f32 = 0.004;
+
+/// How much of the water's colour is laid over the view under water: barely seen, so a still view
+/// still reads as water.
+const UNDER_TINT: f32 = 0.03;
+
+/// `TESSERAE_DIAG_UNDER_TINT=<share>` overrides [`UNDER_TINT`], so captures can compare tints.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn under_tint() -> f32 {
+    std::env::var("TESSERAE_DIAG_UNDER_TINT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(UNDER_TINT)
+}
+
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
+fn under_tint() -> f32 {
+    UNDER_TINT
+}
+
+/// Moves the shimmer on with the clock; still under Reduced motion.
+fn shimmer(
+    time: Option<Res<Time>>,
+    preferences: Option<Res<super::profile::Preferences>>,
+    mut wobbles: Query<&mut Wobble>,
+) {
+    let still = preferences.is_some_and(|p| p.reduced_motion);
+    for mut wobble in &mut wobbles {
+        wobble.time_s = time.as_ref().map_or(0.0, |t| t.elapsed_secs_wrapped());
+        wobble.strength = if still { 0.0 } else { WOBBLE_STRENGTH };
     }
 }
 
@@ -98,7 +130,7 @@ fn fluid_fog(hue: [f32; 3], dimming: u8) -> DistanceFog {
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Submersion>().add_session_systems(
         Update,
-        (track_hues, track_looks, apply_submersion)
+        (track_hues, track_looks, apply_submersion, shimmer)
             .chain()
             .after(super::view::place)
             .after(fog::follow_settings),
@@ -150,14 +182,14 @@ fn track_looks(mut messages: MessageReader<MaterialWaterLooks>, mut state: ResMu
 
 fn apply_submersion(
     body: Res<PublishedBody>,
-    main: Query<&Transform, With<MainCamera>>,
+    main: Query<(Entity, &Transform), With<MainCamera>>,
     cameras: Query<Entity, TerrainCamera>,
     dry: Dry,
     mut clear: ResMut<ClearColor>,
     mut state: ResMut<Submersion>,
     mut commands: Commands,
 ) {
-    let Ok(camera) = main.single() else {
+    let Ok((main, camera)) = main.single() else {
         return;
     };
     let wet = body
@@ -190,12 +222,22 @@ fn apply_submersion(
             // Water is dark at night as the ground is; a fluid that gives off light keeps its own.
             let hue = if fluid.emits { hue } else { ambient.shade(hue) };
             clear.0 = Color::srgb(hue[0], hue[1], hue[2]);
+            if look.is_some() {
+                commands.entity(main).insert(Wobble {
+                    tint: under_tint(),
+                    hue: clear.0.to_linear().to_vec3(),
+                    ..default()
+                });
+            } else {
+                commands.entity(main).remove::<Wobble>();
+            }
             Some(match look {
-                Some(look) => water_fog(look, hue),
+                Some(_) => water_fog(hue, dry.streaming.view_distance_m),
                 None => fluid_fog(hue, fluid.dimming),
             })
         }
         None => {
+            commands.entity(main).remove::<Wobble>();
             let [r, g, b] = dry.settings.sky;
             clear.0 = Color::srgb(r, g, b);
             fog::camera_fog(
@@ -386,31 +428,28 @@ mod tests {
     }
 
     #[test]
-    fn under_water_with_a_water_look_red_fades_first_and_blue_last() {
+    fn under_water_the_view_is_clear_then_fades_and_shimmers_on_the_players_camera_only() {
         let mut rig = standard();
         rig.app
             .world_mut()
             .write_message(MaterialWaterLooks(vec![(WATER, WaterLook::PURE)]));
         rig.place(9.0, surface(WATER, 2));
+        let reach_m = rig
+            .app
+            .world()
+            .resource::<StreamingSettings>()
+            .view_distance_m;
         for camera in [rig.main, rig.coarse] {
-            let FogFalloff::Atmospheric {
-                extinction,
-                inscattering,
-            } = rig.fog(camera).unwrap().falloff
-            else {
+            let FogFalloff::Linear { start, end } = rig.fog(camera).unwrap().falloff else {
                 panic!("{:?}", rig.fog(camera).unwrap().falloff);
             };
-            assert!(
-                extinction.x > extinction.y && extinction.y > extinction.z,
-                "{extinction}"
-            );
-            assert_eq!(
-                inscattering, extinction,
-                "what is lost is scattered back in"
-            );
+            assert_eq!((start, end), (CLEAR_SHARE * reach_m, reach_m));
         }
         let seen = scattered_hue(&WaterLook::PURE);
         assert!(near(rig.clear(), Color::srgb(seen[0], seen[1], seen[2])));
+        let wobble = |rig: &Rig, camera| rig.app.world().get::<Wobble>(camera).copied();
+        assert!(wobble(&rig, rig.main).is_some_and(|w| w.tint > 0.0 && w.tint < 0.1));
+        assert_eq!(wobble(&rig, rig.coarse), None);
         rig.place(9.0, surface(LAVA, 15));
         assert!(
             matches!(
@@ -419,6 +458,9 @@ mod tests {
             ),
             "lava keeps its single hue"
         );
+        assert_eq!(wobble(&rig, rig.main), None, "only water shimmers");
+        rig.place(12.0, surface(WATER, 2));
+        assert_eq!(wobble(&rig, rig.main), None, "and not once out of it");
     }
 
     #[test]
