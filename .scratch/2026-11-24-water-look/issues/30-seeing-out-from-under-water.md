@@ -20,9 +20,8 @@ it, and white lines run along the edges of the surface's quads.
 
 ## Acceptance criteria
 
-- [ ] A capture looking straight up shows the sky in a round window and the
-      surface's mirror outside it, both rippling.
-- [ ] Trees on the shore show through the window and not past it.
+- [ ] A capture looking up shows the sky and the shore through the surface at
+      every angle, with a faint shimmering sheen where the surface is.
 - [ ] No white lines along the surface's quads from below.
 - [ ] GPU time under water against before, in Comments.
 - [ ] Captures shown to the user.
@@ -31,3 +30,6 @@ it, and white lines run along the edges of the surface's quads.
 
 - 2026-11-27: the user chose clear water with a light blue tint at any
   distance over a realistic fade by 30 m.
+- 2026-11-27: the user chose a clear surface over Snell's window and a mirror:
+  from below the surface is see-through at every angle with a faint shimmering
+  sheen, under 29's 3% tint and shimmer.
