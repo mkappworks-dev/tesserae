@@ -20,7 +20,7 @@ mod structures;
 mod water;
 
 pub use loot::{Loot, Stood};
-pub use water::{FALL_REACH, Fall};
+pub use water::{FALL_REACH_M, Fall, fall_reach};
 
 use std::cell::RefCell;
 use std::collections::HashMap;

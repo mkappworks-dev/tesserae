@@ -18,8 +18,14 @@ pub struct Fall {
     pub reach: u8,
 }
 
-/// How many columns past its lip a Fall's lower pool may lie.
-pub const FALL_REACH: i32 = 3;
+/// How far past its lip a Fall's lower pool may lie: a face is 3.5 in 1, so this holds a drop
+/// of some 40 m.
+pub const FALL_REACH_M: f32 = 12.0;
+
+/// [`FALL_REACH_M`] in columns of `voxel_size`.
+pub fn fall_reach(voxel_size: f32) -> i32 {
+    (FALL_REACH_M / voxel_size).ceil() as i32
+}
 
 impl Worldgen {
     /// The Flow over a column, in m/s along x and z: down a river or brook, or a lake's slow drift
@@ -55,8 +61,8 @@ impl Worldgen {
                 let from_m = surface(dx, dz)?;
                 // A tall Fall's face is a short steep slope, dry below the lip; the pool it lands
                 // in lies a few columns out.
-                let (reach, to_m) =
-                    (1..=FALL_REACH).find_map(|k| Some((k, surface(-k * dx, -k * dz)?)))?;
+                let (reach, to_m) = (1..=fall_reach(self.voxel_size))
+                    .find_map(|k| Some((k, surface(-k * dx, -k * dz)?)))?;
                 (self.level_top(to_m) < self.level_top(from_m)).then_some(Fall {
                     toward: [-dx, -dz],
                     from_m,
@@ -205,7 +211,7 @@ mod tests {
                     .iter()
                     .filter_map(|&(dx, dz, _)| {
                         let up = surface(gx + dx, gz + dz)?;
-                        let (reach, down) = (1..=FALL_REACH)
+                        let (reach, down) = (1..=fall_reach(size))
                             .find_map(|k| Some((k, surface(gx - k * dx, gz - k * dz)?)))?;
                         below(up, down).then_some(Fall {
                             toward: [-dx, -dz],

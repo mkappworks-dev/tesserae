@@ -869,7 +869,9 @@ impl Drainage {
                 if n.lake & HEAD != 0 {
                     width = width.max(spring_width_m(t, ab));
                 }
-                let surface = water_surface_m(n, p, (ni, nj), t, libm::hypotf(ab[0], ab[1]));
+                let length_m = libm::hypotf(ab[0], ab[1]);
+                let surface = water_surface_m(n, p, (ni, nj), t, length_m);
+                let (dug, wet) = fall_bed(n, p, (ni, nj), t, length_m);
                 let edge = (d - width / 2.0).max(0.0);
                 let mut reach_m = valley_reach_m(width);
                 if near_sea {
@@ -894,7 +896,8 @@ impl Drainage {
                 if edge >= reach_m {
                     continue;
                 }
-                let dig = dig_m(width);
+                let full_dig = dig_m(width);
+                let dig = full_dig * dug;
                 let target = surface - dig + edge * BANK_SLOPE;
                 let fade = 1.0 - smoothstep(0.66 * reach_m, reach_m, edge);
                 let cut = (ground_m - target).max(0.0) * fade;
@@ -905,7 +908,8 @@ impl Drainage {
                 // A brook's water stays in the channel it cut: past it the slope stands a few
                 // centimetres either side of the surface, and its Voxels would chequer wet and dry.
                 let band = if n.catchment >= RIVER_NODES { 2.0 } else { 1.0 };
-                if edge * BANK_SLOPE < dig * band {
+                // The full depth's band, so the water keeps its width over a Fall's sill.
+                if wet && edge * BANK_SLOPE < full_dig * band {
                     level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
                 }
             }
@@ -1178,8 +1182,9 @@ impl Drainage {
             width = width.max(spring_width_m(t, ab));
         }
         let edge = ((dx * dx + dz * dz).sqrt() - width / 2.0).max(0.0);
+        let (_, wet) = fall_bed(n, p, at, t, length_m);
         let dig = dig_m(width);
-        if edge >= reach_m || edge * BANK_SLOPE >= dig * channel.band {
+        if !wet || edge >= reach_m || edge * BANK_SLOPE >= dig * channel.band {
             return None;
         }
         let surface = water_surface_m(n, p, at, t, length_m);
@@ -1370,6 +1375,8 @@ const FALL_SLOPE: f32 = 0.1;
 /// How steep a Fall's face is, rise over run: steep enough that its Voxels stand as a wall of
 /// several, while the heightfield stays a slope, as every cliff it draws is.
 const FALL_FACE_STEEPNESS: f32 = 3.5;
+/// Over how far a stream's bed rises to a Fall's lip and sinks again past its foot.
+const SILL_M: f32 = 3.0;
 /// Where along a falling segment its Fall stands, hashed per node within this span.
 const FALL_SPAN: (f32, f32) = (0.3, 0.7);
 
@@ -1377,21 +1384,49 @@ const FALL_SPAN: (f32, f32) = (0.3, 0.7);
 /// between their levels, or held at the upper level and dropped down one steep face where the
 /// segment falls steeply enough to make a waterfall.
 fn water_surface_m(n: Node, p: Node, at: (i32, i32), t: f32, length_m: f32) -> f32 {
-    let drop = n.level_m - p.level_m;
-    let level = if drop >= FALL_DROP_M && drop / length_m >= FALL_SLOPE {
-        let h = (at.0 as u32)
-            .wrapping_mul(0x9e37_79b9)
-            .wrapping_add((at.1 as u32).wrapping_mul(0x85eb_ca6b));
-        let h = (h ^ (h >> 15)).wrapping_mul(0x2c1b_3c6d);
-        let at_t =
-            FALL_SPAN.0 + (FALL_SPAN.1 - FALL_SPAN.0) * ((h >> 8) as f32 / (1u32 << 24) as f32);
-        let face = drop / FALL_FACE_STEEPNESS / length_m;
-        let s = ((t - at_t) / face).clamp(0.0, 1.0);
-        n.level_m + (p.level_m - n.level_m) * s
-    } else {
-        n.level_m * (1.0 - t) + p.level_m * t
+    let level = match fall_face(n, p, at, length_m) {
+        Some((at_t, face)) => {
+            let s = ((t - at_t) / face).clamp(0.0, 1.0);
+            n.level_m + (p.level_m - n.level_m) * s
+        }
+        None => n.level_m * (1.0 - t) + p.level_m * t,
     };
     level - SURFACE_BELOW_M
+}
+
+/// Where a segment that falls steeply enough has its Fall: how far along it the face starts and
+/// how much of it the face spans, as shares of the segment.
+fn fall_face(n: Node, p: Node, at: (i32, i32), length_m: f32) -> Option<(f32, f32)> {
+    let drop = n.level_m - p.level_m;
+    if drop < FALL_DROP_M || drop / length_m < FALL_SLOPE {
+        return None;
+    }
+    let h = (at.0 as u32)
+        .wrapping_mul(0x9e37_79b9)
+        .wrapping_add((at.1 as u32).wrapping_mul(0x85eb_ca6b));
+    let h = (h ^ (h >> 15)).wrapping_mul(0x2c1b_3c6d);
+    let at_t = FALL_SPAN.0 + (FALL_SPAN.1 - FALL_SPAN.0) * ((h >> 8) as f32 / (1u32 << 24) as f32);
+    Some((at_t, drop / FALL_FACE_STEEPNESS / length_m))
+}
+
+/// How much of a stream's bed is dug under its surface `t` along the segment, and whether the
+/// water is there at all. A Fall's face is bare rock the water pours over, not water stepping
+/// down it: the bed rises to a sill flush with the pool over [`SILL_M`] before the lip, stands
+/// dry down the face, and sinks to the full depth again over as much past its foot, so the
+/// ground stays a slope.
+fn fall_bed(n: Node, p: Node, at: (i32, i32), t: f32, length_m: f32) -> (f32, bool) {
+    let Some((at_t, face)) = fall_face(n, p, at, length_m) else {
+        return (1.0, true);
+    };
+    let along_m = t * length_m;
+    let (top_m, foot_m) = (at_t * length_m, (at_t + face) * length_m);
+    if along_m < top_m {
+        (smoothstep(0.0, SILL_M, top_m - along_m), true)
+    } else if along_m <= foot_m {
+        (0.0, false)
+    } else {
+        (smoothstep(0.0, SILL_M, along_m - foot_m), true)
+    }
 }
 
 /// Widens with the square root of catchment, as rivers do; a brook's banks start at the river's

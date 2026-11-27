@@ -9,7 +9,7 @@ use crate::mesh::{LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z, Quad};
 use crate::occupants::{Fluid, Occupants};
 use crate::shape::SUBDIV;
 use crate::voxel::MaterialId;
-use crate::worldgen::{FALL_REACH, Fall};
+use crate::worldgen::{Fall, fall_reach};
 
 /// Columns along a side of a Chunk's water columns: the Chunk's and its apron.
 pub const WATER_SIDE: usize = CHUNK_SIZE + 2;
@@ -118,7 +118,7 @@ pub fn fall_sheets(
     let inside = |x: i32, z: i32| (0..SIDE).contains(&x) && (0..SIDE).contains(&z);
     let mut sheets = Vec::new();
     // A Fall's ledges may lie in this Chunk while its lip lies in the next.
-    let apron = FALL_REACH - 1;
+    let apron = fall_reach(size) - 1;
     for lz in -apron..SIDE + apron {
         for lx in -apron..SIDE + apron {
             let Some(fall) = answers.fall([base[0] + lx, base[2] + lz]) else {
@@ -285,7 +285,7 @@ pub fn water_columns(
             !in_apron || scans[water_index(x, z)].is_none()
         };
         let foam = CARDINALS.iter().any(|&[dx, dz]| {
-            (1..=FALL_REACH)
+            (1..=fall_reach(answers.voxel_size()))
                 .take_while(|&k| k == 1 || dry(column[0] - (k - 1) * dx, column[1] - (k - 1) * dz))
                 .any(|k| {
                     answers
