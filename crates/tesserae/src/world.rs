@@ -79,11 +79,19 @@ const DEV_VOXEL_SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 
 impl WorldSettings {
     /// The defaults, except that under `dev` `TESSERAE_VOXEL_SIZE_M` picks one
-    /// of [`DEV_VOXEL_SIZES`], so one binary opens a World at each of them.
+    /// of [`DEV_VOXEL_SIZES`], so one binary opens a World at each of them, and
+    /// `TESSERAE_SEED` picks the seed.
     /// Save data does not exist yet, so nothing else chooses it.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn from_env(env: impl Fn(&str) -> Option<String>) -> Self {
-        let defaults = WorldSettings::default();
+        // `TESSERAE_SEED` regenerates a reported World's ground afresh, where its own save keeps
+        // the Chunks it generated before a change.
+        let defaults = WorldSettings {
+            seed: env("TESSERAE_SEED")
+                .and_then(|seed| seed.parse().ok())
+                .unwrap_or(WorldSettings::default().seed),
+            ..WorldSettings::default()
+        };
         let Some(asked) = env("TESSERAE_VOXEL_SIZE_M") else {
             return defaults;
         };
