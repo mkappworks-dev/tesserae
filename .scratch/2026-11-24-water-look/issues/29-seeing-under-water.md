@@ -23,12 +23,12 @@ near; a thin white line crosses the view looking down.
 
 ## Acceptance criteria
 
-- [ ] Under water reads as clear water with a light blue tint at any distance:
+- [x] Under water reads as clear water with a light blue tint at any distance:
       a floor 5 m off and one 30 m off both keep their colours, tinted; only
       near the edge of what is streamed does the view fade to the water.
 - [ ] A shallow floor lit brighter than a deep one, by the water above it.
 - [ ] Caustics move on the floor near the surface and fade with depth.
-- [ ] No white line across the view under water.
+- [x] No white line across the view under water.
 - [ ] Captures at the four angles, before and after, shown to the user.
 
 ## Comments
@@ -46,3 +46,8 @@ near; a thin white line crosses the view looking down.
   (unchanged with them painted magenta), and only shows under water. Its
   cause is not yet found. Caustics and the light from above are left out:
   the user chose clear water.
+- 2026-11-27, the white line: the aim outline. From inside water the aim ray
+  stopped at the Voxel the Eye was in, and its white outline drew that
+  Voxel's edges round the whole view, on `main` too. The ray now passes
+  through the fluid it starts in (`from_under_water_remove_reaches_the_bed_through_the_water`);
+  `/tmp/tesserae-water-look-captures/32-lines/fixed.png`.

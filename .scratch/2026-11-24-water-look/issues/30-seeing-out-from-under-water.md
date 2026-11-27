@@ -20,9 +20,9 @@ it, and white lines run along the edges of the surface's quads.
 
 ## Acceptance criteria
 
-- [ ] A capture looking up shows the sky and the shore through the surface at
+- [x] A capture looking up shows the sky and the shore through the surface at
       every angle, with a faint shimmering sheen where the surface is.
-- [ ] No white lines along the surface's quads from below.
+- [x] No white lines along the surface's quads from below.
 - [ ] GPU time under water against before, in Comments.
 - [ ] Captures shown to the user.
 
@@ -37,3 +37,4 @@ it, and white lines run along the edges of the surface's quads.
   of the sky that moves with the ripples; the shore and trees show through it
   (`/tmp/tesserae-water-look-captures/30-after/sheet.png`). The white lines
   along its edges are the same as 29's line, on `main` too.
+- 2026-11-27: the white lines were 29's aim outline, now gone.
