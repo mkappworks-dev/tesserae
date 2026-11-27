@@ -267,6 +267,7 @@ fn add_view_systems(app: &mut App) {
         Update,
         (
             update_textures.after(super::material_textures::receive),
+            follow_sky,
             receive_meshes,
             drop_meshes,
             land_meshes,
@@ -298,6 +299,35 @@ fn update_textures(
     }
 }
 
+/// How far the sky's zenith may drift, in linear colour, before water's copy follows: each change
+/// re-uploads the blended material, and the zenith moves every frame through the day.
+const ZENITH_STEP: f32 = 1.0 / 512.0;
+
+/// Keeps the zenith water reflects in step with the sky's. Only the blended layer draws water.
+fn follow_sky(
+    settings: Option<Res<FogSettings>>,
+    terrain: Res<TerrainMaterial>,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    let zenith = crate::render::sky::zenith(settings.sky);
+    let Some(now) = materials.get(&terrain.blended) else {
+        return;
+    };
+    if (now.extension.water_sky.zenith - zenith)
+        .abs()
+        .max_element()
+        <= ZENITH_STEP
+    {
+        return;
+    }
+    if let Some(mut material) = materials.get_mut(&terrain.blended) {
+        material.extension.water_sky.zenith = zenith;
+    }
+}
+
 /// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
 /// order, so a capture can show what the sort fixes.
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -314,12 +344,19 @@ fn add_material(
     mut commands: Commands,
     mut materials: ResMut<Assets<ChunkMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    images: Option<ResMut<Assets<Image>>>,
     mut palette: MessageReader<crate::content::MaterialPalette>,
+    mut water_looks: MessageReader<crate::content::MaterialWaterLooks>,
 ) {
     let mut extension = ChunkMaterialExtension::default();
     for message in palette.read() {
         extension.apply_palette(message);
     }
+    for message in water_looks.read() {
+        extension.water = crate::render::water::table(&message.0);
+    }
+    extension.water_normals =
+        images.map(|mut images| images.add(crate::render::water::normal_map()));
     let drawn = buffers.add(ShaderBuffer::new(vec![0u32], RenderAssetUsages::default()));
     let quads = QuadBuffer::new(&mut buffers);
     let opaque = ChunkMaterial {
@@ -336,7 +373,8 @@ fn add_material(
     };
     let blended = ChunkMaterial {
         base: StandardMaterial {
-            alpha_mode: AlphaMode::Blend,
+            // The shader premultiplies, so water's reflection is not faded by its body's alpha.
+            alpha_mode: AlphaMode::Premultiplied,
             // The mesher hides water against water, so from inside a lake the
             // surface's underside is the only water face there is.
             double_sided: true,
@@ -1161,6 +1199,7 @@ mod tests {
             .add_message::<LodMeshReady>()
             .add_message::<LodUnloaded>()
             .add_message::<crate::content::MaterialPalette>()
+            .add_message::<crate::content::MaterialWaterLooks>()
             .add_systems(Startup, add_material);
         add_view_systems(&mut app);
         // The mesh systems take the dev-only counter as a `ResMut`, so without
@@ -1244,6 +1283,33 @@ mod tests {
             let palette = materials.get(handle).unwrap().extension.palette;
             assert_eq!(palette[8], expected);
             assert_eq!(palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
+        }
+    }
+
+    #[test]
+    fn the_water_look_message_marks_exactly_its_slots_as_water() {
+        use crate::content::{MaterialWaterLooks, WaterLook};
+        use crate::render::water::ROWS_PER_SLOT;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<ChunkMaterial>()
+            .init_asset::<ShaderBuffer>()
+            .init_asset::<Image>()
+            .add_message::<crate::content::MaterialPalette>()
+            .add_message::<MaterialWaterLooks>()
+            .add_systems(Startup, add_material);
+        app.world_mut()
+            .write_message(MaterialWaterLooks(vec![(5, WaterLook::PURE)]));
+        app.update();
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for handle in terrain.all() {
+            let extension = &materials.get(handle).unwrap().extension;
+            let water: Vec<usize> = (0..=crate::render::chunk_material::PALETTE_LEN)
+                .filter(|slot| extension.water[slot * ROWS_PER_SLOT].w == 1.0)
+                .collect();
+            assert_eq!(water, [5]);
+            assert!(extension.water_normals.is_some());
         }
     }
 
@@ -2549,7 +2615,7 @@ mod tests {
         };
         assert_eq!(
             alpha_of(&app, blended_at(&app, 0, coord).unwrap()),
-            AlphaMode::Blend
+            AlphaMode::Premultiplied
         );
         assert_eq!(
             alpha_of(&app, entity_for(&app, coord).unwrap()),

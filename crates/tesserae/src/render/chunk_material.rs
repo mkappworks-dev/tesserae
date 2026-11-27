@@ -18,6 +18,7 @@ use bevy::render::render_resource::{
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
+use super::water;
 use crate::client::chunk_mesh;
 
 /// What to spawn in `MeshMaterial3d`.
@@ -80,6 +81,13 @@ pub struct LodParams {
     pub tint: u32,
 }
 
+/// Mirrors `WaterSky` in `water.wesl`: what water reflects, kept in step with the sky's.
+#[derive(Reflect, ShaderType, Debug, Clone, Copy, Default, PartialEq)]
+pub struct WaterSky {
+    /// The sky material's zenith, linear.
+    pub zenith: Vec4,
+}
+
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 #[bind_group_data(ChunkMaterialKey)]
 pub struct ChunkMaterialExtension {
@@ -103,6 +111,15 @@ pub struct ChunkMaterialExtension {
     /// Every Chunk layer's quads, in `render::quad_buffer`'s ranges.
     #[storage(106, read_only)]
     pub quads: Handle<ShaderBuffer>,
+    /// `water::table`'s rows: which slots are water and how each looks.
+    #[uniform(107)]
+    pub water: [Vec4; water::TABLE_LEN],
+    /// `water::normal_map`; `None` until the Client has built it.
+    #[texture(108)]
+    #[sampler(109)]
+    pub water_normals: Option<Handle<Image>>,
+    #[uniform(110)]
+    pub water_sky: WaterSky,
     /// Whether the pipeline holds the coverage test's `discard`. A Chunk no
     /// finer level draws any of takes a material without it: on Apple's
     /// tile-based GPUs a pipeline that may discard defeats hidden-surface
@@ -149,6 +166,9 @@ impl Default for ChunkMaterialExtension {
             texture: None,
             face_words: [UVec4::ZERO; FACE_WORD_VECS],
             quads: Handle::default(),
+            water: [Vec4::ZERO; water::TABLE_LEN],
+            water_normals: None,
+            water_sky: WaterSky::default(),
             coverage_test: true,
         }
     }
@@ -196,7 +216,9 @@ impl MaterialExtension for ChunkMaterialExtension {
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,
             ),
+            ShaderDefVal::UInt("CHUNK_WATER_ROWS".into(), water::TABLE_LEN as u32),
         ];
+        defs.extend(water::ripple_shader_defs());
         defs.extend(super::texture_atlas::face_word_shader_defs());
         defs.extend(quad_layout_defs());
         defs.extend(super::fog::haze_shader_defs());
@@ -206,6 +228,8 @@ impl MaterialExtension for ChunkMaterialExtension {
         let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
         #[cfg(not(feature = "profiling"))]
         let switched = false;
+        #[cfg(feature = "profiling")]
+        defs.extend(held_water_clock());
         if casts_the_suns_shadow(descriptor) {
             defs.push(ShaderDefVal::Bool("CHUNK_SUN_SHADOW".into(), true));
         }
@@ -223,6 +247,21 @@ impl MaterialExtension for ChunkMaterialExtension {
         }
         Ok(())
     }
+}
+
+/// `TESSERAE_WATER_CLOCK_S` holds water's clock at that many seconds, for a capture pair.
+#[cfg(feature = "profiling")]
+fn held_water_clock() -> Vec<ShaderDefVal> {
+    let Some(seconds) = std::env::var("TESSERAE_WATER_CLOCK_S")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    else {
+        return Vec::new();
+    };
+    vec![
+        ShaderDefVal::Bool("CHUNK_WATER_CLOCK_HELD".into(), true),
+        ShaderDefVal::UInt("CHUNK_WATER_CLOCK_S".into(), seconds.to_bits()),
+    ]
 }
 
 /// Bevy draws a directional light's cascades with unclipped depth, natively or

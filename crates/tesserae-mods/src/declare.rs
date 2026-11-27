@@ -194,6 +194,16 @@ pub struct Behaviour {
     pub(crate) cave_biomes: Vec<content::CaveBiomeDef>,
 }
 
+impl Behaviour {
+    /// The full names of this Mod's Materials tagged `tag`.
+    pub fn tagged<'a>(&'a self, tag: &'a str) -> impl Iterator<Item = &'a str> {
+        self.material_tags
+            .iter()
+            .filter(move |(_, tags)| tags.iter().any(|t| t == tag))
+            .map(|(name, _)| name.as_str())
+    }
+}
+
 /// The first `world` field a Mod set besides `character`: anything but the engine's own terrain
 /// values, which is what a data Declaration's absent numbers become, and no optional table.
 fn beyond_character(world: &content::WorldParams) -> Option<&'static str> {

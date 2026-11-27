@@ -10,8 +10,9 @@ import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::{
-        STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK, STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
-        STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT, STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
+        STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK, STANDARD_MATERIAL_FLAGS_ALPHA_MODE_PREMULTIPLIED,
+        STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS, STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT,
+        STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
     },
     mesh_view_bindings as view_bindings,
 };
@@ -25,6 +26,10 @@ import super::{
     leaf_hole::leaf_hole,
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
+    water::{
+        WATER_REFLECTANCE, ambient_specular, fresnel, is_water, sky_reflection, water_gradient,
+        water_surface,
+    },
 };
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
@@ -214,6 +219,7 @@ fn fragment(
     vertex_output.world_normal = in.world_normal;
     vertex_output.instance_index = in.instance_index;
     let uv_grad = uv_gradient(in.uv);
+    let water_grad = water_gradient(in.world_position.xyz);
 
     // Coarse geometry up to a Voxel above the real surface would stand over the
     // finer silhouette, and coarse water under finer water would be drawn twice.
@@ -227,7 +233,9 @@ fn fragment(
     // Multiplied rather than assigned so the base material's base_color still
     // works as a whole-chunk tint.
     let slot = material_slot(in.material);
-    if has_texture(slot) {
+    let water = is_water(slot);
+    // Water's tile stays for Items, the inventory and the coarse colour; its surface is its own.
+    if has_texture(slot) && !water {
         pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal, in.voxel);
         if patched(slot, in.world_normal) {
             pbr_input.material.base_color = vec4<f32>(
@@ -250,8 +258,9 @@ fn fragment(
 
     // bevy_pbr bounces the occlusion off StandardMaterial's white base_color, before the Material's
     // colour is multiplied in, which lifts it to almost nothing; bounce it off the real albedo.
+    // Water is not in the prepass AO reads, so it would take the floor's occlusion.
     @if(SCREEN_SPACE_AMBIENT_OCCLUSION) {
-    if in.level == 0u {
+    if in.level == 0u && !water {
         let ssao_at = vec2<i32>(in.clip_position.xy - view.viewport.xy);
         let ssao = textureLoad(screen_space_ambient_occlusion_texture, ssao_at, 0i).r;
         // Faded by sky light, which already darkens what cannot see the sky: a shaded floor is
@@ -283,6 +292,25 @@ fn fragment(
     pbr_input.diffuse_occlusion *= max(vec3<f32>(sky * in.sky_view), cave_floor());
     pbr_input.directional_shadow_factor *= sky;
 
+    // Premultiplied: what the water sends toward the eye, as `alpha` of the colour below is lost.
+    // The body's share is scaled into its albedo, so bevy_pbr's lighting leaves the sun's glint
+    // and the sky's reflection unscaled by the body's alpha.
+    var reflection = vec3<f32>(0.0);
+    var water_alpha = 1.0;
+    if water {
+        let surface = water_surface(slot, in.world_position.xyz, water_grad, pbr_input.N);
+        pbr_input.N = surface.normal;
+        pbr_input.material.perceptual_roughness = surface.perceptual_roughness;
+        pbr_input.material.reflectance = vec3<f32>(WATER_REFLECTANCE);
+        // From under the surface there is no sky to reflect; the underwater fog does the rest.
+        let from_below = pbr_input.world_normal.y < -0.5;
+        let mirrored = select(fresnel(dot(surface.normal, pbr_input.V)), 0.0, from_below);
+        let body = (1.0 - mirrored) * pbr_input.material.base_color.a;
+        pbr_input.material.base_color = vec4<f32>(pbr_input.material.base_color.rgb * body, 1.0);
+        reflection = mirrored * sky * sky_reflection(pbr_input.V, surface.normal);
+        water_alpha = body + mirrored;
+    }
+
     // Block light is a local source, so it is emissive: tinted by the Voxel's
     // own palette colour, so a face a lantern reaches still shows its Material
     // instead of turning into a flat glow. Its exposure weight is 1, so it goes
@@ -313,6 +341,13 @@ fn fragment(
     } else {
         out.color = pbr_input.material.base_color;
     }
+    if water {
+        // The sky's reflection replaces the ambient light's specular, which at a low angle is
+        // nearly all of the ambient and turned the far water grey.
+        let sent = out.color.rgb - ambient_specular(pbr_input) + reflection;
+        // Back out of premultiplied, so fog and the tonemapper see a colour, as for glass.
+        out.color = vec4<f32>(sent / water_alpha, water_alpha);
+    }
     @if(DISTANCE_FOG)
     if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u {
         out.color = apply_fog(apply_haze(out.color, in.world_position.xyz), in.world_position.xyz);
@@ -320,5 +355,9 @@ fn fragment(
     // Fogged above; Bevy's own fog would sample the shadow map again.
     pbr_input.material.flags &= ~STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+    // bevy_pbr leaves a premultiplied material's colour as the shader writes it.
+    if alpha_mode == STANDARD_MATERIAL_FLAGS_ALPHA_MODE_PREMULTIPLIED {
+        out.color = vec4<f32>(out.color.rgb * out.color.a, out.color.a);
+    }
     return out;
 }
