@@ -22,7 +22,7 @@ toward the shore. Lakes ripple with the Wind's strength, far less than the sea.
 - [x] Tests: the Wind is the same for the same seed and differs across seeds; it
       reaches the Client when a World session starts.
 - [x] The frequency unit test from 08 covers every wave.
-- [ ] Coast captures over several seconds: waves from one direction, shortening
+- [x] Coast captures over several seconds: waves from one direction, shortening
       and turning toward the shore, foam breaking on the beach; shown to the
       user.
 - [x] No sparkle or crawl at distance in a moving pair.
@@ -57,3 +57,4 @@ toward the shore. Lakes ripple with the Wind's strength, far less than the sea.
   parallel to the beach moving between frames. Moving pair, 2.4 cm apart, clock
   held: mean 0.34 and 0.5 % over 10, the far water 0.06 and 0.0 %. They wait on
   the user's review; the breakers are faint at this fixture's Wind.
+- 2026-11-27: the user reviewed the captures and approved them.

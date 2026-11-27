@@ -18,7 +18,7 @@ Other fluids keep today's single-hue fog.
 
 - [x] Underwater tests: water's fog extinguishes red faster than green faster
       than blue; lava's look is unchanged; the existing tests pass.
-- [ ] Before and after captures from the underwater fixture, shown to the user.
+- [x] Before and after captures from the underwater fixture, shown to the user.
 
 ## Comments
 
@@ -41,3 +41,4 @@ Other fluids keep today's single-hue fog.
   look) and `09-after/underwater.png`. The floor near the Eye keeps some of its
   colour and fades to blue with distance; the old fog's 160 m view of the floor
   is shorter now. They wait on the user's review.
+- 2026-11-27: the user reviewed the captures and approved them.

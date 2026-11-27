@@ -16,7 +16,7 @@ own water's colour.
 
 ## Acceptance criteria
 
-- [ ] Estuary, delta and river captures show the channels' water from above;
+- [x] Estuary, delta and river captures show the channels' water from above;
       the lake fixture unchanged. Shown to the user.
 
 ## Comments
@@ -25,3 +25,4 @@ own water's colour.
   extinction, scatter (0.09, 0.09, 0.055) linear. Channels read as water from
   above; the lake is unchanged. `/tmp/tesserae-water-look-captures/24-after/sheet.png`. Coarse columns carry
   no Flow, so a far river is clear.
+- 2026-11-27: the user reviewed the captures and approved them.

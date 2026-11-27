@@ -16,7 +16,7 @@ landing and fast, steep water still foam.
 ## Acceptance criteria
 
 - [x] The shore band is scaled by the sea's share of the columns.
-- [ ] A capture of a Settlement pond and a lake's margin with no foam, and the
+- [x] A capture of a Settlement pond and a lake's margin with no foam, and the
       coast's shore with its band, shown to the user.
 
 ## Comments
@@ -26,3 +26,4 @@ landing and fast, steep water still foam.
   them into lace. The crop field's canals in the user's World lost their
   white band. Captures in `/tmp/tesserae-water-look-captures/18-blackspot/field-yaw270.png` and
   `/tmp/tesserae-water-look-captures/20-day/`.
+- 2026-11-27: the user reviewed the captures and approved them.

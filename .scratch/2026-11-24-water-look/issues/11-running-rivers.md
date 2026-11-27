@@ -16,7 +16,7 @@ multiples of the clock's, as in 08.
 
 ## Acceptance criteria
 
-- [ ] Captures over several seconds at the river fixture show the surface moving
+- [x] Captures over several seconds at the river fixture show the surface moving
       downstream with no visible pulse or reset, and white water on steep
       reaches; shown to the user.
 - [ ] Water poured on a slope runs down it in a capture.
@@ -55,3 +55,4 @@ multiples of the clock's, as in 08.
   running and its walls clear). They wait on the user's review, as does the
   first criterion. Poured water on a true slope is not captured: the `active`
   block stands on flat ground.
+- 2026-11-27: the user reviewed the captures and approved them.

@@ -15,7 +15,7 @@ Measure the finished water against `main` and close the spec.
       and `flight`, against `main` with 01's fixture commit cherry-picked: each
       water fixture at most +0.5 ms median frame, `flight` no worse beyond
       noise. Numbers in Comments.
-- [ ] Final captures from every fixture, before and after, shown to the user.
+- [x] Final captures from every fixture, before and after, shown to the user.
 - [x] DESIGN.md's step 17 and render notes describe the water as built.
 - [x] The spec's Status set to done.
 
@@ -86,3 +86,4 @@ Measure the finished water against `main` and close the spec.
   before its noise, which leaves every recorded Chunk unchanged. Seven
   interleaved rounds against `main`: dry +4.6% @ 1 m and +0.6% @ 0.5 m, every
   other case within 2.4% or faster. Full suites: core 1194 and game 2001 pass.
+- 2026-11-27: the user reviewed the captures and approved them.

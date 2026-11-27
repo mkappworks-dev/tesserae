@@ -14,7 +14,7 @@ colour at sunset, the reflection and body at night.
 
 ## Acceptance criteria
 
-- [ ] A capture sheet at the three hours, shown to the user.
+- [x] A capture sheet at the three hours, shown to the user.
 - [x] Whatever reads wrong fixed, with a capture of the fix.
 
 ## Comments
@@ -24,3 +24,4 @@ colour at sunset, the reflection and body at night.
   notes left to the day/night work: the sun's glint is white at sunset, the
   sun light's own colour; underwater at midnight is a mid navy, dimmed by the
   night's ambient as the ground is.
+- 2026-11-27: the user reviewed the captures and approved them.

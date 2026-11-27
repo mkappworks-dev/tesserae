@@ -22,7 +22,7 @@ and ripples calm in the shallows.
 
 - [x] A chunk mesh test: the header names where the water columns start and they
       upload whole; a dry layer uploads none.
-- [ ] Lake and coast captures: clear shallows, deep water darker and bluer with
+- [x] Lake and coast captures: clear shallows, deep water darker and bluer with
       depth, a foam line at the shore; shown to the user.
 - [x] No colour step where two Chunks of one lake meet, corners included.
 
@@ -56,3 +56,4 @@ and ripples calm in the shallows.
   and estuary. With pure water's absorption, shallow river channels seen from
   above are nearly clear; a Game's own look (ticket 15) is what colours them.
   They wait on the user's review.
+- 2026-11-27: the user reviewed the captures and approved them.

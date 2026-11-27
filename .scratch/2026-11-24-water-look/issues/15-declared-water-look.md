@@ -23,7 +23,7 @@ draw.
 - [x] Data tests: a data water look decodes to what a component returns; bad
       values and non-fluid rows are refused naming the Mod and field.
 - [x] A loading test: Terra's declared values reach the per-slot table.
-- [ ] Terra's lake, coast and underwater captures with its declared look, shown
+- [x] Terra's lake, coast and underwater captures with its declared look, shown
       to the user.
 
 ## Comments
@@ -52,3 +52,4 @@ draw.
   coast, underwater). Under water the view is a blue-teal fog with the floor
   faint past 30 m; Terra's scatter tint is where to take it bluer or clearer.
   They wait on the user's review.
+- 2026-11-27: the user reviewed the captures and approved them.

@@ -30,7 +30,7 @@ Water reads as water at every angle.
 
 ## Acceptance criteria
 
-- [ ] Captures from the lake and coast fixtures show sky reflection at low
+- [x] Captures from the lake and coast fixtures show sky reflection at low
       angles, the floor when looking down, and the sun's glint; shown to the
       user.
 - [x] A moving pair at the coast, scored as in
@@ -85,3 +85,4 @@ Water reads as water at every angle.
   1.8 %, the far water band 0.79 and 0.7 %. The amplified difference is the
   clouds, which keep their own clock, and the islands' edges; the water shows
   no sparkle or crawl.
+- 2026-11-27: the user reviewed the captures and approved them.

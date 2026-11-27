@@ -15,9 +15,9 @@ that distance, so the edge between them does not show.
 
 ## Acceptance criteria
 
-- [ ] Captures from high over a lake and the sea, past level 0's edge, at
+- [x] Captures from high over a lake and the sea, past level 0's edge, at
       noon, sunset and midnight, before and after, shown to the user.
-- [ ] The edge between level 0 and level 1 water does not show as a change of
+- [x] The edge between level 0 and level 1 water does not show as a change of
       brightness or roughness.
 
 ## Comments
@@ -28,3 +28,4 @@ that distance, so the edge between them does not show.
   sky and less of it. Before and after at noon, sunset and midnight in
   `/tmp/tesserae-water-look-captures/19-before/` and `/tmp/tesserae-water-look-captures/19-after/sheet.png`; the user had said the white
   horizon was the issue.
+- 2026-11-27: the user reviewed the captures and approved them.

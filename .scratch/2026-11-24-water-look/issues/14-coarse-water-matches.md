@@ -16,7 +16,7 @@ Coarse water takes the same water path, calm, with no Flow.
 
 - [x] A test: a level-1 water column's depth agrees with level 0's at its centre
       within one coarse Voxel.
-- [ ] Captures from `flight` and the coast fixture show no colour step at the
+- [x] Captures from `flight` and the coast fixture show no colour step at the
       edge of level 0; shown to the user.
 
 ## Comments
@@ -39,3 +39,4 @@ Coarse water takes the same water path, calm, with no Flow.
   fails on this branch: level 5 over the coast window, 3 columns' Canopy cover
   differ from level 0's tree density past one column. It does not read water;
   ticket 16's full run checks it against `main`.
+- 2026-11-27: the user reviewed the captures and approved them.

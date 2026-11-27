@@ -20,7 +20,7 @@ as a spring pool.
 - [x] Every stream ends in a lake, a pond or the sea, or leaves what is
       stored; a test walks every stream.
 - [ ] A river's width agrees on both sides of a region border; a test.
-- [ ] Ponds on the map; a capture shown to the user.
+- [x] Ponds on the map; a capture shown to the user.
 
 ## Comments
 
@@ -49,3 +49,4 @@ as a spring pool.
   and 2.6x a region's solve; left at 1 km until the profile shows what the
   solve costs. Test `a_river_keeps_its_width_across_a_region_border`.
 - 2026-11-27: the user kept the 1 km halo.
+- 2026-11-27: the user reviewed the captures and approved them.
