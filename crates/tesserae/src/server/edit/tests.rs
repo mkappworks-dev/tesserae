@@ -277,6 +277,29 @@ fn pool() -> Chunk {
     chunk
 }
 
+/// From inside a lake the aim passes through the lake's own water to its bed, so it never
+/// outlines the Voxel the Eye is in.
+#[test]
+fn from_under_water_remove_reaches_the_bed_through_the_water() {
+    let mut chunk = ground();
+    for y in 8..=12 {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                chunk.set(x, y, z, Voxel::cube(water()));
+            }
+        }
+    }
+    let mut app = app_with(&[(origin(), chunk)]);
+    send(&mut app, down(EditAction::Remove));
+    tick(&mut app);
+    assert!(voxel_at(&app, [5, 7, 5]).is_air(), "the bed is taken");
+    assert_eq!(
+        voxel_at(&app, [5, 8, 5]),
+        Voxel::cube(water()),
+        "the water stays"
+    );
+}
+
 #[test]
 fn remove_takes_the_surface_source_and_place_replaces_water() {
     let mut app = app_with(&[(origin(), pool())]);

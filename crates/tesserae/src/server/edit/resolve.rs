@@ -21,9 +21,20 @@ pub(super) fn trace(
     reach: Reach,
     fluid_tool: bool,
 ) -> Result<(RayHit, Vec3), RejectReason> {
+    // The fluid the ray starts in: from inside a lake it passes through the lake's own water to
+    // what lies in it, or it struck the Voxel the Eye is in and outlined it all round the view.
+    let start = (reach.start / world.voxel_size)
+        .floor()
+        .as_ivec3()
+        .to_array();
+    let inside = store
+        .occupants(start, &tables.fluids)
+        .and_then(|here| here.fluid)
+        .map(|fluid| fluid.material);
     // A packed fluid Voxel is a source; flowing fluid is packed air.
     let stops = |v: Voxel| {
-        tables.materials.solid(v) || (fluid_tool && tables.fluids.contains(v.material()))
+        tables.materials.solid(v)
+            || (fluid_tool && tables.fluids.contains(v.material()) && inside != Some(v.material()))
     };
     let hit = raycast_until(
         store,
