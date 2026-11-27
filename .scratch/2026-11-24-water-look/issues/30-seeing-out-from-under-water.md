@@ -1,6 +1,6 @@
 # 30: Seeing out from under water
 
-Status: ready-for-agent
+Status: done
 Blocked by: 29
 
 Spec: [Water that looks natural](../spec.md), Under water. From the user's
@@ -23,8 +23,8 @@ it, and white lines run along the edges of the surface's quads.
 - [x] A capture looking up shows the sky and the shore through the surface at
       every angle, with a faint shimmering sheen where the surface is.
 - [x] No white lines along the surface's quads from below.
-- [ ] GPU time under water against before, in Comments.
-- [ ] Captures shown to the user.
+- [x] GPU time under water against before, in Comments.
+- [x] Captures shown to the user.
 
 ## Comments
 
@@ -38,3 +38,8 @@ it, and white lines run along the edges of the surface's quads.
   (`/tmp/tesserae-water-look-captures/30-after/sheet.png`). The white lines
   along its edges are the same as 29's line, on `main` too.
 - 2026-11-27: the white lines were 29's aim outline, now gone.
+- 2026-11-27, the cost. The build before 29 against this one, profiling,
+  `--instruments gpu`, runs A, B, B, A, load 7 to 10. GPU p50: under water
+  3.17 to 3.32 ms (+0.15, the shimmer pass and the clear surface), the lake
+  3.99 to 4.01 (+0.03). Frame p50: under water 4.47 to 4.72, the lake 4.96 to
+  5.14.

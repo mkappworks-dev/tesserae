@@ -1,6 +1,6 @@
 # 29: Seeing under water
 
-Status: ready-for-agent
+Status: done
 Blocked by: 28
 
 Spec: [Water that looks natural](../spec.md), Under water. From the user's
@@ -29,7 +29,7 @@ near; a thin white line crosses the view looking down.
 - [ ] ~~A shallow floor lit brighter than a deep one, by the water above it.~~ (dropped by the user)
 - [ ] ~~Caustics move on the floor near the surface and fade with depth.~~ (dropped by the user)
 - [x] No white line across the view under water.
-- [ ] Captures at the four angles, before and after, shown to the user.
+- [x] Captures at the four angles, before and after, shown to the user.
 
 ## Comments
 
