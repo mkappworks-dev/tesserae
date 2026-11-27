@@ -1,6 +1,6 @@
 # 12: A darker night sky
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Day and night cycle](../spec.md).
 
@@ -20,10 +20,18 @@ readable without torches.
 
 ## Acceptance
 
-- [ ] Captures at full-moon and new-moon midnight and 03:00, far and near Eyes,
+- [x] Captures at full-moon and new-moon midnight and 03:00, far and near Eyes,
       approved by the user.
-- [ ] The reach's edge stays hidden at night.
+- [x] The reach's edge stays hidden at night.
 
 ## Comments
 
 Recommended on 2026-11-26 and agreed by the user.
+
+2026-11-27: the night key's sky tint is (0.002, 0.004, 0.024) at 0.97 and its
+fog tint (0.004, 0.007, 0.026) at 0.96, a navy. The ground's light is
+unchanged; `MOON_WASH` and the moon glow were left as they are, and no shader
+changed, so frame time is as measured in ticket 09. Captured at full-moon and
+new-moon midnight and full-moon 03:00 (far) and both midnights (near); the
+fogged terrain meets the horizon with no line. The user approved the look on
+2026-11-27.
