@@ -1,6 +1,6 @@
 # 13: Seams on lakes at chunk edges
 
-Status: ready-for-agent
+Status: done
 
 Spec: [Day and night cycle](../spec.md).
 
@@ -29,7 +29,7 @@ it.
 ## Acceptance
 
 - [x] The cause found and written here.
-- [ ] No seams on the lake at the spot above after the fix, captured.
+- [x] No seams on the lake at the spot above after the fix, captured.
 - [x] A test that fails before the fix, if the cause is in meshing or LOD
       selection.
 
@@ -55,3 +55,6 @@ planes (x -3584 and -3552, z -1600 and -1568). They are not level-1 water
 sides or bed seam walls (a Terra probe of those Chunks finds none there), and
 a 90 s settle shows the same; not yet explained. Mesh time per coarse job
 moved by +5 to 15% in one capture each way, within run-to-run noise.
+
+2026-11-27: the user approved the fix on the captures, the faint bands
+included; they stay unexplained.
