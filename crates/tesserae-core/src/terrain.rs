@@ -1098,8 +1098,8 @@ mod tests {
 
     /// Each region solves its rivers over a window of its own, so a river's width comes from two
     /// catchments either side of a border. The coarse solve's rivers fed in at a window's edge
-    /// bring 5.3% of border stream nodes more than a fifth apart down to 3.5%; the rest are
-    /// valleys its 128 m lattice cannot see.
+    /// bring border stream nodes more than a fifth apart from 5.3% to 3.5% on these worlds; the
+    /// rest are valleys its 128 m lattice cannot see.
     #[test]
     fn a_river_keeps_its_width_across_a_region_border() {
         let p = crate::testgen::world_params();
@@ -1124,6 +1124,35 @@ mod tests {
         assert!(
             apart * 100 <= nodes * 4,
             "{apart} of {nodes} border stream nodes are a fifth apart in width"
+        );
+    }
+
+    /// D8 draws streams side by side down an even slope: 9.2% of stream nodes on these worlds
+    /// before one joined the other, 1.4% after.
+    #[test]
+    fn few_streams_run_side_by_side() {
+        let p = crate::testgen::world_params();
+        let (mut streams, mut beside) = (0, 0);
+        for seed in 0..8u32 {
+            let t = Terrain::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for key in [
+                [0, 0],
+                [-1, 0],
+                [0, -1],
+                [-1, -1],
+                [1, 1],
+                [2, -2],
+                [-3, 2],
+                [4, 1],
+            ] {
+                let (s, b) = t.drainage.parallel_streams(key);
+                (streams, beside) = (streams + s, beside + b);
+            }
+        }
+        assert!(streams > 5000, "{streams} stream nodes");
+        assert!(
+            beside * 100 <= streams * 2,
+            "{beside} of {streams} stream nodes run beside another"
         );
     }
 

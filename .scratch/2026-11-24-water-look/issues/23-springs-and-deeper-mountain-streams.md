@@ -1,6 +1,6 @@
 # 23: Springs and deeper mountain streams
 
-Status: ready-for-agent
+Status: done
 Blocked by: 22
 
 Spec: [Water that looks natural](../spec.md), Rivers. From the user's review:
@@ -31,3 +31,13 @@ drawing parallel streams. Mountain streams are 1.5 to 2 m deep in their pools.
   no longer start side by side down an even slope. Long parallel pairs a
   node apart remain on the 1 km map (`25-map-before-after.png`, bottom
   left); a D-infinity spread is still open for them.
+- 2026-11-27, parallel pairs. A stream beside another a node away that stands
+  no higher joins it (the larger of two), once per line per round, and the
+  catchment is counted again between up to four rounds; joining at every
+  touch drew zigzags. Only a node the flood reached first can be joined, so
+  water never runs uphill and no loop forms. On 8 worlds of the default
+  landforms, stream nodes beside another: 9.2% to 1.4%. Test
+  `few_streams_run_side_by_side`; map
+  `/tmp/tesserae-water-look-captures/23-map/before-after.png`. D-infinity was
+  not used: on an even slope it gathers every line alike, which is what drew
+  the pairs.

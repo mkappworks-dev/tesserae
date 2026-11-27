@@ -121,6 +121,7 @@ const SPRING_WIDTH_M: f32 = 5.0;
 /// How far along a window's edge either side of a river coming in is kept from being an outlet:
 /// a coarse node's spacing, as far off as the coarse river may cross.
 const ENTRY_NODES: i32 = 4;
+const CAPTURE_ROUNDS: usize = 4;
 const INLAND: u8 = u8::MAX;
 /// Steps from the sea over which a river's channel widens into its mouth.
 const MOUTH_NODES: u8 = 2;
@@ -458,6 +459,40 @@ impl Drainage {
         (compared, apart, worst)
     }
 
+    /// A region's stream nodes, and how many run beside another stream a node away that neither
+    /// flows into it nor meets it at the next node: two streams side by side down one slope.
+    #[cfg(test)]
+    pub(crate) fn parallel_streams(&self, key: [i32; 2]) -> (u32, u32) {
+        let region = self.solve(key);
+        let at = |i: i32, j: i32| region.node(i, j, key);
+        let down = |i: i32, j: i32, n: Node| {
+            let (di, dj) = STEPS[n.down as usize];
+            (i + di, j + dj)
+        };
+        let (mut streams, mut beside) = (0, 0);
+        let base = key.map(|k| k * REGION_NODES);
+        for j in base[1]..base[1] + REGION_NODES {
+            for i in base[0]..base[0] + REGION_NODES {
+                let n = at(i, j);
+                if !n.is_stream() || n.is_lake() || n.down == NO_PARENT {
+                    continue;
+                }
+                streams += 1;
+                let nd = down(i, j, n);
+                beside += STEPS.iter().any(|&(di, dj)| {
+                    let (qi, qj) = (i + di, j + dj);
+                    let q = at(qi, qj);
+                    if !q.is_stream() || q.is_lake() || q.down == NO_PARENT || (qi, qj) == nd {
+                        return false;
+                    }
+                    let qd = down(qi, qj, q);
+                    qd != (i, j) && qd != nd && (qd.0 - nd.0).abs().max((qd.1 - nd.1).abs()) == 1
+                }) as u32;
+            }
+        }
+        (streams, beside)
+    }
+
     fn solve(&self, key: [i32; 2]) -> Region {
         let origin = [
             key[0] * REGION_NODES - HALO_NODES,
@@ -543,6 +578,11 @@ impl Drainage {
             }
         }
         let lake = lakes(&height, &level);
+        for _ in 0..CAPTURE_ROUNDS {
+            if !capture(&order, &mut parent, &level, &lake, &inflow) {
+                break;
+            }
+        }
         // In flood order a node's parent comes first, so one pass counts every node's steps.
         let mut to_sea = vec![INLAND; size];
         for &at in &order {
@@ -566,37 +606,7 @@ impl Drainage {
                 spilled[at] = !lake[p] || spilled[p];
             }
         }
-        let mut catchment: Vec<u32> = inflow.iter().map(|&n| 1 + n).collect();
-        for &at in order.iter().rev() {
-            if parent[at] != NO_PARENT {
-                let (di, dj) = STEPS[parent[at] as usize];
-                let p = idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj);
-                catchment[p] += catchment[at];
-            }
-        }
-        // A stream starts only where water gathers: in a hollow two or more nodes drain into, or
-        // once a whole slope's worth has run down one line. On an even slope every line of nodes
-        // gathers alike, and starting them all at one catchment drew brooks side by side.
-        let up_of = |at: usize| {
-            let (di, dj) = STEPS[parent[at] as usize];
-            idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj)
-        };
-        let mut inflows = vec![0u8; size];
-        for at in 0..size {
-            if parent[at] != NO_PARENT {
-                inflows[up_of(at)] = inflows[up_of(at)].saturating_add(1);
-            }
-        }
-        let mut stream = vec![false; size];
-        let mut fed = vec![false; size];
-        for &at in order.iter().rev() {
-            stream[at] = fed[at]
-                || (catchment[at] >= STREAM_NODES
-                    && (inflows[at] >= 2 || catchment[at] >= SLOPE_STREAM_NODES));
-            if stream[at] && parent[at] != NO_PARENT {
-                fed[up_of(at)] = true;
-            }
-        }
+        let (catchment, stream, fed) = gather(&order, &parent, &inflow);
         let inside = |i: i32, j: i32| (0..WINDOW).contains(&i) && (0..WINDOW).contains(&j);
         let mut delta = vec![0u8; size];
         for at in 0..size {
@@ -1092,6 +1102,101 @@ fn lakes(height: &[f32], level: &[f32]) -> Vec<bool> {
 }
 
 /// `STEPS` is ordered so that a step and its reverse sum to 7.
+/// Where a stream runs beside another a node away that stands no higher, it joins it, the larger
+/// of two: an even slope gathers every line of nodes alike, and D8 drew them side by side down it.
+/// A node only joins one the flood reached first, so every parent still comes first in `order`.
+fn capture(
+    order: &[usize],
+    parent: &mut [u8],
+    level: &[f32],
+    lake: &[bool],
+    inflow: &[u32],
+) -> bool {
+    let (catchment, stream, _) = gather(order, parent, inflow);
+    let mut rank = vec![0u32; parent.len()];
+    for (k, &at) in order.iter().enumerate() {
+        rank[at] = k as u32;
+    }
+    let step = |at: usize, k: usize| {
+        let (di, dj) = STEPS[k];
+        let (i, j) = (at as i32 % WINDOW + di, at as i32 / WINDOW + dj);
+        ((0..WINDOW).contains(&i) && (0..WINDOW).contains(&j)).then(|| (j * WINDOW + i) as usize)
+    };
+    let flowing: Vec<bool> = (0..parent.len())
+        .map(|at| stream[at] && !lake[at] && parent[at] != NO_PARENT)
+        .collect();
+    let mut moved = vec![false; parent.len()];
+    let mut joined = false;
+    for &at in order.iter().rev() {
+        if !flowing[at] || moved[at] {
+            continue;
+        }
+        let down = step(at, parent[at] as usize);
+        let mut best: Option<(u32, usize)> = None;
+        for k in 0..STEPS.len() {
+            let Some(q) = step(at, k) else { continue };
+            if Some(q) == down || !flowing[q] || rank[q] > rank[at] || level[q] > level[at] {
+                continue;
+            }
+            let q_down = step(q, parent[q] as usize);
+            if q_down == Some(at) || q_down == down {
+                continue;
+            }
+            if best.is_none_or(|(c, _)| catchment[q] > c) {
+                best = Some((catchment[q], k));
+            }
+        }
+        if let Some((_, k)) = best {
+            // The line below no longer carries this water: it joins nothing else this round, as
+            // what it still gathers is only known once the catchment is counted again.
+            let mut below = down;
+            while let Some(b) = below.filter(|&b| !moved[b] && parent[b] != NO_PARENT) {
+                moved[b] = true;
+                below = step(b, parent[b] as usize);
+            }
+            parent[at] = k as u8;
+            joined = true;
+        }
+    }
+    joined
+}
+
+/// Each node's catchment in nodes, with what comes in at the window's edge, and which nodes carry
+/// a stream and which of those are fed by one above.
+fn gather(order: &[usize], parent: &[u8], inflow: &[u32]) -> (Vec<u32>, Vec<bool>, Vec<bool>) {
+    let size = parent.len();
+    let up_of = |at: usize| {
+        let (di, dj) = STEPS[parent[at] as usize];
+        ((at as i32 / WINDOW + dj) * WINDOW + at as i32 % WINDOW + di) as usize
+    };
+    let mut catchment: Vec<u32> = inflow.iter().map(|&n| 1 + n).collect();
+    for &at in order.iter().rev() {
+        if parent[at] != NO_PARENT {
+            catchment[up_of(at)] += catchment[at];
+        }
+    }
+    // A stream starts only where water gathers: in a hollow two or more nodes drain into, or
+    // once a whole slope's worth has run down one line. On an even slope every line of nodes
+    // gathers alike, and starting them all at one catchment drew brooks side by side.
+    let mut inflows = vec![0u8; size];
+    for at in 0..size {
+        if parent[at] != NO_PARENT {
+            inflows[up_of(at)] = inflows[up_of(at)].saturating_add(1);
+        }
+    }
+    let mut stream = vec![false; size];
+    let mut fed = vec![false; size];
+    for &at in order.iter().rev() {
+        stream[at] = fed[at]
+            || (catchment[at] >= STREAM_NODES
+                && (inflows[at] >= 2 || catchment[at] >= SLOPE_STREAM_NODES));
+        if stream[at] && parent[at] != NO_PARENT {
+            fed[up_of(at)] = true;
+        }
+    }
+    (catchment, stream, fed)
+}
+
 fn opposite(step: usize) -> u8 {
     (STEPS.len() - 1 - step) as u8
 }
