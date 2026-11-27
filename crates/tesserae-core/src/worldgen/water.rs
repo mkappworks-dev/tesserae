@@ -197,6 +197,48 @@ mod tests {
         assert!(compared > 100, "{compared} columns compared");
     }
 
+    /// How many columns the containment raises over a box's ground, how many by more than
+    /// 3 m, and the most it raises one.
+    fn walls(g: &Worldgen, size: f32) -> (u32, u32, f32) {
+        let (mut raised, mut tall, mut most) = (0, 0, 0.0f32);
+        for [gx, gz] in big_columns(size) {
+            let (x_m, z_m) = (g.global_m(gx), g.global_m(gz));
+            let up = g.surface_height_m(x_m, z_m) - g.raw_column(x_m, z_m).0;
+            if up > 0.0 {
+                raised += 1;
+                tall += (up > 3.0) as u32;
+                most = most.max(up);
+            }
+        }
+        (raised, tall, most)
+    }
+
+    /// Every column of a wider square round each box.
+    fn big_columns(voxel_size: f32) -> impl Iterator<Item = [i32; 2]> {
+        let side = (256.0 / voxel_size) as i32;
+        BOXES_M.into_iter().flat_map(move |[x_m, z_m]| {
+            let (gx, gz) = (
+                ((x_m - 112.0) / voxel_size) as i32,
+                ((z_m - 112.0) / voxel_size) as i32,
+            );
+            (0..side).flat_map(move |z| (0..side).map(move |x| [gx + x, gz + z]))
+        })
+    }
+
+    /// Generated water stands only as deep over the ground as its own channel, so the rock the
+    /// containment raises to hold it is low: of the columns it raised round these boxes, 351 of
+    /// 645 rose more than 3 m before, 69 of 391 after; what is left is lakes whose rim the 32 m
+    /// lattice saw whole.
+    #[test]
+    fn the_containment_raises_little_rock_round_generated_water() {
+        let (raised, tall, _) = walls(&wet(1.0), 1.0);
+        assert!(raised > 100, "{raised} columns raised");
+        assert!(
+            tall * 4 <= raised,
+            "{tall} of {raised} raised more than 3 m"
+        );
+    }
+
     #[test]
     fn a_fall_runs_over_every_lip_with_a_lower_pool_past_it_and_nowhere_else() {
         for size in [1.0, 0.5] {

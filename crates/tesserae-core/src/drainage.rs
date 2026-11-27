@@ -182,6 +182,9 @@ struct Node {
     /// How far its channel's point stands off its lattice point, in 127ths of [`JITTER_M`]: hashed
     /// once in the solve, as every column of a channel asks it.
     off: [i8; 2],
+    /// Where along its segment down to its parent a Fall's face starts, in 255ths, where the
+    /// segment falls steeply enough for one: found in the solve from the ground under it.
+    fall_at: u8,
 }
 
 #[cfg(test)]
@@ -553,13 +556,13 @@ impl Drainage {
                 self.node_at(s.p, s.pa.0, s.pa.1),
             );
             let len = length(a, b);
-            let at = |t: f32| water_surface_m(s.n, s.p, s.at, t, len);
+            let at = |t: f32| water_surface_m(s.n, s.p, t, len);
             for k in 0..16 {
                 rise = rise.max(at((k + 1) as f32 / 16.0) - at(k as f32 / 16.0));
             }
             if let Some((q, qa)) = s.below {
                 let c = self.node_at(q, qa.0, qa.1);
-                let next = water_surface_m(s.p, q, s.pa, 0.0, length(b, c));
+                let next = water_surface_m(s.p, q, 0.0, length(b, c));
                 rise = rise.max(next - at(1.0));
             }
             checked += 1;
@@ -621,6 +624,52 @@ impl Drainage {
             straight += (sin.abs() < 0.035 && u[0] * v[0] + u[1] * v[1] > 0.0) as u32;
         }
         (bends, straight)
+    }
+
+    /// Puts each falling segment's face where the ground under it drops through the middle of
+    /// the fall, so the upper pool ends at the real edge: a face at a hashed point left the pool
+    /// running on over lower ground, walled in by the containment.
+    fn place_falls(&self, nodes: &mut [Node], key: [i32; 2]) {
+        let base = key.map(|k| k * REGION_NODES - MARGIN);
+        let at = |li: i32, lj: i32| (lj * STORED + li) as usize;
+        for lj in 0..STORED {
+            for li in 0..STORED {
+                let n = nodes[at(li, lj)];
+                if !n.is_stream() || n.down == NO_PARENT {
+                    continue;
+                }
+                let (di, dj) = STEPS[n.down as usize];
+                let (pi, pj) = (li + di, lj + dj);
+                if !(0..STORED).contains(&pi) || !(0..STORED).contains(&pj) {
+                    continue;
+                }
+                let p = nodes[at(pi, pj)];
+                let a = self.node_at(n, base[0] + li, base[1] + lj);
+                let b = self.node_at(p, base[0] + pi, base[1] + pj);
+                let length_m = libm::hypotf(b[0] - a[0], b[1] - a[1]);
+                let drop = n.level_m - p.level_m;
+                if drop < FALL_DROP_M || drop / length_m < FALL_SLOPE {
+                    continue;
+                }
+                let middle = n.level_m - drop / 2.0;
+                let ts: [f32; FALL_SAMPLES] =
+                    std::array::from_fn(|k| (k as f32 + 0.5) / FALL_SAMPLES as f32);
+                let mut ground = [0.0f32; FALL_SAMPLES];
+                for (out, t) in ground.chunks_mut(4).zip(ts.chunks(4)) {
+                    let x = std::array::from_fn(|k| a[0] + (b[0] - a[0]) * t[k]);
+                    let z = std::array::from_fn(|k| a[1] + (b[1] - a[1]) * t[k]);
+                    out.copy_from_slice(&(self.base)(x, z));
+                }
+                let face = drop / FALL_FACE_STEEPNESS / length_m;
+                let crossing = ts
+                    .iter()
+                    .zip(ground)
+                    .find(|&(_, g)| g < middle)
+                    .map_or(1.0, |(&t, _)| t);
+                let start = (crossing - face / 2.0).clamp(0.02, (0.98 - face).max(0.02));
+                nodes[at(li, lj)].fall_at = (start * 255.0).round() as u8;
+            }
+        }
     }
 
     fn solve(&self, key: [i32; 2]) -> Region {
@@ -786,9 +835,11 @@ impl Drainage {
                     to_sea: to_sea[at],
                     delta: delta[at],
                     off: [off(0), off(1)],
+                    fall_at: 0,
                 });
             }
         }
+        self.place_falls(&mut nodes, key);
         Region { nodes }
     }
 
@@ -802,12 +853,17 @@ impl Drainage {
         let region = self.region(key);
         let mut level_m: Option<f32> = None;
 
+        // The water that may stand here, each with how far above the lowest bed a channel leaves
+        // here it may stand: a column takes no water whose own bed another channel has cut far
+        // below, or it stood tens of metres deep over that channel, walled in by the containment.
+        let mut held = Held::default();
         for (di, dj) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
             let n = region.node(i0 + di, j0 + dj, key);
             if n.is_lake() && n.level_m > self.sea_m {
-                level_m = Some(level_m.map_or(n.level_m, |l: f32| l.max(n.level_m)));
+                held.push(n.level_m, LAKE_HOLD_M, false);
             }
         }
+        let mut lowest_bed_m = f32::MAX;
 
         let (mut cut_m, mut river_cut_m) = (0.0f32, 0.0f32);
         for dj in -STENCIL + 1..=STENCIL {
@@ -827,7 +883,7 @@ impl Drainage {
                         let p = region.node(ni + si, nj + sj, key);
                         let c =
                             self.side_channel((ni, nj), n, (si, sj), p, w, (x_m, z_m), ground_m);
-                        take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut level_m);
+                        take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut held);
                     }
                     continue;
                 }
@@ -870,8 +926,8 @@ impl Drainage {
                     width = width.max(spring_width_m(t, ab));
                 }
                 let length_m = libm::hypotf(ab[0], ab[1]);
-                let surface = water_surface_m(n, p, (ni, nj), t, length_m);
-                let (dug, wet) = fall_bed(n, p, (ni, nj), t, length_m);
+                let surface = water_surface_m(n, p, t, length_m);
+                let (dug, wet) = fall_bed(n, p, t, length_m);
                 let edge = (d - width / 2.0).max(0.0);
                 let mut reach_m = valley_reach_m(width);
                 if near_sea {
@@ -890,7 +946,7 @@ impl Drainage {
                             (x_m, z_m),
                             ground_m,
                         );
-                        take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut level_m);
+                        take_channel(c, true, &mut cut_m, &mut river_cut_m, &mut held);
                     }
                 }
                 if edge >= reach_m {
@@ -900,6 +956,10 @@ impl Drainage {
                 let dig = full_dig * dug;
                 let target = surface - dig + edge * BANK_SLOPE;
                 let fade = 1.0 - smoothstep(0.66 * reach_m, reach_m, edge);
+                if edge < 0.66 * reach_m {
+                    lowest_bed_m = lowest_bed_m.min(target);
+                }
+                held.bed(target, fade);
                 let cut = (ground_m - target).max(0.0) * fade;
                 cut_m = cut_m.max(cut);
                 if n.catchment >= RIVER_NODES {
@@ -910,7 +970,7 @@ impl Drainage {
                 let band = if n.catchment >= RIVER_NODES { 2.0 } else { 1.0 };
                 // The full depth's band, so the water keeps its width over a Fall's sill.
                 if wet && edge * BANK_SLOPE < full_dig * band {
-                    level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
+                    held.push(surface, full_dig * band + HOLD_SLACK_M, true);
                 }
             }
         }
@@ -918,7 +978,21 @@ impl Drainage {
             && let Some((cut, surface)) = self.pond(x_m, z_m, ground_m)
         {
             cut_m = cut_m.max(cut);
-            level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
+            held.push(surface, POND_DEPTH_M + HOLD_SLACK_M, true);
+        }
+        // A river or a pond also stands no deeper than its own over the ground itself, asked
+        // here and not of the caller, so the level is the same whatever ground is asked about:
+        // between two lattice nodes the ground may fall away under a river the lattice saw level.
+        let ground_here_m = if held.iter().any(|&(_, _, river)| river) {
+            held.dug((self.base)([x_m; 4], [z_m; 4])[0])
+        } else {
+            f32::MAX
+        };
+        for &(surface, depth_m, river) in held.iter() {
+            let bed_m = if river { ground_here_m } else { lowest_bed_m };
+            if surface - bed_m <= depth_m {
+                level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
+            }
         }
         Wet {
             level_m,
@@ -1035,10 +1109,16 @@ impl Drainage {
         let (u, v) = (x_m / self.node_m, z_m / self.node_m);
         let (i0, j0) = (u.floor() as i32, v.floor() as i32);
         let key = [i0.div_euclid(REGION_NODES), j0.div_euclid(REGION_NODES)];
+        // Only the water `wet` lets stand here runs: a channel it turned away for standing over a
+        // lower bed has no water here to move.
+        let Some(level) = self.wet(x_m, z_m, f32::MIN).level_m else {
+            return [0.0; 2];
+        };
         let region = self.region(key);
         let mut best: Option<(f32, [f32; 2])> = None;
         let mut take = |found: Option<(f32, [f32; 2])>| {
             if let Some((surface, _)) = found
+                && surface <= level + 1e-3
                 && best.is_none_or(|(l, _)| surface > l)
             {
                 best = found;
@@ -1182,12 +1262,12 @@ impl Drainage {
             width = width.max(spring_width_m(t, ab));
         }
         let edge = ((dx * dx + dz * dz).sqrt() - width / 2.0).max(0.0);
-        let (_, wet) = fall_bed(n, p, at, t, length_m);
+        let (_, wet) = fall_bed(n, p, t, length_m);
         let dig = dig_m(width);
         if !wet || edge >= reach_m || edge * BANK_SLOPE >= dig * channel.band {
             return None;
         }
-        let surface = water_surface_m(n, p, at, t, length_m);
+        let surface = water_surface_m(n, p, t, length_m);
         let slope = (n.level_m - p.level_m).max(0.0) / length_m;
         let catchment = n.catchment as f32 * (1.0 - t) + p.catchment as f32 * t;
         let area_km2 = catchment * self.node_m * self.node_m * 1e-6;
@@ -1375,16 +1455,74 @@ const FALL_SLOPE: f32 = 0.1;
 /// How steep a Fall's face is, rise over run: steep enough that its Voxels stand as a wall of
 /// several, while the heightfield stays a slope, as every cliff it draws is.
 const FALL_FACE_STEEPNESS: f32 = 3.5;
+/// How much deeper than its own channel's band a stream's water may stand over a lower bed.
+const HOLD_SLACK_M: f32 = 1.0;
+/// How deep a delta's side channel may stand over the ground: a distributary's depth and slack.
+const SIDE_HOLD_M: f32 = 4.0;
+/// How far above the lowest channel bed in reach a lake's water may stand: an inflow's bed lies a
+/// stream's depth under the lake, an outlet's canyon far more.
+const LAKE_HOLD_M: f32 = 4.0;
+
+/// The water a column may take, as surfaces with how deep each may stand over the lowest bed.
+struct Held {
+    /// Surface, how deep it may stand, and whether it is a river's, which the ground also bounds.
+    items: [(f32, f32, bool); 32],
+    len: usize,
+    /// Each valley in reach as its bed here and how much of its cut reaches here.
+    beds: [(f32, f32); 64],
+    beds_len: usize,
+}
+
+impl Default for Held {
+    fn default() -> Self {
+        Held {
+            items: [(0.0, 0.0, false); 32],
+            len: 0,
+            beds: [(0.0, 0.0); 64],
+            beds_len: 0,
+        }
+    }
+}
+
+impl Held {
+    fn push(&mut self, surface_m: f32, depth_m: f32, river: bool) {
+        if self.len < self.items.len() {
+            self.items[self.len] = (surface_m, depth_m, river);
+            self.len += 1;
+        }
+    }
+
+    fn bed(&mut self, target_m: f32, fade: f32) {
+        if self.beds_len < self.beds.len() {
+            self.beds[self.beds_len] = (target_m, fade);
+            self.beds_len += 1;
+        }
+    }
+
+    /// Ground standing at `base_m` once every valley in reach has cut it.
+    fn dug(&self, base_m: f32) -> f32 {
+        let cut = self.beds[..self.beds_len]
+            .iter()
+            .map(|&(target, fade)| (base_m - target).max(0.0) * fade)
+            .fold(0.0f32, f32::max);
+        base_m - cut
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &(f32, f32, bool)> {
+        self.items[..self.len].iter()
+    }
+}
+
 /// Over how far a stream's bed rises to a Fall's lip and sinks again past its foot.
 const SILL_M: f32 = 3.0;
-/// Where along a falling segment its Fall stands, hashed per node within this span.
-const FALL_SPAN: (f32, f32) = (0.3, 0.7);
+/// How many points along a falling segment the solve samples the ground at, a multiple of four.
+const FALL_SAMPLES: usize = 16;
 
 /// The water's surface a fraction `t` down the segment from `n` at node `at` to `p`: straight
 /// between their levels, or held at the upper level and dropped down one steep face where the
 /// segment falls steeply enough to make a waterfall.
-fn water_surface_m(n: Node, p: Node, at: (i32, i32), t: f32, length_m: f32) -> f32 {
-    let level = match fall_face(n, p, at, length_m) {
+fn water_surface_m(n: Node, p: Node, t: f32, length_m: f32) -> f32 {
+    let level = match fall_face(n, p, length_m) {
         Some((at_t, face)) => {
             let s = ((t - at_t) / face).clamp(0.0, 1.0);
             n.level_m + (p.level_m - n.level_m) * s
@@ -1396,17 +1534,15 @@ fn water_surface_m(n: Node, p: Node, at: (i32, i32), t: f32, length_m: f32) -> f
 
 /// Where a segment that falls steeply enough has its Fall: how far along it the face starts and
 /// how much of it the face spans, as shares of the segment.
-fn fall_face(n: Node, p: Node, at: (i32, i32), length_m: f32) -> Option<(f32, f32)> {
+fn fall_face(n: Node, p: Node, length_m: f32) -> Option<(f32, f32)> {
     let drop = n.level_m - p.level_m;
     if drop < FALL_DROP_M || drop / length_m < FALL_SLOPE {
         return None;
     }
-    let h = (at.0 as u32)
-        .wrapping_mul(0x9e37_79b9)
-        .wrapping_add((at.1 as u32).wrapping_mul(0x85eb_ca6b));
-    let h = (h ^ (h >> 15)).wrapping_mul(0x2c1b_3c6d);
-    let at_t = FALL_SPAN.0 + (FALL_SPAN.1 - FALL_SPAN.0) * ((h >> 8) as f32 / (1u32 << 24) as f32);
-    Some((at_t, drop / FALL_FACE_STEEPNESS / length_m))
+    Some((
+        f32::from(n.fall_at) / 255.0,
+        drop / FALL_FACE_STEEPNESS / length_m,
+    ))
 }
 
 /// How much of a stream's bed is dug under its surface `t` along the segment, and whether the
@@ -1414,8 +1550,8 @@ fn fall_face(n: Node, p: Node, at: (i32, i32), length_m: f32) -> Option<(f32, f3
 /// down it: the bed rises to a sill flush with the pool over [`SILL_M`] before the lip, stands
 /// dry down the face, and sinks to the full depth again over as much past its foot, so the
 /// ground stays a slope.
-fn fall_bed(n: Node, p: Node, at: (i32, i32), t: f32, length_m: f32) -> (f32, bool) {
-    let Some((at_t, face)) = fall_face(n, p, at, length_m) else {
+fn fall_bed(n: Node, p: Node, t: f32, length_m: f32) -> (f32, bool) {
+    let Some((at_t, face)) = fall_face(n, p, length_m) else {
         return (1.0, true);
     };
     let along_m = t * length_m;
@@ -1505,14 +1641,14 @@ fn take_channel(
     river: bool,
     cut_m: &mut f32,
     river_cut_m: &mut f32,
-    level_m: &mut Option<f32>,
+    held: &mut Held,
 ) {
     *cut_m = cut_m.max(cut);
     if river {
         *river_cut_m = river_cut_m.max(cut);
     }
     if surface > f32::MIN {
-        *level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
+        held.push(surface, SIDE_HOLD_M, true);
     }
 }
 
