@@ -17,9 +17,9 @@ import bevy_pbr::render::{
     mesh_view_bindings as view_bindings,
 };
 @if(DISTANCE_FOG)
-import bevy_pbr::render::fog::{atmospheric_fog, exponential_squared_fog};
+import bevy_pbr::render::fog::{exponential_squared_fog, linear_fog};
 @if(DISTANCE_FOG)
-import bevy_pbr::render::mesh_view_types::FOG_MODE_ATMOSPHERIC;
+import bevy_pbr::render::mesh_view_types::FOG_MODE_LINEAR;
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
 import bevy_pbr::render::mesh_view_bindings::screen_space_ambient_occlusion_texture;
 import bevy_pbr::render::mesh_view_bindings::view;
@@ -207,13 +207,13 @@ fn fog_glow(direction: vec3<f32>) -> vec3<f32> {
     return glow * view_bindings::view.exposure;
 }
 
-// fog.rs always sets ExponentialSquared in air; under water, `client::underwater` sets
-// Atmospheric, which fades each channel at its own rate and takes no haze.
+// fog.rs always sets ExponentialSquared in air; under water, `client::underwater` sets Linear,
+// clear water until near the reach's edge, which takes no haze.
 fn apply_fog(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
     let toward = world_position - view_bindings::view.world_position.xyz;
     let distance = length(toward);
-    if view_bindings::fog.mode == FOG_MODE_ATMOSPHERIC {
-        return atmospheric_fog(view_bindings::fog, color, distance, vec3<f32>(0.0));
+    if view_bindings::fog.mode == FOG_MODE_LINEAR {
+        return linear_fog(view_bindings::fog, color, distance, vec3<f32>(0.0));
     }
     let hazed = apply_haze(color, world_position);
     return exponential_squared_fog(view_bindings::fog, hazed, distance, fog_glow(toward / distance));
