@@ -17,7 +17,9 @@ import bevy_pbr::render::{
     mesh_view_bindings as view_bindings,
 };
 @if(DISTANCE_FOG)
-import bevy_pbr::render::fog::exponential_squared_fog;
+import bevy_pbr::render::fog::{atmospheric_fog, exponential_squared_fog};
+@if(DISTANCE_FOG)
+import bevy_pbr::render::mesh_view_types::FOG_MODE_ATMOSPHERIC;
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
 import bevy_pbr::render::mesh_view_bindings::{screen_space_ambient_occlusion_texture, view};
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
@@ -196,11 +198,16 @@ fn fog_glow(direction: vec3<f32>) -> vec3<f32> {
     return glow * view_bindings::view.exposure;
 }
 
-// fog.rs always sets ExponentialSquared.
+// fog.rs always sets ExponentialSquared in air; under water, `client::underwater` sets
+// Atmospheric, which fades each channel at its own rate and takes no haze.
 fn apply_fog(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
     let toward = world_position - view_bindings::view.world_position.xyz;
     let distance = length(toward);
-    return exponential_squared_fog(view_bindings::fog, color, distance, fog_glow(toward / distance));
+    if view_bindings::fog.mode == FOG_MODE_ATMOSPHERIC {
+        return atmospheric_fog(view_bindings::fog, color, distance, vec3<f32>(0.0));
+    }
+    let hazed = apply_haze(color, world_position);
+    return exponential_squared_fog(view_bindings::fog, hazed, distance, fog_glow(toward / distance));
 }
 
 @vertex
@@ -350,7 +357,7 @@ fn fragment(
     }
     @if(DISTANCE_FOG)
     if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u {
-        out.color = apply_fog(apply_haze(out.color, in.world_position.xyz), in.world_position.xyz);
+        out.color = apply_fog(out.color, in.world_position.xyz);
     }
     // Fogged above; Bevy's own fog would sample the shadow map again.
     pbr_input.material.flags &= ~STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;

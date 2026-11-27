@@ -28,7 +28,7 @@ impl WaterLook {
     /// before ripples.
     pub const PURE: Self = Self {
         absorption_per_m: [0.34, 0.0565, 0.0092],
-        scatter: [0.0, 0.035, 0.07],
+        scatter: [0.0, 0.03, 0.16],
         roughness: 0.08,
         foam: [0.85, 0.88, 0.9],
     };

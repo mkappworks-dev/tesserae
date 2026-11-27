@@ -6,7 +6,7 @@
 //! in different media.
 
 use bevy::ecs::system::SystemParam;
-use bevy::pbr::DistanceFog;
+use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
@@ -20,7 +20,7 @@ use super::pose::PublishedBody;
 use super::preview::HandCamera;
 use super::sky::SkyNow;
 use super::tile_preview::AtlasCamera;
-use crate::content::MaterialPalette;
+use crate::content::{MaterialPalette, MaterialWaterLooks, WaterLook};
 use crate::render::fog::{self, FogSettings};
 use crate::server::quality::DeclaredStreaming;
 use crate::server::streaming::StreamingSettings;
@@ -54,6 +54,35 @@ fn range_m(dimming: u8) -> f32 {
     (MAX_RANGE_M / (1.0 + f32::from(dimming)).powi(2)).max(MIN_RANGE_M)
 }
 
+/// What scattering adds to a water look's absorption in the view's extinction. Pure water's blue
+/// alone would carry past the streamed reach and show its edge; with this, blue is down to a
+/// fiftieth by 200 m, and a clear lake's floor still shows some 50 m off.
+const WATER_SCATTERING_PER_M: f32 = 0.01;
+
+/// Fog that takes each channel by its own extinction, red first and blue last, and puts back
+/// the in-scattered colour, `hue`, in its place.
+fn water_fog(look: &WaterLook, hue: [f32; 3]) -> DistanceFog {
+    let extinction = Vec3::from(look.absorption_per_m) + WATER_SCATTERING_PER_M;
+    DistanceFog {
+        color: {
+            let [r, g, b] = fog::fog_toward(hue);
+            Color::srgb(r, g, b)
+        },
+        falloff: FogFalloff::Atmospheric {
+            extinction,
+            inscattering: extinction,
+        },
+        ..default()
+    }
+}
+
+/// The colour a water look's in-scattered light shows as, sRGB.
+fn scattered_hue(look: &WaterLook) -> [f32; 3] {
+    let [r, g, b] = look.scatter;
+    let seen = Color::linear_rgb(r, g, b).to_srgba();
+    [seen.red, seen.green, seen.blue]
+}
+
 /// Fog that ends in `hue` at the fluid's range. `sky` is the colour behind
 /// terrain that is not drawn, so a void underwater is not the dry sky.
 fn fluid_fog(hue: [f32; 3], dimming: u8) -> DistanceFog {
@@ -69,7 +98,7 @@ fn fluid_fog(hue: [f32; 3], dimming: u8) -> DistanceFog {
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Submersion>().add_session_systems(
         Update,
-        (track_hues, apply_submersion)
+        (track_hues, track_looks, apply_submersion)
             .chain()
             .after(super::view::place)
             .after(fog::follow_settings),
@@ -84,6 +113,7 @@ struct Submersion {
     /// The fluid the cameras are swapped to, or `None` while they show the dry fog.
     under: Option<MaterialId>,
     hues: HashMap<MaterialId, [f32; 3]>,
+    looks: HashMap<MaterialId, WaterLook>,
     /// A hue arrived since the cameras were last given fog.
     repaint: bool,
     /// The ambient light the fluid was last shaded by.
@@ -108,6 +138,13 @@ fn track_hues(mut palette: MessageReader<MaterialPalette>, mut state: ResMut<Sub
                 .hues
                 .insert(id, [r, g, b].map(|byte| f32::from(byte) / 255.0));
         }
+    }
+}
+
+fn track_looks(mut messages: MessageReader<MaterialWaterLooks>, mut state: ResMut<Submersion>) {
+    for message in messages.read() {
+        state.repaint = true;
+        state.looks = message.0.iter().copied().collect();
     }
 }
 
@@ -141,12 +178,22 @@ fn apply_submersion(
     state.ambient = Some(ambient);
     let fog = match wet {
         Some(fluid) => {
-            let hue = state.hues.get(&fluid.material).copied();
-            let hue = hue.unwrap_or(UNPAINTED_HUE);
+            let look = state.looks.get(&fluid.material);
+            let hue = match look {
+                Some(look) => scattered_hue(look),
+                None => state
+                    .hues
+                    .get(&fluid.material)
+                    .copied()
+                    .unwrap_or(UNPAINTED_HUE),
+            };
             // Water is dark at night as the ground is; a fluid that gives off light keeps its own.
             let hue = if fluid.emits { hue } else { ambient.shade(hue) };
             clear.0 = Color::srgb(hue[0], hue[1], hue[2]);
-            Some(fluid_fog(hue, fluid.dimming))
+            Some(match look {
+                Some(look) => water_fog(look, hue),
+                None => fluid_fog(hue, fluid.dimming),
+            })
         }
         None => {
             let [r, g, b] = dry.settings.sky;
@@ -228,6 +275,7 @@ mod tests {
         app.init_resource::<StreamingSettings>()
             .init_resource::<PublishedBody>()
             .add_message::<MaterialPalette>()
+            .add_message::<MaterialWaterLooks>()
             .add_plugins((fog::plugin, plugin));
         let main = app
             .world_mut()
@@ -335,6 +383,42 @@ mod tests {
             assert_eq!(density(rig.fog(camera).unwrap()), density(&dry_fog()));
         }
         assert_eq!(rig.clear(), sky);
+    }
+
+    #[test]
+    fn under_water_with_a_water_look_red_fades_first_and_blue_last() {
+        let mut rig = standard();
+        rig.app
+            .world_mut()
+            .write_message(MaterialWaterLooks(vec![(WATER, WaterLook::PURE)]));
+        rig.place(9.0, surface(WATER, 2));
+        for camera in [rig.main, rig.coarse] {
+            let FogFalloff::Atmospheric {
+                extinction,
+                inscattering,
+            } = rig.fog(camera).unwrap().falloff
+            else {
+                panic!("{:?}", rig.fog(camera).unwrap().falloff);
+            };
+            assert!(
+                extinction.x > extinction.y && extinction.y > extinction.z,
+                "{extinction}"
+            );
+            assert_eq!(
+                inscattering, extinction,
+                "what is lost is scattered back in"
+            );
+        }
+        let seen = scattered_hue(&WaterLook::PURE);
+        assert!(near(rig.clear(), Color::srgb(seen[0], seen[1], seen[2])));
+        rig.place(9.0, surface(LAVA, 15));
+        assert!(
+            matches!(
+                rig.fog(rig.main).unwrap().falloff,
+                FogFalloff::ExponentialSquared { .. }
+            ),
+            "lava keeps its single hue"
+        );
     }
 
     #[test]
