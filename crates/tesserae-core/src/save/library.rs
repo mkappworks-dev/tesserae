@@ -61,10 +61,16 @@ pub struct Sidecar {
     /// Changes Edit World asked for; the Server applies them at the next open.
     #[serde(default, skip_serializing_if = "ModeChanges::is_empty")]
     pub mode_changes: ModeChanges,
+    /// Whether the Game declares a `sky`, so Edit World can tell without reading Declarations.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sky: bool,
+    /// Mirrors the commit's, for Edit World; absent in Worlds that predate it, which run.
+    #[serde(default = "super::daylight_cycle_on")]
+    pub daylight_cycle: bool,
 }
 
-/// Game mode changes waiting for the World to open. No one changes a mode
-/// while the World runs.
+/// Game mode and Daylight cycle changes waiting for the World to open. No one
+/// changes them while the World runs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModeChanges {
     /// The World's default, for Players new to it.
@@ -73,11 +79,13 @@ pub struct ModeChanges {
     /// The Player's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own: Option<super::GameMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daylight_cycle: Option<bool>,
 }
 
 impl ModeChanges {
     pub fn is_empty(&self) -> bool {
-        self.default.is_none() && self.own.is_none()
+        self.default.is_none() && self.own.is_none() && self.daylight_cycle.is_none()
     }
 }
 
@@ -148,6 +156,9 @@ impl Sidecar {
             biomes: None,
             player_mode: None,
             mode_changes: Default::default(),
+            // Only a Game with a sky saves a Time of day.
+            sky: commit.time_of_day.is_some(),
+            daylight_cycle: commit.daylight_cycle,
         }
     }
 }
@@ -376,6 +387,8 @@ mod tests {
             biomes: None,
             player_mode: None,
             mode_changes: Default::default(),
+            sky: false,
+            daylight_cycle: true,
         }
     }
 
@@ -401,6 +414,36 @@ mod tests {
             "an empty set is not written: {text}"
         );
         assert!(read(&plain).unwrap().unwrap().mods.is_empty());
+    }
+
+    #[test]
+    fn the_daylight_cycle_and_its_requested_change_survive_a_round_trip_and_an_older_sidecar_runs()
+    {
+        let worlds = Directory::new();
+        let mut still = sidecar("Still");
+        still.sky = true;
+        still.daylight_cycle = false;
+        let path = create(&worlds.0, &still).unwrap();
+        assert_eq!(read(&path).unwrap(), Some(still.clone()));
+        let changes = ModeChanges {
+            daylight_cycle: Some(true),
+            ..Default::default()
+        };
+        assert!(!changes.is_empty());
+        request_modes(&path, changes).unwrap();
+        let read_back = read(&path).unwrap().unwrap();
+        assert_eq!(read_back.mode_changes.daylight_cycle, Some(true));
+        assert!(!read_back.daylight_cycle, "only the open applies it");
+
+        let plain = create(&worlds.0, &sidecar("Plain")).unwrap();
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(plain.join(SIDECAR)).unwrap()).unwrap();
+        assert!(json.get("sky").is_none(), "no sky is not written");
+        json.as_object_mut().unwrap().remove("daylight_cycle");
+        fs::write(plain.join(SIDECAR), serde_json::to_vec(&json).unwrap()).unwrap();
+        let older = read(&plain).unwrap().unwrap();
+        assert!(older.daylight_cycle);
+        assert!(!older.sky);
     }
 
     #[test]

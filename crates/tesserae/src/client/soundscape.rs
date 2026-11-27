@@ -1,17 +1,18 @@
 //! Plays the Soundscape the Server names: its beds looped and crossfaded, its
-//! music from the core scheduler. Neither is positional, so both play as
-//! recorded, stereo included.
+//! music from the core scheduler, both mixed by the Client's Daylight. Neither
+//! is positional, so both play as recorded, stereo included.
 
 use std::collections::HashMap;
 
 use bevy::audio::{AudioPlugin, AudioSinkPlayback, PlaybackMode, Volume};
 use bevy::prelude::*;
 use tesserae_core::audio::{
-    AMBIENT_FADE_S, DEFAULT_SILENCE_S, Music, SoundCategory, SoundRng, SoundscapeId,
+    AMBIENT_FADE_S, BedHours, DEFAULT_SILENCE_S, Music, SoundCategory, SoundRng, SoundscapeId,
 };
 
 use super::profile::Preferences;
 use super::sound::Library;
+use super::time_of_day::ClientTimeOfDay;
 use crate::content::SoundscapeLibrary;
 use crate::server::soundscape::HereSoundscape;
 use crate::session::SessionApp;
@@ -70,6 +71,7 @@ impl Default for Scene {
 #[derive(Component)]
 struct BedSink {
     volume: f32,
+    when: BedHours,
     level: f32,
     leaving: bool,
     gain: f32,
@@ -131,7 +133,9 @@ fn change(
         scene.music.change(&[], DEFAULT_SILENCE_S);
         return;
     };
-    scene.music.change(&def.music, def.silence_s);
+    scene
+        .music
+        .change_by_hour(&def.music, def.night_music.as_deref(), def.silence_s);
     for bed in &def.beds {
         let Some((source, variation)) = library.vary(bed.sound, &mut scene.rng) else {
             continue;
@@ -144,6 +148,7 @@ fn change(
             variation.pitch,
             BedSink {
                 volume: bed.volume * variation.volume,
+                when: bed.when,
                 level: 0.0,
                 leaving: false,
                 gain: 0.0,
@@ -153,9 +158,14 @@ fn change(
 }
 
 /// Starts each track the scheduler begins, and tells it of each that ended.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system takes what it reads"
+)]
 fn schedule_music(
     focus: Res<super::sound::PlaybackFocus>,
     time: Res<Time>,
+    clock: Res<ClientTimeOfDay>,
     mut scene: ResMut<Scene>,
     library: Res<Library>,
     playing: Query<(), With<TrackSink>>,
@@ -177,6 +187,7 @@ fn schedule_music(
         scene.tracks.remove(&voice);
         scene.music.ended(voice);
     }
+    scene.music.set_daylight(clock.daylight());
     scene.music.advance(time.delta_secs());
     let voices: Vec<_> = scene.music.voices().collect();
     scene.tracks.retain(|voice, &mut sink| {
@@ -230,7 +241,11 @@ fn fade_beds(time: Res<Time>, mut beds: Query<(Entity, &mut BedSink)>, mut comma
 fn follow(
     mut scene: ResMut<Scene>,
     time: Res<Time>,
-    (preferences, focus): (Res<Preferences>, Res<super::sound::PlaybackFocus>),
+    (preferences, focus, clock): (
+        Res<Preferences>,
+        Res<super::sound::PlaybackFocus>,
+        Res<ClientTimeOfDay>,
+    ),
     mut beds: Query<(&mut BedSink, Option<&mut AudioSink>), Without<TrackSink>>,
     mut tracks: Query<(&mut TrackSink, Option<&mut AudioSink>)>,
 ) {
@@ -250,10 +265,11 @@ fn follow(
     let target = 1.0 - (1.0 - std::f32::consts::FRAC_1_SQRT_2) * music_level;
     let seconds = if target < scene.music_duck { 0.8 } else { 2.0 };
     scene.music_duck += (target - scene.music_duck) * (1.0 - (-time.delta_secs() / seconds).exp());
+    let daylight = clock.daylight();
     for (mut bed, sink) in &mut beds {
         bed.gain = volumes.gain(
             SoundCategory::Ambient,
-            bed.volume * bed.level * scene.music_duck * focus.gain,
+            bed.volume * bed.when.gain(daylight) * bed.level * scene.music_duck * focus.gain,
             1.0,
         );
         if let Some(mut sink) = sink {
@@ -290,15 +306,25 @@ mod tests {
 
     use bevy::time::TimeUpdateStrategy;
     use tesserae_core::audio::{Bed, SoundDef, SoundId, SoundscapeDef, Span, Volumes};
+    use tesserae_core::sky::{SkyParams, TimeOfDay};
 
     use super::*;
-    use crate::content::{LibrarySound, SoundLibrary};
+    use crate::content::{LibrarySound, SoundLibrary, TimeOfDaySync, WorldSky};
 
     const STEREO: &[u8] = include_bytes!("../../../tesserae-mods/tests/fixtures/sounds/stereo.ogg");
     const STEP_S: f32 = 0.25;
     const WIND: SoundId = SoundId(0);
     const DRIP: SoundId = SoundId(1);
     const TUNE: SoundId = SoundId(2);
+    const NOCTURNE: SoundId = SoundId(3);
+    const SKY: SkyParams = SkyParams {
+        day_length_s: 1200.0,
+        start_hour: 7.0,
+        day_share: 0.7,
+        tilt_deg: 25.0,
+        day_curve: None,
+        clouds: None,
+    };
 
     fn sound(category: SoundCategory, volume: f32) -> LibrarySound {
         LibrarySound {
@@ -313,8 +339,9 @@ mod tests {
         }
     }
 
-    /// An open world of wind with a tune after 1 s of silence, and a cave of
-    /// drips; no audio device, so nothing is heard and no sink ends.
+    /// An open world of wind with a tune after 1 s of silence, a cave of
+    /// drips, and a meadow of wind by day and drips by night with a nocturne;
+    /// no audio device, so nothing is heard and no sink ends. No sky: noon.
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
@@ -322,10 +349,15 @@ mod tests {
                 STEP_S,
             )))
             .insert_resource(Preferences::default())
-            .add_plugins((super::super::sound::plugin, plugin));
+            .add_plugins((
+                super::super::sound::plugin,
+                super::super::time_of_day::plugin,
+                plugin,
+            ));
         app.world_mut().write_message(SoundLibrary(Arc::from(vec![
             sound(SoundCategory::Ambient, 0.8),
             sound(SoundCategory::Ambient, 1.0),
+            sound(SoundCategory::Music, 0.5),
             sound(SoundCategory::Music, 0.5),
         ])));
         app.world_mut()
@@ -334,16 +366,37 @@ mod tests {
                     beds: vec![Bed {
                         sound: WIND,
                         volume: 0.5,
+                        when: BedHours::Always,
                     }],
                     music: vec![TUNE],
+                    night_music: None,
                     silence_s: Span::at(1.0),
                 },
                 SoundscapeDef {
                     beds: vec![Bed {
                         sound: DRIP,
                         volume: 1.0,
+                        when: BedHours::Always,
                     }],
                     music: Vec::new(),
+                    night_music: None,
+                    silence_s: Span::at(1.0),
+                },
+                SoundscapeDef {
+                    beds: vec![
+                        Bed {
+                            sound: WIND,
+                            volume: 0.5,
+                            when: BedHours::Day,
+                        },
+                        Bed {
+                            sound: DRIP,
+                            volume: 1.0,
+                            when: BedHours::Night,
+                        },
+                    ],
+                    music: vec![TUNE],
+                    night_music: Some(vec![NOCTURNE]),
                     silence_s: Span::at(1.0),
                 },
             ])));
@@ -368,6 +421,14 @@ mod tests {
         let mut found: Vec<_> = beds.iter(app.world()).map(|b| (b.volume, b.gain)).collect();
         found.sort_by(|a, b| a.0.total_cmp(&b.0));
         found
+    }
+
+    fn at_hour(app: &mut App, hour: f32) {
+        app.world_mut().write_message(WorldSky(Some(SKY)));
+        app.world_mut().write_message(TimeOfDaySync {
+            time: TimeOfDay::on_day(0, hour, &SKY),
+            steps_per_s: 0.0,
+        });
     }
 
     fn tracks(app: &mut App) -> Vec<f32> {
@@ -450,6 +511,43 @@ mod tests {
         assert!(fading > 0.0 && fading < 0.25, "{fading}");
         seconds(&mut app, 2.5);
         assert!(tracks(&mut app).is_empty());
+    }
+
+    #[test]
+    fn day_beds_give_way_to_night_beds_and_night_music_starts_at_night() {
+        for (hour, day, night, track) in [(12.0, 0.7 * 0.4, 0.0, TUNE), (0.0, 0.0, 0.7, NOCTURNE)] {
+            let mut app = app();
+            app.world_mut().resource_mut::<Preferences>().volumes.music = 0;
+            at_hour(&mut app, hour);
+            here(&mut app, Some(2));
+            seconds(&mut app, 3.0);
+            let [(wind, by_day), (drip, by_night)] = beds(&mut app)[..] else {
+                panic!("{:?}", beds(&mut app));
+            };
+            assert!(close(wind, 0.4) && close(drip, 1.0));
+            assert!(close(by_day, day), "{hour}: {by_day} by day, not {day}");
+            assert!(
+                close(by_night, night),
+                "{hour}: {by_night} by night, not {night}"
+            );
+            let started: Vec<_> = app.world().resource::<Scene>().music.voices().collect();
+            assert_eq!(started.len(), 1, "{hour}: {started:?}");
+            assert_eq!(started[0].track, track, "{hour}");
+        }
+    }
+
+    #[test]
+    fn a_track_begun_by_day_plays_on_into_the_night() {
+        let mut app = app();
+        at_hour(&mut app, 12.0);
+        here(&mut app, Some(2));
+        seconds(&mut app, 1.5);
+        let before: Vec<_> = app.world().resource::<Scene>().music.voices().collect();
+        assert_eq!(before.iter().map(|v| v.track).collect::<Vec<_>>(), [TUNE]);
+        at_hour(&mut app, 0.0);
+        seconds(&mut app, 5.0);
+        let after: Vec<_> = app.world().resource::<Scene>().music.voices().collect();
+        assert_eq!(before, after, "never cut by the hour");
     }
 
     #[test]

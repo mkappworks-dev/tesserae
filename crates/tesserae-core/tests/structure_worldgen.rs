@@ -124,6 +124,7 @@ fn named(name: &str, temperature: f32, structures: &[BiomeStructure]) -> Biome {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: SurfaceFeatures::NONE.with_structures(structures).unwrap(),
     }
 }

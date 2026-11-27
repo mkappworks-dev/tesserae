@@ -179,7 +179,10 @@ struct Form {
     voxel_size_m: f32,
     /// `None` until the chosen Game's declarations are read.
     climate: Option<ClimateDraft>,
+    /// Whether the chosen Game declares a `sky`; read with the Climate sizes.
+    sky: bool,
     game_mode: GameMode,
+    daylight_cycle: bool,
     problem: Option<String>,
     /// The chosen Game's id; `None` until the form opens on an installed one.
     game: Option<String>,
@@ -381,7 +384,9 @@ impl Default for Form {
             random_seed: tesserae_core::seed::random(),
             voxel_size_m: 1.0,
             climate: None,
+            sky: false,
             game_mode: GameMode::Creative,
+            daylight_cycle: true,
             problem: None,
             game: None,
             mods: Default::default(),
@@ -423,6 +428,8 @@ struct Launcher {
     rename: String,
     /// Edit World's choice of modes.
     modes: Modes,
+    /// Edit World's choice of Daylight cycle.
+    cycle: bool,
     search: String,
     mod_search: String,
     mod_view: ModView,
@@ -538,6 +545,8 @@ pub(super) enum Act {
     /// Edit World's one Game mode: the World's default and the Player's own, while the Player is
     /// its only Player.
     EditMode(GameMode),
+    /// Edit World's Daylight cycle, applied when the World next opens.
+    EditCycle(bool),
     ToggleBiome(usize),
     SelectBiome(usize),
     /// Opens or closes a ground layer's Material dropdown in the edit panel.
@@ -559,6 +568,8 @@ pub(super) enum Act {
     /// Picks this Voxel size, one of [`VOXEL_SIZES`].
     VoxelSize(f32),
     Mode(GameMode),
+    /// Create World's Daylight cycle.
+    Cycle(bool),
     PickGame(usize),
     ToggleMod(usize),
     SaveName,
@@ -601,6 +612,8 @@ impl Act {
         match self {
             Act::Mode(_) => Some(Act::Mode(mode)),
             Act::EditMode(_) => Some(Act::EditMode(mode)),
+            Act::Cycle(_) => Some(Act::Cycle(by > 0)),
+            Act::EditCycle(_) => Some(Act::EditCycle(by > 0)),
             Act::VoxelSize(size) => {
                 let at = VOXEL_SIZES.iter().position(|(s, ..)| s == size)? as i32;
                 let next = (at + by).clamp(0, VOXEL_SIZES.len() as i32 - 1) as usize;
@@ -745,6 +758,7 @@ fn review_capture(
                 "delete" => Act::Delete,
                 "recreate" => Act::ReCreate,
                 "survival" => Act::EditMode(GameMode::Survival),
+                "cycle-off" => Act::EditCycle(false),
                 "open" => Act::Play(first.clone()),
                 "create" => Act::Create,
                 "next" => Act::Next,
@@ -1014,6 +1028,7 @@ fn start(
         initial: Form::default(),
         rename: String::new(),
         modes: Modes::default(),
+        cycle: true,
         search: String::new(),
         mod_search: String::new(),
         mod_view: ModView::default(),
@@ -1350,6 +1365,7 @@ fn handle(
             | Act::ShowFolder
             | Act::CopySeed
             | Act::EditMode(..)
+            | Act::EditCycle(..)
             | Act::SaveName
             | Act::DontSave
             | Act::SaveAndContinue
@@ -1375,6 +1391,7 @@ fn handle(
             | Act::DiscardSetup
             | Act::VoxelSize(..)
             | Act::Mode(..)
+            | Act::Cycle(..)
             | Act::TrustStep
             | Act::Create => on_create_world(l, &mut cx, act),
             Act::Worlds | Act::Library | Act::Settings | Act::Quit | Act::Back | Act::Dismiss => {

@@ -129,6 +129,8 @@ pub struct LoadedMods {
     pub game: bool,
     pub movement: Option<tesserae_mods::MovementPolicy>,
     pub map: Option<tesserae_mods::MapPolicy>,
+    /// The Game's day; `None` holds the World at noon.
+    pub sky: Option<tesserae_core::sky::SkyParams>,
     pub character: Option<tesserae_mods::Character>,
     pub tools: Vec<tesserae_mods::ToolDef>,
     pub items: Vec<tesserae_mods::ItemDef>,
@@ -157,6 +159,7 @@ impl Default for LoadedMods {
             game: false,
             movement: None,
             map: None,
+            sky: None,
             character: None,
             tools: Vec::new(),
             items: Vec::new(),
@@ -465,6 +468,7 @@ pub(crate) fn preview(
             })
             .collect(),
         climate: params.climate,
+        sky: loaded.sky.is_some(),
         ground: params.ground.map(ground),
         materials: {
             let ground =
@@ -588,6 +592,8 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
         looted: Vec::new(),
         map: Default::default(),
         game_mode: Default::default(),
+        time_of_day: None,
+        daylight_cycle: true,
     };
     Writer::acquire(path, &id, &content)
         .unwrap()
@@ -704,6 +710,7 @@ pub(crate) async fn declare_all(
             loaded.game = true;
             loaded.movement = applied.movement;
             loaded.map = applied.map;
+            loaded.sky = applied.sky;
             loaded.tools = applied.tools;
             loaded.survival = applied.survival;
         }
@@ -2360,6 +2367,8 @@ layers = [["{row}"]]
                 looted: Vec::new(),
                 map: Default::default(),
                 game_mode: Default::default(),
+                time_of_day: None,
+                daylight_cycle: true,
             };
             Writer::acquire(&path, &id, &content)
                 .unwrap()

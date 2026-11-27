@@ -157,6 +157,46 @@ pub(crate) fn world_params(
     (terrain, p.water)
 }
 
+pub(crate) fn sky_params(s: &content::SkyParams) -> tesserae_core::sky::SkyParams {
+    tesserae_core::sky::SkyParams {
+        day_length_s: s.day_length_s,
+        start_hour: s.start_hour,
+        day_share: s.day_share,
+        tilt_deg: s.tilt_deg,
+        day_curve: s
+            .day_curve
+            .as_ref()
+            .map(|keys| keys.iter().map(day_key).collect()),
+        clouds: s.clouds.map(|c| tesserae_core::sky::CloudLayer {
+            altitude_m: c.altitude_m,
+            thickness_m: c.thickness_m,
+            cover: c.cover,
+            wind_direction_deg: c.wind_direction_deg,
+            wind_speed_m_per_s: c.wind_speed_m_per_s,
+        }),
+    }
+}
+
+fn day_key(k: &content::DayKey) -> tesserae_core::sky::DayKey {
+    let light = |l: content::CurveLight| tesserae_core::sky::Light {
+        colour: l.colour.into(),
+        strength: l.strength,
+    };
+    let tint = |t: content::CurveTint| tesserae_core::sky::Tint {
+        colour: t.colour.into(),
+        amount: t.amount,
+    };
+    tesserae_core::sky::DayKey {
+        hour: k.hour,
+        sun: light(k.sun),
+        moon: light(k.moon),
+        ambient: light(k.ambient),
+        sky_tint: tint(k.sky_tint),
+        fog_tint: tint(k.fog_tint),
+        stars: k.stars,
+    }
+}
+
 /// What `default-world-params` returns: the engine's own terrain parameters.
 pub(crate) fn engine_world_params() -> content::WorldParams {
     let p = WorldgenParams::default();
@@ -185,6 +225,7 @@ pub(crate) fn engine_world_params() -> content::WorldParams {
         climate: None,
         lava: None,
         cave_biomes: None,
+        sky: None,
     }
 }
 

@@ -84,6 +84,8 @@ pub(super) fn fixture() -> Commit {
         looted: Vec::new(),
         map: Default::default(),
         game_mode: GameMode::Creative,
+        time_of_day: None,
+        daylight_cycle: true,
     }
 }
 
@@ -170,7 +172,13 @@ fn malformed_cells_and_orientations_fail_without_panics() {
     let refused = |from: &SavedChunk, change: &dyn Fn(&mut SavedChunk)| {
         let mut saved = from.clone();
         change(&mut saved);
-        matches!(saved.restore(&m), Err(Error::Corrupt(_)))
+        let restored = saved.restore(&m);
+        assert_eq!(
+            saved.validate(&m).is_ok(),
+            restored.is_ok(),
+            "validate and restore disagree"
+        );
+        matches!(restored, Err(Error::Corrupt(_)))
     };
     for from in [&good, &format_2] {
         assert!(refused(from, &|s| s.palette.clear()));
@@ -320,6 +328,18 @@ fn a_changed_checksum_recovers_but_a_complete_new_version_refuses_rollback() {
     assert!(matches!(
         recover(&d.0, &c.content),
         Err(Error::Incompatible(_))
+    ));
+}
+
+#[test]
+fn a_commit_holding_a_corrupt_chunk_is_refused() {
+    let mut c = fixture();
+    c.chunks = vec![ground([0, 0, 0], 1, 8)];
+    assert!(c.compatible(&c.content.clone()).is_ok());
+    c.chunks[0].palette[0].solid.orientation = 24;
+    assert!(matches!(
+        c.compatible(&c.content.clone()),
+        Err(Error::Corrupt(_))
     ));
 }
 
@@ -1075,6 +1095,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> crate::Biome {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: Default::default(),
     }
 }
@@ -1836,6 +1857,34 @@ mod dropped_items {
         assert_eq!(json["game_mode"], "survival");
         let back: Commit = serde_json::from_value(json).unwrap();
         assert_eq!(back.game_mode, GameMode::Survival);
+    }
+
+    #[test]
+    fn a_commit_keeps_its_time_of_day_and_one_without_it_has_none() {
+        let json = serde_json::to_value(fixture()).unwrap();
+        assert!(json.get("time_of_day").is_none());
+        let old: Commit = serde_json::from_value(json).unwrap();
+        assert_eq!(old.time_of_day, None);
+        let dusk = Commit {
+            time_of_day: Some(123_456),
+            ..fixture()
+        };
+        let back: Commit = serde_json::from_value(serde_json::to_value(&dusk).unwrap()).unwrap();
+        assert_eq!(back.time_of_day, Some(123_456));
+    }
+
+    #[test]
+    fn a_commit_without_a_daylight_cycle_runs_it_and_one_turned_off_stays_off() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        value.as_object_mut().unwrap().remove("daylight_cycle");
+        let old: Commit = serde_json::from_value(value).unwrap();
+        assert!(old.daylight_cycle, "the default is on, not bool's");
+        let off = Commit {
+            daylight_cycle: false,
+            ..fixture()
+        };
+        let back: Commit = serde_json::from_value(serde_json::to_value(&off).unwrap()).unwrap();
+        assert!(!back.daylight_cycle);
     }
 
     #[test]

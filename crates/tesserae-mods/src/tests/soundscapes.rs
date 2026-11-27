@@ -2,7 +2,7 @@
 //! a context, and every refusal names the Mod, the Soundscape and the field.
 
 use tesserae_core::Tables;
-use tesserae_core::audio::{Bed, SoundId, SoundscapeContext, SoundscapeDef, Span};
+use tesserae_core::audio::{Bed, BedHours, SoundId, SoundscapeContext, SoundscapeDef, Span};
 
 use super::sounds::{STEREO, ambience, assert_names, effect, empty};
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -24,6 +24,7 @@ fn bed(sound: &str, volume: f32) -> content::AmbientBed {
     content::AmbientBed {
         sound: sound.into(),
         volume,
+        when: None,
     }
 }
 
@@ -39,6 +40,7 @@ fn scape(
         beds,
         music: tracks.iter().map(|&t| t.into()).collect(),
         silence_s: None,
+        night_music: None,
     }
 }
 
@@ -113,9 +115,11 @@ fn a_games_soundscapes_resolve_their_beds_and_tracks_by_full_name() {
         SoundscapeDef {
             beds: vec![Bed {
                 sound: SoundId(0),
-                volume: 0.6
+                volume: 0.6,
+                when: BedHours::Always,
             }],
             music: vec![SoundId(2), SoundId(3)],
+            night_music: None,
             silence_s: Span {
                 min: 60.0,
                 max: 180.0
@@ -148,6 +152,7 @@ fn a_mods_soundscape_has_no_context_and_may_use_the_games_sounds() {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: vec![],
         crop_fields: Vec::new(),
         structures: Vec::new(),
@@ -361,6 +366,7 @@ fn biome_soundscape_resolves_and_unknown_name_is_refused() {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: vec![],
         crop_fields: Vec::new(),
         structures: Vec::new(),
@@ -377,4 +383,81 @@ fn biome_soundscape_resolves_and_unknown_name_is_refused() {
     );
     d.biomes[0].soundscape = Some("missing:wind".into());
     assert!(refused(vec![("g", d)]).contains("missing:wind"));
+}
+
+#[test]
+fn beds_carry_their_hours_and_night_music_resolves_like_music() {
+    let d = with_scapes(vec![content::SoundscapeDef {
+        beds: vec![
+            content::AmbientBed {
+                when: Some(content::BedHours::Day),
+                ..bed("g:wind", 0.5)
+            },
+            content::AmbientBed {
+                when: Some(content::BedHours::Night),
+                ..bed("g:drip", 0.4)
+            },
+            content::AmbientBed {
+                when: Some(content::BedHours::Always),
+                ..bed("g:wind", 0.2)
+            },
+            bed("g:drip", 0.1),
+        ],
+        night_music: Some(vec!["g:deep".into()]),
+        ..scape("meadow", None, Vec::new(), &["g:calm"])
+    }]);
+    let sounds = load(vec![("g", d)]).unwrap();
+    let def = &sounds.soundscapes[0].def;
+    let hours: Vec<_> = def.beds.iter().map(|b| b.when).collect();
+    assert_eq!(
+        hours,
+        [
+            BedHours::Day,
+            BedHours::Night,
+            BedHours::Always,
+            BedHours::Always
+        ]
+    );
+    assert_eq!(def.music, [SoundId(2)]);
+    assert_eq!(def.night_music, Some(vec![SoundId(3)]));
+    let silent_nights = with_scapes(vec![content::SoundscapeDef {
+        night_music: Some(Vec::new()),
+        ..scape("meadow", None, Vec::new(), &["g:calm"])
+    }]);
+    let sounds = load(vec![("g", silent_nights)]).unwrap();
+    assert_eq!(sounds.soundscapes[0].def.night_music, Some(Vec::new()));
+}
+
+#[test]
+fn night_music_takes_only_music_and_at_most_8_tracks() {
+    for (track, named) in [
+        ("g:crack", "g:crack"),
+        ("g:wind", "g:wind"),
+        ("x:nope", "x:nope"),
+    ] {
+        let d = with_scapes(vec![content::SoundscapeDef {
+            night_music: Some(vec![track.into()]),
+            ..scape("odd", None, Vec::new(), &[])
+        }]);
+        assert_names(
+            &refused(vec![("g", d)]),
+            &["`g`", "soundscapes", "g:odd", "night-music", named],
+        );
+    }
+    let tracks = |n: usize| {
+        let names: Vec<String> = (0..n).map(|i| format!("t{i}")).collect();
+        Declaration {
+            sounds: names.iter().map(|n| music(n)).collect(),
+            soundscapes: vec![content::SoundscapeDef {
+                night_music: Some(names.iter().map(|n| format!("g:{n}")).collect()),
+                ..scape("busy", None, Vec::new(), &[])
+            }],
+            ..empty()
+        }
+    };
+    load(vec![("g", tracks(8))]).unwrap();
+    assert_names(
+        &refused(vec![("g", tracks(9))]),
+        &["`g`", "soundscapes", "g:busy", "night-music", "8"],
+    );
 }

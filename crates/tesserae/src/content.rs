@@ -344,6 +344,24 @@ impl ContentCatalogue {
 pub struct SkyFogTarget {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
+    /// A Cave Biome's air, which the hour never tints, rather than the Biomes' pair.
+    pub cave: bool,
+    /// The Biomes' cloud cover scale over the Eye's column, blended at borders like the pair; the
+    /// surface Biomes' even underground, since the clouds are above the column.
+    pub cloud_scale: f32,
+}
+
+/// The Game's `sky`, sent once at session start; `None` holds the World at noon.
+#[derive(Message, Clone, Debug, PartialEq)]
+pub struct WorldSky(pub Option<tesserae_core::sky::SkyParams>);
+
+/// The World's Time of day and the rate it runs at, which the Client advances itself between
+/// messages: sent on open, when the rate changes, when the time is set and every few seconds.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct TimeOfDaySync {
+    pub time: tesserae_core::sky::TimeOfDay,
+    /// Logical steps a second; 0 while the clock is held or the Daylight cycle is off.
+    pub steps_per_s: f32,
 }
 
 /// The Biome at the Player's Eye, as an index into [`WorldFacts::biomes`], sent as it changes;

@@ -7,6 +7,7 @@ mod audio;
 mod character;
 mod landforms;
 mod plants;
+mod sky;
 mod structures;
 mod templates;
 mod textures;
@@ -171,6 +172,7 @@ impl Guest for Terra {
             temperature_size_m: 256.0,
             humidity_size_m: 256.0,
         });
+        world.sky = Some(sky::sky());
         Declaration {
             materials: vec![
                 MaterialDef {
@@ -425,6 +427,7 @@ impl Guest for Terra {
                         fog: (176, 190, 206),
                     }),
                     cave_scale: None,
+                    cloud_cover: None,
                     // A melon in every 16 by 16 m of grass is found while exploring, not a
                     // carpet; the oaks every 9 m give Wood for a Workbench, Chest and Door in a
                     // short walk, and no Wood lies about on its own.
@@ -465,6 +468,7 @@ impl Guest for Terra {
                         fog: (212, 196, 166),
                     }),
                     cave_scale: Some(1.5),
+                    cloud_cover: Some(0.4),
                     crop_fields: Vec::new(),
                     structures: structures::wild_and_bridged(&["ruined_keep"]),
                     settlements: structures::village(),
@@ -488,6 +492,7 @@ impl Guest for Terra {
                         fog: (214, 222, 232),
                     }),
                     cave_scale: Some(0.0),
+                    cloud_cover: None,
                     crop_fields: Vec::new(),
                     structures: structures::wild_and_bridged(&["watchtower", "ruined_keep"]),
                     settlements: structures::village(),
@@ -507,6 +512,7 @@ impl Guest for Terra {
                         fog: (178, 194, 184),
                     }),
                     cave_scale: None,
+                    cloud_cover: None,
                     crop_fields: Vec::new(),
                     structures: structures::wild_and_bridged(&["ruined_keep"]),
                     settlements: Vec::new(),
@@ -530,6 +536,7 @@ impl Guest for Terra {
                         fog: (166, 174, 156),
                     }),
                     cave_scale: Some(0.5),
+                    cloud_cover: Some(1.75),
                     crop_fields: Vec::new(),
                     structures: structures::bridge("stone_bridge"),
                     settlements: Vec::new(),
@@ -553,6 +560,7 @@ impl Guest for Terra {
                         fog: (214, 196, 158),
                     }),
                     cave_scale: None,
+                    cloud_cover: Some(0.6),
                     crop_fields: plants::savanna_fields(),
                     structures: structures::wild_and_bridged(&["standing_stones", "waystone"]),
                     settlements: structures::village(),
@@ -587,6 +595,7 @@ impl Guest for Terra {
                         fog: (176, 196, 214),
                     }),
                     cave_scale: Some(0.0),
+                    cloud_cover: None,
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
                     settlements: Vec::new(),
@@ -617,6 +626,7 @@ impl Guest for Terra {
                         fog: (196, 208, 216),
                     }),
                     cave_scale: None,
+                    cloud_cover: None,
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
                     settlements: Vec::new(),
@@ -649,6 +659,7 @@ impl Guest for Terra {
                         fog: (206, 214, 226),
                     }),
                     cave_scale: Some(0.0),
+                    cloud_cover: None,
                     crop_fields: Vec::new(),
                     structures: Vec::new(),
                     settlements: Vec::new(),

@@ -100,6 +100,112 @@ impl From<Caves> for content::CaveParams {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Sky {
+    day_length_s: f32,
+    start_hour: f32,
+    day_share: f32,
+    tilt_deg: f32,
+    day_curve: Option<Vec<DayKey>>,
+    clouds: Option<Clouds>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct Clouds {
+    altitude_m: f32,
+    thickness_m: f32,
+    cover: f32,
+    wind_direction_deg: f32,
+    wind_speed_m_per_s: f32,
+}
+
+impl From<Clouds> for content::CloudLayer {
+    fn from(c: Clouds) -> Self {
+        Self {
+            altitude_m: c.altitude_m,
+            thickness_m: c.thickness_m,
+            cover: c.cover,
+            wind_direction_deg: c.wind_direction_deg,
+            wind_speed_m_per_s: c.wind_speed_m_per_s,
+        }
+    }
+}
+
+impl From<Sky> for content::SkyParams {
+    fn from(s: Sky) -> Self {
+        Self {
+            day_length_s: s.day_length_s,
+            start_hour: s.start_hour,
+            day_share: s.day_share,
+            tilt_deg: s.tilt_deg,
+            day_curve: s
+                .day_curve
+                .map(|keys| keys.into_iter().map(Into::into).collect()),
+            clouds: s.clouds.map(Into::into),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct DayKey {
+    hour: f32,
+    sun: CurveLight,
+    moon: CurveLight,
+    ambient: CurveLight,
+    sky_tint: CurveTint,
+    fog_tint: CurveTint,
+    stars: f32,
+}
+
+impl From<DayKey> for content::DayKey {
+    fn from(k: DayKey) -> Self {
+        Self {
+            hour: k.hour,
+            sun: k.sun.into(),
+            moon: k.moon.into(),
+            ambient: k.ambient.into(),
+            sky_tint: k.sky_tint.into(),
+            fog_tint: k.fog_tint.into(),
+            stars: k.stars,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurveLight {
+    colour: [f32; 3],
+    strength: f32,
+}
+
+impl From<CurveLight> for content::CurveLight {
+    fn from(l: CurveLight) -> Self {
+        Self {
+            colour: l.colour.into(),
+            strength: l.strength,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurveTint {
+    colour: [f32; 3],
+    amount: f32,
+}
+
+impl From<CurveTint> for content::CurveTint {
+    fn from(t: CurveTint) -> Self {
+        Self {
+            colour: t.colour.into(),
+            amount: t.amount,
+        }
+    }
+}
+
 impl From<Climate> for content::ClimateParams {
     fn from(c: Climate) -> Self {
         Self {

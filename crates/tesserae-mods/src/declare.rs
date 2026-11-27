@@ -10,13 +10,14 @@ use tesserae_core::survival::MAX_SURVIVAL_VALUE;
 use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeSettlement, BiomeStructure, BiomeTable, Burn,
     CombustionDef, FluidDef, GroundParams, Heat, MAX_BIOME_SETTLEMENTS, MAX_BIOME_STRUCTURES,
-    MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable, ParamError, Phase, Reactant,
-    ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures, SurfaceFruit, SurfacePlant,
-    SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables, TreeVariety, Voxel,
-    VoxelUse, WaterParams, WorldgenParams,
+    MAX_BIOMES, MAX_CAVE_SCALE, MAX_CLOUD_SCALE, MAX_ORES, MaterialId, Ore, OreTable, ParamError,
+    Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures, SurfaceFruit,
+    SurfacePlant, SurfacePlantKind, SurfaceTree, SurfaceVine, SurvivalRules, Tables, TreeVariety,
+    Voxel, VoxelUse, WaterParams, WorldgenParams,
 };
 
 use tesserae_core::plant::{Direction as PlantDirection, Kind as PlantKind};
+use tesserae_core::sky::SkyParams;
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::convert::world_params;
@@ -153,6 +154,8 @@ pub struct Applied {
     pub view: Option<ViewParams>,
     pub movement: Option<content::MovementPolicy>,
     pub map: Option<content::MapPolicy>,
+    /// `None` holds the World at noon.
+    pub sky: Option<SkyParams>,
     pub character: Option<crate::character::Character>,
     pub tools: Vec<ToolDef>,
     /// The Game's, with its omitted fields at the engine's defaults.
@@ -203,6 +206,7 @@ fn beyond_character(world: &content::WorldParams) -> Option<&'static str> {
         (world.water.is_some(), "world.water"),
         (world.ground.is_some(), "world.ground"),
         (world.climate.is_some(), "world.climate"),
+        (world.sky.is_some(), "world.sky"),
         (world.sea_level_m != bare.sea_level_m, "world.sea-level-m"),
         (world.relief_m != bare.relief_m, "world.relief-m"),
         (
@@ -378,6 +382,15 @@ pub fn apply(
         });
     }
     let map = declaration.world.as_ref().and_then(|p| p.map_policy);
+    let sky = declaration
+        .world
+        .as_ref()
+        .and_then(|p| p.sky.as_ref())
+        .map(crate::convert::sky_params);
+    if let Some(sky) = &sky {
+        sky.validate()
+            .map_err(|source| ModError::Sky { id: id(), source })?;
+    }
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let lava = declaration.world.as_ref().and_then(|p| p.lava.clone());
     let cave_biomes = declaration
@@ -387,6 +400,11 @@ pub fn apply(
         .unwrap_or_default();
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
+    // Here and not in `SkyParams::validate`: only the Game's own terrain says where its band ends.
+    if let (Some(sky), Some(params)) = (&sky, &world) {
+        sky.validate_cloud_base(params.terrain_band_m().1)
+            .map_err(|source| ModError::Sky { id: id(), source })?;
+    }
     if let Some(params) = world {
         // `validate` reads only the lake's level; its fluid waits for `resolve`.
         let water = lake.as_ref().map(|l| WaterParams {
@@ -520,6 +538,7 @@ pub fn apply(
         view,
         movement,
         map,
+        sky,
         character,
         tools,
         survival,
@@ -630,6 +649,12 @@ fn check_biomes(mod_id: &str, biomes: &[content::BiomeDef]) -> Result<(), ModErr
             if !(0.0..=1.0).contains(&value) {
                 return Err(bad(field, "must be from 0 to 1"));
             }
+        }
+        if biome
+            .cloud_cover
+            .is_some_and(|scale| !(0.0..=MAX_CLOUD_SCALE).contains(&scale))
+        {
+            return Err(bad("biomes.cloud_cover", "must be from 0 to 4"));
         }
     }
     Ok(())
@@ -1190,6 +1215,7 @@ pub fn resolve_biomes(
                     fog: c.fog.into(),
                 }),
                 cave_scale: def.cave_scale,
+                cloud_cover: def.cloud_cover,
                 surface_features: SurfaceFeatures::new(&features)
                     .and_then(|table| table.with_crop_fields(&crop_fields))
                     .and_then(|table| table.with_structures(&structures))

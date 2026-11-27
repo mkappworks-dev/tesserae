@@ -15,6 +15,8 @@ import bevy_pbr::render::{
     },
     mesh_view_bindings as view_bindings,
 };
+@if(DISTANCE_FOG)
+import bevy_pbr::render::fog::exponential_squared_fog;
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
 import bevy_pbr::render::mesh_view_bindings::{screen_space_ambient_occlusion_texture, view};
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
@@ -118,10 +120,17 @@ const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 // exposure works in: 4.0 on screen at Bevy's default Exposure (EV100 9.7).
 const BLOCK_LIGHT_STRENGTH: f32 = 3992.0;
 
-// The ambient dome a face no sky light reaches still gets, as a share of `SKY_AMBIENT` in
-// chunk_view.rs: about 96 of it, so a sealed cave's walls read as shapes and not a void, while a
-// torch is still what lights it. The sun gets none.
-const UNLIT_AMBIENT: f32 = 0.0642;
+// Guards the division below: a black channel of the ambient shows no ambient at all, floor or not.
+const MIN_AMBIENT: f32 = 1e-3;
+
+// The share of the hour's ambient that is the noon floor a face no sky light reaches keeps
+// (`tesserae_core::sky::CAVE_FLOOR`), so a sealed cave looks the same at every hour: bevy_pbr
+// multiplies the occlusion by the hour's ambient, and this divides it back out. Per channel, so a
+// blue night does not tint the cave either.
+fn cave_floor() -> vec3<f32> {
+    let noon = bitcast<f32>(constants::CHUNK_CAVE_FLOOR) * bitcast<f32>(constants::CHUNK_NOON_AMBIENT);
+    return noon / max(view_bindings::lights.ambient_color.rgb, vec3<f32>(MIN_AMBIENT));
+}
 
 // The share of screen-space occlusion the sun's light takes as well as the sky's.
 const SUN_OCCLUSION: f32 = 0.5;
@@ -163,6 +172,30 @@ fn apply_haze(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
     let fog = view_bindings::fog.base_color;
     let haze = bitcast<f32>(constants::CHUNK_HAZE_MOST) * (1.0 - exp(-distance * rate)) * fog.a;
     return vec4<f32>(mix(color.rgb, fog.rgb, haze), color.a);
+}
+
+// bevy_pbr's own fog samples the shadow map again for this glow, a second full shadow lookup per
+// pixel for about 0.3 ms at 1080p; unshadowed, as the sky's and the clouds' glow is, it shows no
+// difference: the glow is strongest far out, past the last cascade, where Bevy's lookup is 1 anyway.
+fn fog_glow(direction: vec3<f32>) -> vec3<f32> {
+    let fog = view_bindings::fog;
+    if fog.directional_light_color.a <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    var glow = vec3<f32>(0.0);
+    for (var i: u32 = 0u; i < view_bindings::lights.n_directional_lights; i = i + 1u) {
+        let light = view_bindings::lights.directional_lights[i];
+        let toward = max(dot(direction, light.direction_to_light), 0.0);
+        glow += pow(toward, fog.directional_light_exponent) * light.color.rgb;
+    }
+    return glow * view_bindings::view.exposure;
+}
+
+// fog.rs always sets ExponentialSquared.
+fn apply_fog(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
+    let toward = world_position - view_bindings::view.world_position.xyz;
+    let distance = length(toward);
+    return exponential_squared_fog(view_bindings::fog, color, distance, fog_glow(toward / distance));
 }
 
 @vertex
@@ -247,7 +280,7 @@ fn fragment(
     // cave past its faint floor. pbr_types.wesl's own doc on that field says "use this for custom
     // shadow maps", which is exactly what a sky-light flood-fill is.
     // The dome share scales the sky only, so a cave's faint floor stays as it was.
-    pbr_input.diffuse_occlusion *= vec3<f32>(max(sky * in.sky_view, UNLIT_AMBIENT));
+    pbr_input.diffuse_occlusion *= max(vec3<f32>(sky * in.sky_view), cave_floor());
     pbr_input.directional_shadow_factor *= sky;
 
     // Block light is a local source, so it is emissive: tinted by the Voxel's
@@ -282,8 +315,10 @@ fn fragment(
     }
     @if(DISTANCE_FOG)
     if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u {
-        out.color = apply_haze(out.color, in.world_position.xyz);
+        out.color = apply_fog(apply_haze(out.color, in.world_position.xyz), in.world_position.xyz);
     }
+    // Fogged above; Bevy's own fog would sample the shadow map again.
+    pbr_input.material.flags &= ~STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
     return out;
 }

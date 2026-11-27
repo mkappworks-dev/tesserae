@@ -248,6 +248,82 @@ interface content {
         /// rock, cavern floor, features and fog, at most 16. `none` leaves the
         /// underground as the surface Biomes lay it. Only the Game may set it.
         cave-biomes: option<list<cave-biome-def>>,
+        /// The day and night. `none` holds the World at noon. Only the Game may
+        /// set it.
+        sky: option<sky-params>,
+    }
+
+    /// A World's day, by the Time of day's clock: 06:00 is always sunrise,
+    /// 12:00 noon and 18:00 sunset, however the Day length is shared.
+    record sky-params {
+        /// Real seconds one day takes, at least 60.
+        day-length-s: f32,
+        /// The hour a new World starts at, from 0 up to but not including 24.
+        start-hour: f32,
+        /// How much of the Day length the sun is up, above 0 and below 1.
+        day-share: f32,
+        /// How far the sun's path leans toward the south (+Z), in degrees from
+        /// 0 to 60: the noon sun stands that far from overhead.
+        tilt-deg: f32,
+        /// The Day curve: from 1 to 16 keys, hours ascending, eased linearly
+        /// between them and across midnight. `none` is the engine's default
+        /// curve.
+        day-curve: option<list<day-key>>,
+        /// The Cloud layer. `none` draws no clouds.
+        clouds: option<cloud-layer>,
+    }
+
+    /// A slab of cloud that drifts across the sky, lit by the sun and the
+    /// moon. In metres, so the same at every Voxel size.
+    record cloud-layer {
+        /// The slab's base, above the top of the Game's terrain band: Sea
+        /// level plus the landforms' height and overhang.
+        altitude-m: f32,
+        /// From 1 to 200.
+        thickness-m: f32,
+        /// How much of the sky is cloud, from 0 to 1; a Biome's
+        /// `cloud-cover` scales it.
+        cover: f32,
+        /// Where the clouds drift toward, in degrees clockwise from north
+        /// (-Z): 90 drifts east (+X).
+        wind-direction-deg: f32,
+        /// From 0 to 50.
+        wind-speed-m-per-s: f32,
+    }
+
+    /// How the sky looks at one hour. Colours are linear, each channel from 0
+    /// to 1; strengths are shares of the engine's noon, from 0 to 1.
+    record day-key {
+        /// From 0 up to but not including 24, after the key before it.
+        hour: f32,
+        /// The sun's light while it is up; faded to nothing at the horizon
+        /// whatever the curve says.
+        sun: curve-light,
+        /// The moon's light while the sun is down, at full moon; a thinner
+        /// phase lights less.
+        moon: curve-light,
+        /// The light from the open sky, each colour channel times the
+        /// strength at least 0.0642: a sealed cave keeps that share of noon
+        /// at every hour, and open ground is never darker.
+        ambient: curve-light,
+        /// Move the Biome's sky and fog colours toward a colour; a Cave
+        /// Biome's air is never tinted.
+        sky-tint: curve-tint,
+        fog-tint: curve-tint,
+        /// How bright the stars are, from 0 to 1.
+        stars: f32,
+    }
+
+    record curve-light {
+        colour: tuple<f32, f32, f32>,
+        strength: f32,
+    }
+
+    /// `amount` from 0 (the Biome's colour) to 1 (the tint's), in linear
+    /// light.
+    record curve-tint {
+        colour: tuple<f32, f32, f32>,
+        amount: f32,
     }
 
     /// A region of the underground, chosen where the cave Climate (two 3D
@@ -833,6 +909,11 @@ interface content {
         /// blends smoothly across the Biome's border, unlike `ground`.
         cave-scale: option<f32>,
 
+        /// A multiplier on the Game's cloud cover over this Biome, from 0 to 4;
+        /// the cover shown is at most 1. `none` is 1. It blends across the
+        /// Biome's border like `sky-fog`.
+        cloud-cover: option<f32>,
+
         /// At most 16 Materials or Plants the engine stands one Voxel above this
         /// Biome's surface Material, where the column's top is a full Voxel of it
         /// with air above: never under a fluid, on a smoothed step or in a cave
@@ -1136,12 +1217,24 @@ interface content {
         underwater,
     }
 
+    /// The hours an ambient bed is heard at. Closed in 0.3.
+    enum bed-hours {
+        /// Scaled by Daylight: whole by day, silent by night.
+        day,
+        /// Scaled by one minus Daylight, so it crossfades with the day beds.
+        night,
+        /// At every hour.
+        always,
+    }
+
     /// An ambient loop a Soundscape plays for as long as it applies.
     record ambient-bed {
         /// An `ambient` Sound, `<mod id>:<name>`, of any loaded Mod.
         sound: string,
         /// From 0 to 1, on top of the Sound's own volume.
         volume: f32,
+        /// `none` is `always`.
+        when: option<bed-hours>,
     }
 
     /// The ambience and music heard where it applies. The engine registers it
@@ -1160,6 +1253,11 @@ interface content {
         /// The silence before each track, in seconds, drawn from 0 to 3600
         /// [60 to 180].
         silence-s: option<sound-range>,
+        /// At most 8 `music` Sounds by full name. When set, a track starts from
+        /// `music` while Daylight is at least 0.5 and from these otherwise; a
+        /// playing track is never cut by the hour. `none` plays `music` at
+        /// every hour.
+        night-music: option<list<string>>,
     }
 
     /// Why the Server makes a Sound event that is not a Voxel's. Closed in

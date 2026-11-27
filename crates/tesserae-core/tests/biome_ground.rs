@@ -19,6 +19,7 @@ fn biome(name: &str, temperature: f32, ground: Option<GroundParams>) -> Biome {
         ground,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: Default::default(),
     }
 }

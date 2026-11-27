@@ -50,6 +50,7 @@ pub mod soundscape;
 pub mod station;
 pub mod streaming;
 pub mod survival;
+pub mod time_of_day;
 pub mod tool;
 pub mod undo;
 pub mod usable;
@@ -147,6 +148,7 @@ pub fn plugin(app: &mut App) {
         death::plugin,
         footfall::plugin,
         causal_sound::plugin,
+        time_of_day::plugin,
     ));
     // Asked for, so a played World starts at its Settlement and not among test Shapes.
     #[cfg(feature = "dev")]
@@ -471,6 +473,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            cloud_cover: None,
             surface_features: SurfaceFeatures::new(&[SurfaceFeature::cube(
                 tesserae_core::testgen::fixtures().lantern,
                 4.0,

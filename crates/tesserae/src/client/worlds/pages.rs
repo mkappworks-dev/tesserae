@@ -968,6 +968,25 @@ fn edit(
                                         ),
                                     );
                                 });
+                            if d.sky {
+                                let waiting = cycle(d) != d.daylight_cycle || l.cycle != cycle(d);
+                                fields
+                                    .spawn(Node {
+                                        flex_direction: FlexDirection::Column,
+                                        flex_shrink: 0.0,
+                                        ..default()
+                                    })
+                                    .with_children(|picks| {
+                                        cycle_picks(
+                                            picks,
+                                            l.cycle,
+                                            Act::EditCycle,
+                                            waiting.then_some(
+                                                "Daylight cycle changes take effect when the World next opens.",
+                                            ),
+                                        );
+                                    });
+                            }
                             for line in &installed.unmet(d) {
                                 ui::paragraph(fields, line, theme::TEXT_SMALL, theme::WARNING);
                             }
@@ -1119,6 +1138,30 @@ fn mode_picks(
         .iter()
         .find(|(mode, ..)| *mode == chosen)
         .map_or("", |(.., about)| about);
+    ui::paragraph(
+        parent,
+        note.unwrap_or(about),
+        theme::TEXT_SMALL,
+        theme::muted(),
+    );
+}
+
+/// Off | On for a Game that declares a `sky`, with `note` under it, or else what the choice means.
+fn cycle_picks(
+    parent: &mut ChildSpawnerCommands,
+    on: bool,
+    act: fn(bool) -> Act,
+    note: Option<&str>,
+) {
+    label(parent, "Daylight cycle");
+    gap(parent, 8.0);
+    segmented(parent, [(act(false), "Off", !on), (act(true), "On", on)]);
+    gap(parent, 8.0);
+    let about = if on {
+        "The sun rises and sets, and the hours pass."
+    } else {
+        "The sky holds at its current hour."
+    };
     ui::paragraph(
         parent,
         note.unwrap_or(about),
@@ -1369,6 +1412,10 @@ fn world_fields(col: &mut ChildSpawnerCommands, f: &Form) -> Entity {
     gap(col, 24.0);
     mode_picks(col, f.game_mode, Act::Mode, None);
     gap(col, 24.0);
+    if f.sky {
+        cycle_picks(col, f.daylight_cycle, Act::Cycle, None);
+        gap(col, 24.0);
+    }
     label(col, "World seed");
     gap(col, 8.0);
     seed_field(col, &f.seed);
@@ -3182,13 +3229,19 @@ fn review_sections(
         let mut rows = vec![
             ("Name", Value::Text(name)),
             ("Game mode", Value::Text(mode_name(f.game_mode).to_owned())),
+        ];
+        if f.sky {
+            let cycle = if f.daylight_cycle { "On" } else { "Off" };
+            rows.push(("Daylight cycle", Value::Text(cycle.to_owned())));
+        }
+        rows.extend([
             (
                 "Seed",
                 f.seed()
                     .map_or_else(Value::Text, |n| Value::Seed(n, Act::CopyResolved)),
             ),
             ("Voxel size", Value::Text(format!("{} m", f.voxel_size_m))),
-        ];
+        ]);
         if let Some(c) = climate {
             rows.push((
                 "Climate scale",

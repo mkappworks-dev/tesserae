@@ -401,6 +401,51 @@ fn terra_shows_its_six_biomes_with_the_approved_sky_and_fog() {
 }
 
 #[test]
+fn terra_outdoor_soundscapes_each_have_a_night_bed() {
+    use tesserae_core::audio::{BedHours, SoundscapeId};
+    let (_install, loaded) = loaded("terra", 0.5);
+    let sounds = &loaded.sounds;
+    let hours = |name: &str| -> Vec<BedHours> {
+        let scape = sounds
+            .soundscapes
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("{name} is declared"));
+        scape.def.beds.iter().map(|b| b.when).collect()
+    };
+    for name in [
+        "terra:surface",
+        "terra:temperate",
+        "terra:dry",
+        "terra:cold",
+    ] {
+        let hours = hours(name);
+        assert!(hours.contains(&BedHours::Night), "{name}: {hours:?}");
+        assert_eq!(
+            hours.contains(&BedHours::Day),
+            matches!(name, "terra:dry" | "terra:cold"),
+            "{name}: no birds by day, {hours:?}"
+        );
+    }
+    for name in ["terra:underground", "terra:underwater"] {
+        assert_eq!(hours(name), [BedHours::Always], "{name} ignores the hour");
+    }
+    let named = |biome: &str| {
+        sounds
+            .biome_soundscapes
+            .iter()
+            .find(|(b, _)| b == biome)
+            .and_then(|&(_, s)| s)
+            .map(|SoundscapeId(at)| sounds.soundscapes[usize::from(at)].name.as_str())
+    };
+    assert_eq!(
+        named("terra:savanna"),
+        Some("terra:dry"),
+        "shares Dry's pair"
+    );
+}
+
+#[test]
 fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
     let (_install, loaded) = loaded("terra", 0.5);
     let world = loaded.world.unwrap();

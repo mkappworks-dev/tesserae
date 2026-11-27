@@ -271,6 +271,7 @@ macro_rules! landforms {
                     fog: (f0, f1, f2),
                 }),
                 cave_scale: (!l.caves).then_some(0.0),
+                cloud_cover: None,
                 crop_fields: Vec::new(),
                 structures: Vec::new(),
                 settlements: Vec::new(),

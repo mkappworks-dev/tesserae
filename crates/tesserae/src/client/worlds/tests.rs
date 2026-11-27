@@ -115,6 +115,8 @@ fn details(name: &str, game: bool) -> Sidecar {
         biomes: None,
         player_mode: None,
         mode_changes: Default::default(),
+        sky: false,
+        daylight_cycle: true,
     }
 }
 
@@ -1708,6 +1710,7 @@ fn fake_preview(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
             .map(String::from)
             .to_vec(),
         source: None,
+        sky: true,
     })
 }
 
@@ -2807,6 +2810,7 @@ fn edit_world_renames_without_touching_the_save_and_records_modes_for_the_next_o
         library::ModeChanges {
             default: Some(GameMode::Survival),
             own: Some(GameMode::Survival),
+            daylight_cycle: None,
         }
     );
 
@@ -3947,6 +3951,7 @@ fn edit_world_shows_one_game_mode_that_sets_the_worlds_default_and_the_players_o
         library::ModeChanges {
             default: Some(GameMode::Survival),
             own: Some(GameMode::Survival),
+            daylight_cycle: None,
         }
     );
 }
@@ -4193,6 +4198,137 @@ fn left_and_right_change_edit_worlds_game_mode() {
     assert_eq!(focused_act(&app), Some(Act::EditMode(GameMode::Survival)));
     step(&mut app, Act::EditMode(GameMode::Survival), -1);
     assert_eq!(launcher(&app).modes.own, GameMode::Creative);
+}
+
+#[test]
+fn a_new_world_runs_its_daylight_cycle_unless_it_is_turned_off() {
+    for chosen in [None, Some(false), Some(true)] {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.update();
+        new_world(&mut app);
+        app.update();
+        assert_eq!(controls(&mut app, &Act::Cycle(false)), 1);
+        if let Some(on) = chosen {
+            act(&mut app, Act::Cycle(false));
+            act(&mut app, Act::Cycle(on));
+        }
+        assert_eq!(
+            shown(&mut app, "The sky holds at its current hour."),
+            chosen == Some(false)
+        );
+        finish(&mut app);
+        let created = created(&app);
+        assert!(created.sky, "Create records that the Game has a sky");
+        assert_eq!(created.daylight_cycle, chosen.unwrap_or(true));
+    }
+}
+
+#[test]
+fn left_and_right_turn_the_daylight_cycle_off_and_on() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    new_world(&mut app);
+    app.update();
+    step(&mut app, Act::Cycle(true), -1);
+    assert!(!launcher(&app).form.daylight_cycle);
+    assert_eq!(focused_act(&app), Some(Act::Cycle(false)));
+    step(&mut app, Act::Cycle(false), 1);
+    assert!(launcher(&app).form.daylight_cycle);
+}
+
+fn skyless_preview(installed: &Installed, ids: &[String]) -> Result<BiomePreview, String> {
+    Ok(BiomePreview {
+        sky: false,
+        ..fake_preview(installed, ids)?
+    })
+}
+
+#[test]
+fn a_game_without_a_sky_offers_no_daylight_cycle_on_either_screen() {
+    let worlds = Directory::new();
+    let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.insert_resource(Previewer(skyless_preview));
+    app.update();
+    new_world(&mut app);
+    app.update();
+    assert!(launcher(&app).form.climate.is_some(), "the Game was read");
+    assert_eq!(controls(&mut app, &Act::Cycle(true)), 0);
+    act(&mut app, Act::Step(Step::Review));
+    assert!(!shown(&mut app, "Daylight cycle"));
+    act(&mut app, Act::Create);
+    assert!(!created(&app).sky);
+
+    let path = library::create(&worlds.0, &details("Skyless", true)).unwrap();
+    let mut app = app_on_edit(&worlds, &path);
+    assert_eq!(controls(&mut app, &Act::EditCycle(true)), 0);
+    assert!(!shown(&mut app, "Daylight cycle"));
+}
+
+fn app_on_edit(worlds: &Directory, path: &Path) -> App {
+    let mut app = app(worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+    app.update();
+    act(&mut app, Act::Worlds);
+    act(&mut app, Act::Edit(path.to_owned()));
+    app
+}
+
+#[test]
+fn edit_world_records_the_daylight_cycle_for_the_next_open_and_says_so() {
+    let worlds = Directory::new();
+    let world = Sidecar {
+        sky: true,
+        ..details("Sunny", true)
+    };
+    let path = library::create(&worlds.0, &world).unwrap();
+    let mut app = app_on_edit(&worlds, &path);
+    let note = "Daylight cycle changes take effect when the World next opens.";
+    assert_eq!(controls(&mut app, &Act::EditCycle(false)), 1);
+    assert!(!shown(&mut app, note));
+    act(&mut app, Act::EditCycle(false));
+    assert!(shown(&mut app, note));
+    act(&mut app, Act::SaveName);
+    let saved = library::read(&path).unwrap().unwrap();
+    assert!(saved.daylight_cycle, "not before the next open");
+    assert_eq!(
+        saved.mode_changes,
+        library::ModeChanges {
+            daylight_cycle: Some(false),
+            ..Default::default()
+        }
+    );
+
+    act(&mut app, Act::Edit(path.clone()));
+    assert!(!launcher(&app).cycle, "the waiting change is shown");
+    assert!(shown(&mut app, note));
+    act(&mut app, Act::EditCycle(true));
+    act(&mut app, Act::SaveName);
+    assert!(
+        library::read(&path)
+            .unwrap()
+            .unwrap()
+            .mode_changes
+            .is_empty(),
+        "choosing the current cycle asks for nothing"
+    );
+}
+
+#[test]
+fn left_and_right_change_edit_worlds_daylight_cycle_and_leaving_asks_first() {
+    let worlds = Directory::new();
+    let world = Sidecar {
+        sky: true,
+        ..details("Sunny", true)
+    };
+    let path = library::create(&worlds.0, &world).unwrap();
+    let mut app = app_on_edit(&worlds, &path);
+    step(&mut app, Act::EditCycle(true), -1);
+    assert!(!launcher(&app).cycle);
+    assert!(edit_world::unsaved(launcher(&app)));
+    step(&mut app, Act::EditCycle(false), 1);
+    assert!(launcher(&app).cycle);
+    assert!(!edit_world::unsaved(launcher(&app)));
 }
 
 fn pick_sky(app: &mut App, hex: &str) {

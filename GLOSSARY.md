@@ -150,7 +150,8 @@ distance, so it does not scale with Voxel size the way everything physical does.
 falls straight down undimmed, so open ground is lit the same however tall the
 air column above it is. A face takes a share of it by which way it faces, as a
 wall sees less of the sky than a top: all of it on a top, less on a side, least
-on an underside.
+on an underside. It is how much of the sky a Voxel sees, not how bright the sky
+is, so it does not change with the Time of day.
 
 **Block light** — the light a Voxel receives from Materials that emit. Dims by
 one level per Voxel in every direction, downwards included.
@@ -258,6 +259,39 @@ sealed by rock below and beside, so it stands rather than pours.
 **Outskirts** — a Settlement's Buildings past its disc, beside its approach
 paths and round its edge, in groups each laid by its own chance: farms, ponds,
 brooks and waterfalls.
+
+## Sky
+
+**Time of day** — where a World is in its day: a count of whole days and how far
+through the current one it is. The Server owns it and it is saved with the
+World; it is never a function of the seed. The clock reads 06:00 at sunrise and
+18:00 at sunset. _Avoid_: world time, game time
+
+**Day length** — how many real seconds one day of a World's Time of day takes,
+declared by its Game.
+
+**Daylight cycle** — whether a World's Time of day advances. A World setting:
+off holds the sky at one moment.
+
+**Daylight** — how much it is day, from 0 at night to 1 by day, from the sun's
+height above the horizon; dawn and dusk lie between.
+
+**Day curve** — what a Game declares the day looks like: keyframes on the Time
+of day for the colour and strength of the sun, the moon and the ambient light, a
+sky and a fog tint, and star brightness. It tints a Biome's sky and fog pair,
+which are the daytime colours; a Cave Biome's air does not change with the hour.
+
+**Moon phase** — which of eight faces the moon shows, one per night. Moonlight
+is as strong as the phase is full.
+
+**Sky state** — the sky and its light at one moment for one Eye: sun and moon
+directions, light colours and strengths, sky and fog colours, star brightness,
+Daylight and cloud cover. Computed from the Time of day, the Day curve and the
+Biome, to which Weather adds itself as a later layer.
+
+**Cloud layer** — the clouds: one slab at an altitude in metres a Game declares,
+with a cover from 0 to 1 that a Biome may scale and Weather will drive, drifting
+with a wind as the Time of day advances, so where the clouds are is never sent.
 
 ## Runtime
 
@@ -668,4 +702,5 @@ World state.
 **Soundscape** — what a Player hears around them when nothing happens: looping
 ambient Sounds and a list of music. A Game declares one per context (default,
 underground or underwater) and a Biome may name its own; the Server says which
-applies to the Eye.
+applies to the Eye. A loop or a track may be for the day or the night only, and
+the Time of day blends them.

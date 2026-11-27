@@ -13,10 +13,12 @@ use crate::session::SessionApp;
 use std::collections::HashMap;
 use tesserae_core::MaterialId;
 use tesserae_core::immersion::FluidSurface;
+use tesserae_core::sky::Light;
 
 use super::camera::MainCamera;
 use super::pose::PublishedBody;
 use super::preview::HandCamera;
+use super::sky::SkyNow;
 use super::tile_preview::AtlasCamera;
 use crate::content::MaterialPalette;
 use crate::render::fog::{self, FogSettings};
@@ -84,6 +86,8 @@ struct Submersion {
     hues: HashMap<MaterialId, [f32; 3]>,
     /// A hue arrived since the cameras were last given fog.
     repaint: bool,
+    /// The ambient light the fluid was last shaded by.
+    ambient: Option<Light>,
 }
 
 /// The dry fog and sky, which the cameras go back to and which a change in
@@ -93,6 +97,7 @@ struct Dry<'w> {
     settings: Res<'w, FogSettings>,
     streaming: Res<'w, StreamingSettings>,
     declared: Option<Res<'w, DeclaredStreaming>>,
+    sky: Option<Res<'w, SkyNow>>,
 }
 
 fn track_hues(mut palette: MessageReader<MaterialPalette>, mut state: ResMut<Submersion>) {
@@ -123,16 +128,23 @@ fn apply_submersion(
         .immersion
         .filter(|f| submerged(camera.translation.y, Some(*f), state.under.is_some()));
     let under = wet.map(|f| f.material);
-    let changed = dry.settings.is_changed() || dry.streaming.is_changed() || state.repaint;
+    let ambient = dry.sky.as_ref().map_or(Light::NOON, |sky| sky.0.ambient);
+    let changed = dry.settings.is_changed()
+        || dry.streaming.is_changed()
+        || state.repaint
+        || state.ambient != Some(ambient);
     if under == state.under && !(under.is_some() && changed) {
         return;
     }
     state.under = under;
     state.repaint = false;
+    state.ambient = Some(ambient);
     let fog = match wet {
         Some(fluid) => {
             let hue = state.hues.get(&fluid.material).copied();
             let hue = hue.unwrap_or(UNPAINTED_HUE);
+            // Water is dark at night as the ground is; a fluid that gives off light keeps its own.
+            let hue = if fluid.emits { hue } else { ambient.shade(hue) };
             clear.0 = Color::srgb(hue[0], hue[1], hue[2]);
             Some(fluid_fog(hue, fluid.dimming))
         }
@@ -164,6 +176,7 @@ mod tests {
             material: 14,
             surface_y_m,
             dimming: 2,
+            emits: false,
         })
     }
 
@@ -260,6 +273,7 @@ mod tests {
             material,
             surface_y_m: 10.0,
             dimming,
+            emits: material == LAVA,
         })
     }
 
@@ -390,5 +404,34 @@ mod tests {
         let mut rig = standard();
         rig.place(9.6, surface(WATER, 2));
         assert!(near(rig.fog(rig.main).unwrap().color, water_fog_colour()));
+    }
+
+    #[test]
+    fn at_night_water_and_the_colour_behind_it_darken_and_lava_keeps_its_own() {
+        use tesserae_core::sky::SkyState;
+        let mut rig = standard();
+        rig.place(9.0, surface(WATER, 2));
+        let (day_fog, day_clear) = (rig.fog(rig.main).unwrap().color, rig.clear());
+        let night = Light {
+            colour: [0.6, 0.7, 1.0],
+            strength: 0.25,
+        };
+        rig.app.insert_resource(SkyNow(SkyState {
+            ambient: night,
+            ..SkyNow::default().0
+        }));
+        rig.app.update();
+        let darker = |a: Color, b: Color| {
+            let (a, b) = (a.to_srgba(), b.to_srgba());
+            a.red < b.red && a.green < b.green && a.blue < b.blue
+        };
+        assert!(darker(rig.clear(), day_clear));
+        assert!(darker(rig.fog(rig.main).unwrap().color, day_fog));
+        rig.place(9.0, surface(LAVA, 15));
+        assert_eq!(
+            rig.clear(),
+            Color::srgb(220.0 / 255.0, 80.0 / 255.0, 10.0 / 255.0),
+            "lava gives off its own light"
+        );
     }
 }

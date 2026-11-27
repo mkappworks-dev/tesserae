@@ -79,6 +79,7 @@ fn spaced(spacing_m: f32) -> WorldgenParams {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: SurfaceFeatures::NONE.with_structures(&structures).unwrap(),
     };
     WorldgenParams {

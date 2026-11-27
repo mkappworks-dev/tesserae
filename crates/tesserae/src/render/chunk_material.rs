@@ -62,6 +62,16 @@ fn sky_view_shader_defs() -> Vec<ShaderDefVal> {
     ]
 }
 
+/// The noon floor a face no sky light reaches keeps, as `constants::CHUNK_CAVE_FLOOR` (a share)
+/// and `constants::CHUNK_NOON_AMBIENT` (the noon ambient it is a share of), bit patterns as above.
+fn cave_floor_shader_defs() -> Vec<ShaderDefVal> {
+    let bits = |name: &'static str, value: f32| ShaderDefVal::UInt(name.into(), value.to_bits());
+    vec![
+        bits("CHUNK_CAVE_FLOOR", tesserae_core::sky::CAVE_FLOOR),
+        bits("CHUNK_NOON_AMBIENT", crate::client::chunk_view::SKY_AMBIENT),
+    ]
+}
+
 /// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
 #[derive(Reflect, ShaderType, Debug, Clone, Copy, Default)]
 pub struct LodParams {
@@ -191,6 +201,7 @@ impl MaterialExtension for ChunkMaterialExtension {
         defs.extend(quad_layout_defs());
         defs.extend(super::fog::haze_shader_defs());
         defs.extend(sky_view_shader_defs());
+        defs.extend(cave_floor_shader_defs());
         #[cfg(feature = "profiling")]
         let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
         #[cfg(not(feature = "profiling"))]

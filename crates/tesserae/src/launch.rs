@@ -61,6 +61,8 @@ pub struct BiomePreview {
     pub materials: Vec<String>,
     /// What the terrain preview draws from; `None` in tests that draw none.
     pub source: Option<std::sync::Arc<tesserae_core::terrain_preview::Source>>,
+    /// Whether the Game declares a `sky`, and so has a Daylight cycle to turn off.
+    pub sky: bool,
 }
 
 /// Where the session ends: set before a quit that is not to desktop.

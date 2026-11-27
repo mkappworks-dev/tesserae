@@ -818,7 +818,7 @@ fn shadows_enabled() -> bool {
     true
 }
 
-fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) {
+pub(super) fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) {
     // A light's layers are also its shadow-caster mask, so level 0 alone
     // casts: a coarse caster would shadow the finer ground it stands over.
     commands.spawn((
@@ -844,12 +844,14 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
 
 /// Under Bevy's 10 000 lux: a sunlit sand or snow top lands in the tonemapper's
 /// flat shoulder, so only less light brings it under about 85% value on screen.
-const SUN_LUX: f32 = 3600.0;
+/// The noon the Sky state's light strengths are shares of.
+pub(crate) const SUN_LUX: f32 = 3600.0;
 
 /// Beside [`SUN_LUX`], enough that a floor lit by the sky alone, such as under a
-/// canopy, reads instead of going black. `UNLIT_AMBIENT` in
-/// `chunk_material.wesl` is a share of it, which keeps a cave as dim.
-const SKY_AMBIENT: f32 = 1500.0;
+/// canopy, reads instead of going black. [`tesserae_core::sky::CAVE_FLOOR`] is a
+/// share of it, which keeps a cave as dim. The noon the Sky state's ambient
+/// strengths are shares of.
+pub(crate) const SKY_AMBIENT: f32 = 1500.0;
 
 /// How far the view tips down. Framing is a Client decision; where the Eye
 /// starts is the Server's, so the Client's camera starts where the Player does.

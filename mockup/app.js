@@ -20,6 +20,7 @@ const games = {
     ],
     seed: "where-the-river-turns",
     required: [],
+    sky: true,
   },
   Tidewater: {
     about: "Islands & quiet lagoons",
@@ -277,6 +278,7 @@ function startCreate(from) {
     seed: from?.seed || randomSeed(),
     voxel: from?.voxel || "1",
     mode: from?.mode || "Creative",
+    cycle: from ? from.cycle !== false : true,
     mods: clone(from?.mods || []),
     biomes: clone(from?.biomes || defaultBiomes("Terra")),
     tempSize: from?.tempSize || 256,
@@ -333,6 +335,7 @@ function startEdit(id) {
     voxel: w.voxel,
     mode: w.mode,
     playerMode: w.playerMode,
+    cycle: w.cycle !== false,
     dirty: false,
   });
   render();
@@ -678,12 +681,31 @@ function voxelPicks(value) {
     "",
   )}</div><small class="mode-hint">${VOXEL_SIZES.find(([size]) => size === value)?.[1] || ""}</small></fieldset>`;
 }
+// A Game without a sky has no cycle, so neither World screen shows it.
+const CYCLE_HINTS = {
+  on: "The sun rises and sets, and the hours pass.",
+  off: "The sky holds at its current hour.",
+};
+function cyclePicks(on, note) {
+  const legend = "Daylight cycle";
+  return `<fieldset class="mode-picks cycle-picks"><legend class="section-label">${legend}</legend><div class="segmented" role="radiogroup" aria-label="${legend}">${[
+    ["off", "Off"],
+    ["on", "On"],
+  ]
+    .map(
+      ([value, label]) =>
+        `<button type="button" role="radio" class="${(value === "on") === on ? "selected" : ""}" data-action="pick-cycle" data-value="${value}" aria-checked="${(value === "on") === on}">${label}</button>`,
+    )
+    .join(
+      "",
+    )}</div><small class="mode-hint">${note || CYCLE_HINTS[on ? "on" : "off"]}</small></fieldset>`;
+}
 function worldForm() {
   const seedActions = [
     { name: "randomize", label: "Randomize seed", icon: "shuffle" },
     { name: "copy-seed", label: "Copy seed", icon: "copy" },
   ];
-  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}${voxelPicks(state.voxel)}${climateScale()}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
+  return `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("mode", state.mode, { legend: "Game mode" })}${games[state.game]?.sky ? cyclePicks(state.cycle) : ""}${textField("World seed", "seed", state.seed, { placeholder: "Words or a number", actions: seedActions })}${voxelPicks(state.voxel)}${climateScale()}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview('data-live="draft"', [320, 180], "Terrain preview of this seed")}</aside></div>`;
 }
 function climateScale() {
   const fields = state.reading.game
@@ -873,6 +895,9 @@ function reviewForm() {
     rows([
       ["Name", esc(state.name.trim() || "New World")],
       ["Game mode", state.mode],
+      ...(games[state.game]?.sky
+        ? [["Daylight cycle", state.cycle ? "On" : "Off"]]
+        : []),
       ["Seed", state.seed ? seedWithCopy(state.seed) : "Random on creation"],
       ["Voxel size", voxel],
       ...(state.reading.game
@@ -910,9 +935,16 @@ function edit() {
     ["Created", w.created],
   ];
   const changed = state.mode !== w.mode || state.playerMode !== w.playerMode;
+  const cycle = games[w.game]?.sky
+    ? cyclePicks(
+        state.cycle,
+        state.cycle !== (w.cycle !== false) &&
+          "Daylight cycle changes take effect when the World next opens.",
+      )
+    : "";
   return frame({
     title: "Edit World",
-    body: `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("worldMode", state.playerMode, { legend: "Game mode", quiet: true })}<small class="muted">${changed ? "Mode changes take effect when the World next opens." : "Creative: take any Material, no damage or hunger. Survival: gather what you place."}</small></div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview(`data-world-id="${w.id}"`, [320, 180], `Terrain preview of ${w.name}`)}<span class="form-label fixed-label">Fixed at creation</span><dl class="review-rows fixed-rows">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></aside></div>`,
+    body: `<div class="world-form"><div class="form-fields">${textField("World name", "name", state.name, { placeholder: "New World" })}${modePicks("worldMode", state.playerMode, { legend: "Game mode", quiet: true })}<small class="muted">${changed ? "Mode changes take effect when the World next opens." : "Creative: take any Material, no damage or hunger. Survival: gather what you place."}</small>${cycle}</div><aside class="form-aside"><span class="form-label">Terrain preview</span>${worldPreview(`data-world-id="${w.id}"`, [320, 180], `Terrain preview of ${w.name}`)}<span class="form-label fixed-label">Fixed at creation</span><dl class="review-rows fixed-rows">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></aside></div>`,
     prompts: [
       ["Ctrl+Enter", "Save", "save-edit"],
       ["D", "New World with these settings", "duplicate", w.id],
@@ -933,7 +965,8 @@ function editUnsaved() {
     !!w &&
     (state.name.trim() !== w.name ||
       state.mode !== w.mode ||
-      state.playerMode !== w.playerMode)
+      state.playerMode !== w.playerMode ||
+      state.cycle !== (w.cycle !== false))
   );
 }
 function trustItems() {
@@ -1069,11 +1102,124 @@ function openingMount() {
   };
   draw();
 }
+// The Menu's clock; a mock, so it only moves when a time is set.
+const menuClock = { day: 3, minutes: 19 * 60 + 42 };
+const TIMES = [
+  { value: "sunrise", label: "Sunrise", minutes: 6 * 60 },
+  { value: "noon", label: "Noon", minutes: 12 * 60 },
+  { value: "sunset", label: "Sunset", minutes: 18 * 60 },
+  { value: "midnight", label: "Midnight", minutes: 0 },
+];
+const hhmm = (m) =>
+  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+function clockLabel() {
+  return `Day ${menuClock.day}, ${hhmm(menuClock.minutes)}`;
+}
+// The clock only goes forward: an hour already past today is tomorrow's.
+function nextTime(minutes) {
+  const day = minutes > menuClock.minutes ? menuClock.day : menuClock.day + 1;
+  return { day, minutes };
+}
+// Each tile's thumbnail: the sky at that hour over a stepped hill, with the sun or moon where it
+// stands. Colours follow Terra's Day curve.
+const TIME_SCENES = {
+  sunrise: {
+    sky: ["#7d8fb3", "#e9b48c", "#f6d7a0"],
+    body: [30, 44, 9, "#fff1c9"],
+    hill: "#4d5a4a",
+    near: "#3a4538",
+  },
+  noon: {
+    sky: ["#4f86cf", "#8fb6e6", "#cfe1f2"],
+    body: [80, 16, 8, "#fffbe8"],
+    hill: "#5f8f4e",
+    near: "#4a7a3d",
+  },
+  sunset: {
+    sky: ["#4f5b86", "#d4876a", "#f2b06e"],
+    body: [130, 44, 9, "#ffd9a0"],
+    hill: "#4f4a48",
+    near: "#3a3536",
+  },
+  midnight: {
+    sky: ["#070b18", "#101a33", "#1d2a48"],
+    body: [112, 18, 6, "#e9eef6"],
+    hill: "#141a22",
+    near: "#0d1117",
+    stars: true,
+  },
+};
+function timeThumb(value) {
+  const t = TIME_SCENES[value];
+  const id = `sky-${value}`;
+  const stars = t.stars
+    ? [
+        [14, 10],
+        [30, 24],
+        [52, 8],
+        [70, 30],
+        [88, 12],
+        [140, 26],
+        [150, 8],
+        [44, 38],
+        [128, 40],
+      ]
+        .map(
+          ([x, y]) =>
+            `<rect x="${x}" y="${y}" width="1.5" height="1.5" fill="#dfe6f2"/>`,
+        )
+        .join("")
+    : "";
+  const [bx, by, br, bc] = t.body;
+  const glow =
+    value === "midnight"
+      ? ""
+      : `<circle cx="${bx}" cy="${by}" r="${br * 2.2}" fill="${bc}" opacity="0.25"/>`;
+  return `<svg viewBox="0 0 160 80" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${t.sky[0]}"/><stop offset="0.65" stop-color="${t.sky[1]}"/><stop offset="1" stop-color="${t.sky[2]}"/></linearGradient></defs><rect width="160" height="80" fill="url(#${id})"/>${stars}${glow}<circle cx="${bx}" cy="${by}" r="${br}" fill="${bc}"/><path d="M0 58h16v-6h14v-8h18v6h12v-10h20v8h14v6h18v-4h16v8h32v22H0z" fill="${t.hill}"/><path d="M0 68h22v-4h26v6h30v-6h24v4h20v-6h38v18H0z" fill="${t.near}"/></svg>`;
+}
+function timePicks(pick) {
+  return `<div class="time-picks" role="radiogroup" aria-label="Time of day">${TIMES.map(
+    (t) => {
+      const at = nextTime(t.minutes);
+      const on = t.value === pick;
+      return `<button type="button" role="radio" class="time-pick time-${t.value} ${on ? "selected" : ""}" aria-checked="${on}" data-action="pick-time" data-value="${t.value}"><i>${timeThumb(t.value)}</i><span>${t.label}</span><small>${at.day === menuClock.day ? "Today" : `Day ${at.day}`}, ${hhmm(t.minutes)}</small></button>`;
+    },
+  ).join("")}</div>`;
+}
+// Custom starts at the next quarter hour; ◀ ▶ step it by a quarter, and any HH:MM can be typed.
+const CUSTOM_STEP = 15;
+let customMinutes = null;
+function parseHhmm(text) {
+  const m = /^\s*(\d{1,2})(?::?(\d{2}))?\s*$/.exec(text);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2] || 0);
+  return h < 24 && min < 60 ? h * 60 + min : null;
+}
+function customRow(pick) {
+  const at = nextTime(customMinutes);
+  const on = pick === "custom";
+  return `<div class="time-custom ${on ? "selected" : ""}"><span class="time-custom-label">Custom</span><button type="button" class="time-step" data-action="time-step" data-value="-1" aria-label="A quarter hour earlier">◀</button><input id="time-custom" class="time-custom-input" inputmode="numeric" maxlength="5" value="${hhmm(customMinutes)}" aria-label="Custom time, HH:MM"><button type="button" class="time-step" data-action="time-step" data-value="1" aria-label="A quarter hour later">▶</button><small>${at.day === menuClock.day ? "Today" : `Day ${at.day}`}, ${hhmm(customMinutes)}</small></div>`;
+}
+function timeDialog(pick, focus) {
+  const held = activeWorld()?.cycle === false;
+  if (customMinutes === null)
+    customMinutes =
+      (Math.ceil(menuClock.minutes / CUSTOM_STEP) * CUSTOM_STEP) % (24 * 60);
+  dialog(
+    "Time of day",
+    `${timePicks(pick)}${customRow(pick)}<p class="muted time-note">${held ? "The Daylight cycle is off, so the sky holds at the hour you pick." : "The clock moves on to the hour you pick, and the day count carries on from there."}</p>`,
+    `${button("Cancel", "close-dialog")}${button("Set time", "time-set", { primary: true, value: pick })}`,
+  );
+  $("#dialog-root .dialog").classList.add("wide-dialog");
+  $(focus || `#dialog-root [data-value="${pick}"].time-pick`)?.focus();
+}
 function pause() {
   const w = activeWorld();
+  const sky = (w?.game || "Terra") === "Terra";
   const item = (label, act, key = "") =>
     `<button type="button" data-action="${act}"><span>${label}</span>${key ? `<kbd>${key}</kbd>` : ""}</button>`;
-  return `<div class="pause-screen game-pause"><section class="pause-list"><h2>Paused</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><nav class="title-menu pause-actions" aria-label="Menu">${item("Resume", "resume", "Esc")}${item("Inventory", "inventory-open", "I")}${state.mapForbidden ? "" : item("Map", "map-open", "M")}${item("Settings", "settings")}${item("World details", "world-details")}${item("Return to Worlds", "leave")}${item("Save &amp; Quit", "save-quit")}</nav></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3><p>${w?.game || "Terra"}</p></div></div>`;
+  return `<div class="pause-screen game-pause"><section class="pause-list"><h2>Paused</h2><small>${esc(w?.name || "Your World")} · ${survival() ? "Survival" : "Creative"}</small><nav class="title-menu pause-actions" aria-label="Menu">${item("Resume", "resume", "Esc")}${item("Inventory", "inventory-open", "I")}${state.mapForbidden ? "" : item("Map", "map-open", "M")}${sky && !survival() ? item("Time of day", "time-open") : ""}${item("Settings", "settings")}${item("World details", "world-details")}${item("Return to Worlds", "leave")}${item("Save &amp; Quit", "save-quit")}</nav></section><div class="world-status"><p class="eyebrow">YOU ARE HERE</p><h3>${esc(w?.biomes.find((b) => b.enabled)?.name || "Greenwood")}</h3>${sky ? `<p class="world-time">${clockLabel()}</p>` : ""}<p>${w?.game || "Terra"}</p></div></div>`;
 }
 function play() {
   ensureInventory();
@@ -1246,6 +1392,7 @@ function action(name, value) {
     w.name = state.name.trim() || w.name;
     w.mode = state.mode;
     w.playerMode = state.playerMode;
+    w.cycle = state.cycle;
     action("duplicate-go", value);
     return;
   }
@@ -1285,6 +1432,17 @@ function action(name, value) {
       render();
       $(`.game-row[data-value="${value}"]`)?.focus({ preventScroll: true });
     } else if (state.screen === "wizard" && state.step === 0) goStep(1);
+    return;
+  }
+  if (name === "pick-cycle") {
+    state.cycle = value === "on";
+    state.dirty = true;
+    const y = $(".body").scrollTop;
+    render();
+    $(".body").scrollTop = y;
+    $(`[data-action="pick-cycle"][data-value="${value}"]`)?.focus({
+      preventScroll: true,
+    });
     return;
   }
   if (name === "pick-voxel") {
@@ -1487,6 +1645,7 @@ function action(name, value) {
       humiditySize: Number(state.humiditySize),
       mode: state.mode,
       playerMode: state.mode,
+      cycle: state.cycle,
       last: "Just created",
       created: "Today",
     };
@@ -1506,6 +1665,7 @@ function action(name, value) {
     w.name = state.name.trim();
     w.mode = state.mode;
     w.playerMode = state.playerMode;
+    w.cycle = state.cycle;
     if (w.id === state.activeWorld)
       state.itemAccess = w.playerMode.toLowerCase();
     navigate("worlds");
@@ -1587,6 +1747,34 @@ function action(name, value) {
   if (name === "leave") {
     navigate("worlds");
     toast("Returned to your Worlds.");
+    return;
+  }
+  if (name === "time-open") {
+    timeDialog("noon");
+    return;
+  }
+  if (name === "pick-time") {
+    timeDialog(value);
+    return;
+  }
+  if (name === "time-step") {
+    customMinutes =
+      (customMinutes + Number(value) * CUSTOM_STEP + 24 * 60) % (24 * 60);
+    timeDialog("custom", `#dialog-root .time-step[data-value="${value}"]`);
+    return;
+  }
+  if (name === "time-set") {
+    const t = TIMES.find((x) => x.value === value);
+    const minutes = t
+      ? t.minutes
+      : (parseHhmm($("#time-custom")?.value || "") ?? customMinutes);
+    Object.assign(menuClock, nextTime(minutes));
+    closeDialog();
+    const line = $(".world-time");
+    if (line) line.textContent = clockLabel();
+    toast(
+      `Time set to ${t ? t.label.toLowerCase() : hhmm(minutes)}, ${clockLabel()}.`,
+    );
     return;
   }
   if (name === "world-details") {
@@ -1871,6 +2059,17 @@ function syncBulk() {
   });
 }
 document.addEventListener("change", (e) => {
+  if (e.target.id === "time-custom" && e.target.isConnected) {
+    const minutes = parseHhmm(e.target.value);
+    if (minutes === null) {
+      e.target.value = hhmm(customMinutes);
+      toast("Type a time from 00:00 to 23:59.");
+      return;
+    }
+    customMinutes = minutes;
+    timeDialog("custom", "#time-custom");
+    return;
+  }
   if (
     e.target.dataset.biomeStatus ||
     e.target.dataset.biomeCustom !== undefined

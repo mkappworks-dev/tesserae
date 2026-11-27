@@ -39,6 +39,8 @@ const BLEND_RANGE: f32 = 0.15;
 /// A tunnel four times as wide carves sixteen times the rock: the most before the ground is lace.
 pub const MAX_CAVE_SCALE: f32 = 4.0;
 
+pub const MAX_CLOUD_SCALE: f32 = 4.0;
+
 /// Bounded so a [`Biome`] stays inline and `Copy`.
 pub const MAX_SURFACE_FEATURES: usize = 16;
 
@@ -369,6 +371,52 @@ impl ClimateField {
         };
         blend_sky_fog(coloured().map(|(b, colours)| (distance(b), colours)))
     }
+
+    /// The cloud cover scale, blended across Biome borders as [`Self::sky_fog_at`] blends the air,
+    /// among the Biomes `biome_at` chooses from there. 1 in a World with no Biomes.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "display only: the cloud cover blend is not generation"
+    )]
+    pub(crate) fn cloud_scale_at(
+        &self,
+        biomes: &BiomeTable,
+        x_m: f32,
+        z_m: f32,
+        (site, (dt, dh)): (Site, (f32, f32)),
+    ) -> f32 {
+        let selectors = biomes.selectors();
+        let ranged_here = (0..biomes.as_slice().len())
+            .any(|i| selectors[i].is_ranged() && selectors[i].admits(&site));
+        let considered = || {
+            biomes
+                .as_slice()
+                .iter()
+                .enumerate()
+                .filter(move |&(i, _)| {
+                    if ranged_here {
+                        selectors[i].is_ranged() && selectors[i].admits(&site)
+                    } else {
+                        !selectors[i].is_ranged()
+                    }
+                })
+                .map(|(_, b)| b)
+        };
+        let mut c = self.at(x_m, z_m);
+        c.temperature += dt;
+        c.humidity += dh;
+        let distance = |b: &Biome| (b.temperature - c.temperature).hypot(b.humidity - c.humidity);
+        let Some(nearest) = considered().map(distance).reduce(f32::min) else {
+            return 1.0;
+        };
+        let (mut sum, mut total) = (0.0, 0.0);
+        for b in considered() {
+            let weight = (-(distance(b) - nearest) / SKY_BLEND_WIDTH).exp();
+            sum += weight * b.cloud_cover.unwrap_or(1.0);
+            total += weight;
+        }
+        sum / total
+    }
 }
 
 /// The sky and fog of Biomes at these climate distances from a point, the nearest weighing most;
@@ -484,6 +532,8 @@ pub struct Biome {
     pub sky_fog: Option<SkyFog>,
     /// Multiplies the World's cave radius: `None` leaves the caves alone, `Some(0.0)` removes them.
     pub cave_scale: Option<f32>,
+    /// Multiplies the Game's cloud cover over this Biome: `None` is 1.
+    pub cloud_cover: Option<f32>,
     pub surface_features: SurfaceFeatures,
 }
 
@@ -495,6 +545,7 @@ impl Biome {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: SurfaceFeatures::NONE,
     };
 }
@@ -1629,6 +1680,15 @@ impl BiomeTable {
         }) {
             return Err(ParamError {
                 field: "biomes.cave_scale",
+                rule: "must be from 0 to 4",
+            });
+        }
+        if !biomes.iter().all(|b| {
+            b.cloud_cover
+                .is_none_or(|s| (0.0..=MAX_CLOUD_SCALE).contains(&s))
+        }) {
+            return Err(ParamError {
+                field: "biomes.cloud_cover",
                 rule: "must be from 0 to 4",
             });
         }

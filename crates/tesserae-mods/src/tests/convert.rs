@@ -194,6 +194,7 @@ fn world_params_field_for_field_with_the_lake_apart() {
         }),
         lava: None,
         cave_biomes: None,
+        sky: None,
     };
     let (terrain, lake) = world_params(wit.clone());
     assert_eq!(
@@ -229,6 +230,7 @@ fn world_params_field_for_field_with_the_lake_apart() {
         climate: None,
         lava: None,
         cave_biomes: None,
+        sky: None,
         ..wit
     };
     let (terrain, lake) = world_params(bare);

@@ -11,6 +11,9 @@ use crate::session::SessionApp;
 /// One 8-bit step: a smaller move cannot be seen, so is not worth a message.
 const VISIBLE_STEP: f32 = 1.0 / 255.0;
 
+/// A hundredth of the Game's cover: the Client eases toward it, so a smaller move cannot be seen.
+const CLOUD_SCALE_STEP: f32 = 0.01;
+
 pub(super) fn plugin(app: &mut App) {
     app.add_session_message::<SkyFogTarget>()
         .add_session_message::<HereBiome>()
@@ -23,30 +26,58 @@ fn moved(sent: SkyFogBlend, now: SkyFogBlend) -> bool {
     apart(sent.sky, now.sky) || apart(sent.fog, now.fog)
 }
 
+/// The air at the Eye as last sent: the pair, whether it is a Cave Biome's, and the cloud scale.
+#[derive(Clone, Copy)]
+struct Sent {
+    air: SkyFogBlend,
+    cave: bool,
+    cloud_scale: f32,
+}
+
+impl Sent {
+    fn differs(self, now: Sent) -> bool {
+        self.cave != now.cave
+            || moved(self.air, now.air)
+            || (self.cloud_scale - now.cloud_scale).abs() >= CLOUD_SCALE_STEP
+    }
+}
+
+/// The air at the Eye: a Cave Biome's when it is in one, else the Biomes' pair.
+fn air_at(generator: &WorldGenerator, eye: Vec3) -> Option<(SkyFogBlend, bool)> {
+    match generator.cave_fog_at(eye.x, eye.y, eye.z) {
+        Some(cave) => Some((cave, true)),
+        None => generator.sky_fog_at(eye.x, eye.z).map(|open| (open, false)),
+    }
+}
+
 /// Measured against what was last sent, not the last tick, so a slow drift still arrives.
 fn publish(
     generator: Option<Res<WorldGenerator>>,
     player: Query<&Player>,
-    mut sent: Local<Option<SkyFogBlend>>,
+    mut sent: Local<Option<Sent>>,
     mut targets: MessageWriter<SkyFogTarget>,
 ) {
     let (Some(generator), Ok(player)) = (generator, player.single()) else {
         return;
     };
     let eye = player.eye();
-    let Some(now) = generator
-        .cave_fog_at(eye.x, eye.y, eye.z)
-        .or_else(|| generator.sky_fog_at(eye.x, eye.z))
-    else {
+    let Some((air, cave)) = air_at(&generator, eye) else {
         return;
     };
-    if sent.is_some_and(|sent| !moved(sent, now)) {
+    let now = Sent {
+        air,
+        cave,
+        cloud_scale: generator.cloud_scale_at(eye.x, eye.z),
+    };
+    if sent.is_some_and(|sent| !sent.differs(now)) {
         return;
     }
     *sent = Some(now);
     targets.write(SkyFogTarget {
-        sky: now.sky,
-        fog: now.fog,
+        sky: air.sky,
+        fog: air.fog,
+        cave,
+        cloud_scale: now.cloud_scale,
     });
 }
 
@@ -102,6 +133,7 @@ mod tests {
             ground: None,
             sky_fog,
             cave_scale: None,
+            cloud_cover: None,
             surface_features: Default::default(),
         }
     }
@@ -130,6 +162,13 @@ mod tests {
         )));
         app.world_mut().spawn(Player::at(Vec3::ZERO));
         app
+    }
+
+    fn clouded(name: &str, temperature: f32, cloud_cover: Option<f32>) -> Biome {
+        Biome {
+            cloud_cover,
+            ..biome(name, temperature, air(120))
+        }
     }
 
     fn coloured() -> App {
@@ -178,6 +217,7 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert_eq!(bytes(sent[0].sky), [0x87, 0xce, 0xeb]);
         assert_eq!(bytes(sent[0].fog), [0xff, 0xff, 0xff]);
+        assert!(!sent[0].cave);
     }
 
     #[test]
@@ -193,7 +233,9 @@ mod tests {
             first,
             vec![SkyFogTarget {
                 sky: want.sky,
-                fog: want.fog
+                fog: want.fog,
+                cave: false,
+                cloud_scale: 1.0,
             }]
         );
         assert!(tick(&mut app).is_empty());
@@ -216,7 +258,9 @@ mod tests {
             sent,
             vec![SkyFogTarget {
                 sky: want.sky,
-                fog: want.fog
+                fog: want.fog,
+                cave: false,
+                cloud_scale: 1.0,
             }]
         );
     }
@@ -236,6 +280,70 @@ mod tests {
         }
         assert!(sent >= 1, "a slow walk is still told");
         assert!(sent < 100, "but not every tick");
+    }
+
+    #[test]
+    fn biomes_that_scale_no_clouds_send_a_scale_of_one() {
+        let mut app = coloured();
+        assert_eq!(tick(&mut app)[0].cloud_scale, 1.0);
+    }
+
+    #[test]
+    fn the_cloud_scale_is_the_eyes_blend_and_eases_across_a_border_with_the_air_alike() {
+        let mut app = app(&[
+            clouded("dry", 0.9, Some(0.4)),
+            clouded("swamp", 0.1, Some(1.75)),
+        ]);
+        let first = tick(&mut app);
+        let want = app
+            .world()
+            .resource::<WorldGenerator>()
+            .cloud_scale_at(0.0, 0.0);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].cloud_scale, want);
+
+        let generator = app.world().resource::<WorldGenerator>();
+        let scales: Vec<f32> = (0..400)
+            .map(|i| generator.cloud_scale_at(i as f32 * 5.0, 0.0))
+            .collect();
+        assert!(
+            scales.iter().all(|s| (0.4..=1.75).contains(s)),
+            "{scales:?}"
+        );
+        let (low, high) = scales
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), &s| (lo.min(s), hi.max(s)));
+        assert!(
+            high - low > 0.5,
+            "the walk crosses a border: {low} to {high}"
+        );
+        // A climate 100 m across turns fast, so the steepest 5 m is looked at closer: a blend
+        // only grows smoother there, while a step would stay.
+        let rise = |i: usize| (scales[i] - scales[i - 1]).abs();
+        let steepest = (1..scales.len())
+            .max_by(|&a, &b| rise(a).total_cmp(&rise(b)))
+            .unwrap();
+        let from_m = (steepest - 1) as f32 * 5.0;
+        let close: Vec<f32> = (0..=100)
+            .map(|i| generator.cloud_scale_at(from_m + i as f32 * 0.05, 0.0))
+            .collect();
+        for pair in close.windows(2) {
+            assert!(
+                (pair[1] - pair[0]).abs() < 0.02,
+                "no step at a border: {pair:?}"
+            );
+        }
+
+        // The air is the same over both, so only the cloud scale moving can send.
+        let mut sent = Vec::new();
+        for i in 1..400 {
+            move_eye(&mut app, i as f32 * 5.0);
+            sent.extend(tick(&mut app));
+        }
+        assert!(!sent.is_empty(), "a change of scale alone is sent");
+        let last = sent.last().unwrap();
+        let generator = app.world().resource::<WorldGenerator>();
+        assert!((last.cloud_scale - generator.cloud_scale_at(399.0 * 5.0, 0.0)).abs() < 0.01);
     }
 
     #[test]
@@ -276,5 +384,9 @@ mod tests {
             .collect();
         assert_eq!(caves, [HereCave(Some(0))]);
         assert_eq!(sky[0].fog, [20.0, 40.0, 120.0].map(|c: f32| c / 255.0));
+        assert!(
+            sky[0].cave,
+            "a Cave Biome's air is marked so the hour leaves it alone"
+        );
     }
 }

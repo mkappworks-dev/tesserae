@@ -372,7 +372,6 @@ impl FluidSim {
         }
     }
 
-    #[cfg(test)]
     pub fn now(&self) -> Step {
         self.now
     }

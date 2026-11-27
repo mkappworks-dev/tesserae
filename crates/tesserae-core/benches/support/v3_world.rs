@@ -125,6 +125,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> Biome {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: SurfaceFeatures::NONE,
     }
 }
@@ -175,6 +176,7 @@ fn params_with_fields(fields: &[CropField]) -> WorldgenParams {
                 surface: SAND,
             }),
             cave_scale: Some(1.4),
+            cloud_cover: None,
             surface_features: SurfaceFeatures::NONE.with_structures(&[hut_row]).unwrap(),
             ..biome("t:dry", 0.8, 0.2)
         },

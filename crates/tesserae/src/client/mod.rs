@@ -67,7 +67,7 @@ mod scenery;
 mod settings;
 #[cfg(feature = "profiling")]
 pub mod sight;
-mod sky;
+pub(crate) mod sky;
 #[cfg(feature = "dev")]
 mod soak;
 mod sound;
@@ -77,6 +77,8 @@ mod structure;
 mod structure_menu;
 mod theme;
 mod tile_preview;
+mod time_dialog;
+pub(crate) mod time_of_day;
 mod tool;
 mod tool_panel;
 mod touch;
@@ -132,7 +134,12 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
-    app.add_plugins((hand_anim::plugin, hand_fx::plugin, place_settle::plugin));
+    app.add_plugins((
+        hand_anim::plugin,
+        hand_fx::plugin,
+        place_settle::plugin,
+        time_dialog::plugin,
+    ));
     app.add_plugins((menu_blur::plugin, held_item::plugin, viewmodel::plugin));
     // In-game screens on the frame need it whether or not the launcher ran.
     frame::plugin(app);
@@ -159,6 +166,7 @@ pub fn plugin(app: &mut App) {
         soundscape::plugin,
         map_cache::plugin,
         compass::plugin,
+        time_of_day::plugin,
     ));
     app.add_plugins((minimap::plugin, map_window::plugin));
     app.add_plugins((structure::plugin, structure_menu::plugin));

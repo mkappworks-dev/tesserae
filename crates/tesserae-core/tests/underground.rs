@@ -456,6 +456,7 @@ fn with_huts(size: f32) -> Worldgen {
         ground: None,
         sky_fog: None,
         cave_scale: Some(4.0),
+        cloud_cover: None,
         surface_features: tesserae_core::SurfaceFeatures::NONE
             .with_structures(&[tesserae_core::BiomeStructure {
                 template: 0,

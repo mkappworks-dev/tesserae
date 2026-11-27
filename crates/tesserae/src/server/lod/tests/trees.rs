@@ -55,6 +55,7 @@ pub(super) fn forest_spaced(spacing_m: f32, crowding_m: Option<f32>) -> Worldgen
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        cloud_cover: None,
         surface_features: SurfaceFeatures::new(&[oak]).unwrap(),
     };
     WorldgenParams {

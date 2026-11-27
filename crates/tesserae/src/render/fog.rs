@@ -29,6 +29,10 @@ const MIN_REACH_M: f32 = 1.0;
 /// below 1 is the largest opacity that still gives a finite density.
 const MAX_REACH_OPACITY: f32 = 1.0 - f32::EPSILON;
 
+/// How much of the light the fog's glow takes: Bevy scales it by the light's lux and the exposure,
+/// which puts the full sun at about 3.6 before this.
+const GLOW_SHARE: f32 = 0.08;
+
 /// The most Low, the Game's own rings, fogs at its reach: Low keeps the look it had before a
 /// Player could choose a farther curve.
 const LOW_REACH_OPACITY: f32 = 0.88;
@@ -56,6 +60,10 @@ pub struct FogSettings {
     /// density stays finite. Outside 0 to 1, and NaN, clamp to the nearest end
     /// (NaN to 0).
     pub reach_opacity: f32,
+    /// Linear: the colour of the light the fog glows with where the view looks toward it, so a
+    /// low sun warms the fog round it. `None` for no glow. The glow already scales with the
+    /// light's strength, so it fades at night by itself.
+    pub glow: Option<[f32; 3]>,
 }
 
 impl Default for FogSettings {
@@ -65,6 +73,7 @@ impl Default for FogSettings {
             sky: srgb(SkyFog::DEFAULT.sky),
             // At 0.88 and below a farther reach's square edge shows against the sky.
             reach_opacity: 0.95,
+            glow: None,
         }
     }
 }
@@ -113,7 +122,7 @@ pub(crate) fn follow_settings(
 /// has no coarse levels (`lod_distance_m <= view_distance_m`).
 ///
 /// A non-positive or NaN result is floored to [`MIN_REACH_M`].
-fn reach_m(view_distance_m: f32, lod_distance_m: f32) -> f32 {
+pub(crate) fn reach_m(view_distance_m: f32, lod_distance_m: f32) -> f32 {
     // `f32::max` returns the other operand for a NaN, so a NaN distance
     // falls through to the floor instead of poisoning the density.
     view_distance_m.max(lod_distance_m).max(MIN_REACH_M)
@@ -145,6 +154,9 @@ pub fn distance_fog(
     let [r, g, b] = settings.color;
     DistanceFog {
         color: Color::srgb(r, g, b),
+        directional_light_color: settings.glow.map_or(Color::NONE, |[r, g, b]| {
+            Color::linear_rgba(r, g, b, GLOW_SHARE)
+        }),
         falloff: FogFalloff::ExponentialSquared {
             density: density(settings, reach_m(view_distance_m, lod_distance_m)),
         },
@@ -465,6 +477,7 @@ mod tests {
         color: [0.1, 0.2, 0.3],
         sky: [0.4, 0.5, 0.6],
         reach_opacity: 0.5,
+        glow: None,
     };
 
     #[test]
@@ -662,5 +675,20 @@ mod tests {
         );
         // The shader multiplies the fog's alpha into its strength.
         assert_eq!(srgb.alpha, 1.0);
+    }
+
+    #[test]
+    fn a_glow_is_the_lights_colour_and_none_is_none() {
+        let none = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, DEFAULT_LOD_M);
+        assert_eq!(none.directional_light_color, Color::NONE);
+        let dusk = FogSettings {
+            glow: Some([1.0, 0.55, 0.28]),
+            ..default()
+        };
+        let glow = distance_fog(&dusk, DEFAULT_VIEW_M, DEFAULT_LOD_M)
+            .directional_light_color
+            .to_linear();
+        assert_eq!([glow.red, glow.green, glow.blue], [1.0, 0.55, 0.28]);
+        assert!(glow.alpha > 0.0 && glow.alpha < 1.0);
     }
 }

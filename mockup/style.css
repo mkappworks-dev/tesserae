@@ -829,12 +829,21 @@ summary {
 }
 .world-status h3 {
   font-weight: 450;
-  font-size: 24px;
-  margin: 8px 0;
+  font-size: 32px;
+  margin: 8px 0 10px;
 }
 .world-status p {
   color: #c1d2b8;
-  font-size: 11px;
+  font-size: 15px;
+}
+.world-status .eyebrow {
+  font-size: 13px;
+}
+/* Only a Game that declares a sky has a day to tell; the others are held at noon. */
+.world-status .world-time {
+  margin-bottom: 6px;
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
 }
 .loading-screen {
   margin: auto;
@@ -1395,4 +1404,104 @@ html[data-embed] body {
   .sheet-footer:has([data-action="settings-apply"]) > .row {
     margin-left: auto;
   }
+}
+/* Creative's Time of day: four hours, each with a swatch of its sky. */
+.time-picks {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin: 4px 0 14px;
+}
+.time-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #3a3c41;
+  border-radius: 6px;
+  background: #16171a;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.time-pick i {
+  display: block;
+  width: 100%;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+.time-pick span {
+  font-size: 16px;
+}
+.time-pick small {
+  font-size: 13px;
+  color: #b9babe;
+  font-variant-numeric: tabular-nums;
+}
+.time-pick.selected,
+.time-pick:focus-visible {
+  border-color: #eef3e4;
+  outline: 2px solid #eef3e4;
+  outline-offset: 1px;
+}
+.time-pick svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+}
+.time-note {
+  max-width: 52ch;
+}
+.time-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  border: 1px solid #3a3c41;
+  border-radius: 6px;
+  background: #16171a;
+}
+.time-custom.selected,
+.time-custom:focus-within {
+  border-color: #eef3e4;
+  outline: 2px solid #eef3e4;
+  outline-offset: 1px;
+}
+.time-custom-label {
+  font-size: 16px;
+  margin-right: auto;
+}
+.time-step {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #3a3c41;
+  border-radius: 4px;
+  background: #222327;
+  color: inherit;
+  cursor: pointer;
+}
+.time-custom-input {
+  width: 72px;
+  height: 32px;
+  border: 1px solid #3a3c41;
+  border-radius: 4px;
+  background: #0d0e10;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.time-custom small {
+  min-width: 96px;
+  text-align: right;
+  font-size: 13px;
+  color: #b9babe;
+  font-variant-numeric: tabular-nums;
 }

@@ -325,6 +325,44 @@ patches about 5 m across). The 0.1 and 0.2 adapters and an omitted data-only
 `variation` give `fixed`, which draws exactly as before. A Declaration built
 against the earlier 0.3 text needs a rebuild.
 
+`world-params` of line 0.3 then gained `sky`, an optional `sky-params` record
+last: `day-length-s` (at least 60), `start-hour` (from 0 up to 24) and
+`day-share` (above 0 and below 1). It is the Game's alone, like `climate`.
+`none` holds the World at noon, so a Game that declares no sky looks as before.
+A Declaration built against the earlier 0.3 text needs a rebuild.
+
+`sky-params` then gained `tilt-deg` last, from 0 to 60: how far the sun's path
+leans toward the south (+Z), so the noon sun stands that far from overhead. A
+Declaration built against the earlier 0.3 text needs a rebuild.
+
+`sky-params` then gained `day-curve` last, an optional list of 1 to 16 `day-key`
+records with ascending hours from 0 up to 24, each the sun's, the moon's and the
+ambient light's colour and strength (`curve-light`), a sky and a fog tint
+(`curve-tint`, a colour and an amount) and a star brightness. Colours are linear
+and every value from 0 to 1; each channel of the ambient colour times its
+strength is at least the cave floor, 0.0642. `none` is the engine's default
+curve, so a Game that declared a `sky` before looks as it did. A Declaration
+built against the earlier 0.3 text needs a rebuild.
+
+`sky-params` then gained `clouds` last, an optional `cloud-layer` record: the
+base's `altitude-m`, above the top of the Game's terrain band (Sea level plus
+the landforms' height and overhang); `thickness-m`, from 1 to 200; `cover`, from
+0 to 1; and the wind, `wind-direction-deg` (where the clouds drift toward,
+clockwise from north, -Z) and `wind-speed-m-per-s`, from 0 to 50. `none` draws
+no clouds. `biome-def` gained `cloud-cover` after `cave-scale`, an optional
+multiplier from 0 to 4 on the Game's cover over that Biome; `none` is 1. A
+Declaration built against the earlier 0.3 text needs a rebuild.
+
+`ambient-bed` then gained `when` last, an optional closed `bed-hours` of `day`,
+`night` or `always`: a day bed plays at its volume times Daylight, a night bed
+times one minus Daylight, so they crossfade at dawn and dusk; `none` is
+`always`. `soundscape-def` gained `night-music` last, an optional list of at
+most 8 `music` Sounds by full name: when set, a track starts from `music` while
+Daylight is at least 0.5 and from `night-music` otherwise, and a playing track
+is never cut by the hour; `none` plays `music` at every hour, so a Soundscape
+declared before sounds as it did. A Declaration built against the earlier 0.3
+text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

@@ -474,6 +474,7 @@ mod tests {
             material: 1,
             surface_y_m: 0.0,
             dimming: 1,
+            emits: false,
         });
         for (body, repeats) in [
             (

@@ -81,6 +81,14 @@ fn motion(swing_deg: f32, rate_hz: f32, arm_raise_deg: f32) -> content::LimbMoti
     }
 }
 
+fn light(colour: (f32, f32, f32), strength: f32) -> content::CurveLight {
+    content::CurveLight { colour, strength }
+}
+
+fn tint(colour: (f32, f32, f32), amount: f32) -> content::CurveTint {
+    content::CurveTint { colour, amount }
+}
+
 /// What a component Game would return for [`FULL`] and the character.
 fn component() -> Declaration {
     use content::{Occlusion as O, RenderClass as R};
@@ -199,6 +207,39 @@ fn component() -> Declaration {
             }),
             lava: None,
             cave_biomes: None,
+            sky: Some(content::SkyParams {
+                day_length_s: 1200.0,
+                start_hour: 7.0,
+                day_share: 0.7,
+                tilt_deg: 25.0,
+                day_curve: Some(vec![
+                    content::DayKey {
+                        hour: 6.0,
+                        sun: light((1.0, 0.55, 0.28), 1.0),
+                        moon: light((0.62, 0.72, 1.0), 0.15),
+                        ambient: light((0.95, 0.75, 0.65), 0.55),
+                        sky_tint: tint((0.25, 0.18, 0.3), 0.4),
+                        fog_tint: tint((1.0, 0.45, 0.18), 0.55),
+                        stars: 0.2,
+                    },
+                    content::DayKey {
+                        hour: 12.0,
+                        sun: light((1.0, 1.0, 1.0), 1.0),
+                        moon: light((0.62, 0.72, 1.0), 0.15),
+                        ambient: light((1.0, 1.0, 1.0), 1.0),
+                        sky_tint: tint((0.0, 0.0, 0.0), 0.0),
+                        fog_tint: tint((0.0, 0.0, 0.0), 0.0),
+                        stars: 0.0,
+                    },
+                ]),
+                clouds: Some(content::CloudLayer {
+                    altitude_m: 260.0,
+                    thickness_m: 30.0,
+                    cover: 0.4,
+                    wind_direction_deg: 90.0,
+                    wind_speed_m_per_s: 4.0,
+                }),
+            }),
             sea_level_m: 20.0,
             relief_m: 12.0,
             feature_size_m: 48.0,
@@ -336,6 +377,7 @@ fn component() -> Declaration {
                     fog: (196, 178, 142),
                 }),
                 cave_scale: Some(0.0),
+                cloud_cover: Some(0.5),
                 surface_features: Vec::new(),
                 crop_fields: Vec::new(),
                 structures: Vec::new(),
@@ -356,6 +398,7 @@ fn component() -> Declaration {
                 }),
                 sky_fog: None,
                 cave_scale: Some(1.5),
+                cloud_cover: None,
                 surface_features: vec![content::SurfaceFeature {
                     material: Some("full:wood".into()),
                     plant: None,
@@ -465,12 +508,21 @@ fn component() -> Declaration {
             content::SoundscapeDef {
                 name: "surface".into(),
                 context: Some(content::SoundscapeContext::Default),
-                beds: vec![content::AmbientBed {
-                    sound: "full:wind".into(),
-                    volume: 0.6,
-                }],
+                beds: vec![
+                    content::AmbientBed {
+                        sound: "full:wind".into(),
+                        volume: 0.6,
+                        when: None,
+                    },
+                    content::AmbientBed {
+                        sound: "full:wind".into(),
+                        volume: 0.3,
+                        when: Some(content::BedHours::Night),
+                    },
+                ],
                 music: vec!["full:tune".into()],
                 silence_s: None,
+                night_music: Some(vec!["full:tune".into()]),
             },
             content::SoundscapeDef {
                 name: "cave".into(),
@@ -481,6 +533,7 @@ fn component() -> Declaration {
                     min: 20.0,
                     max: 40.0,
                 }),
+                night_music: None,
             },
         ],
         cause_sounds: [content::SoundCause::Hurt, content::SoundCause::UseMeasured]
@@ -698,6 +751,9 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
         ),
         ("[world.movement]", "[world.walking]", "walking"),
         ("[world.climate]", "[world.weather]", "weather"),
+        ("stars = 0.2", "stars = 0.2\nglow = 1.0", "glow"),
+        ("when = \"night\"", "when = \"dusk\"", "dusk"),
+        ("cover = 0.4", "cover = 0.4\nrain = 1", "rain"),
         (
             "temperature-size-m = 400.0",
             "temperature-size-m = 400.0\nwind = 1",
@@ -808,6 +864,34 @@ fn shared_validation_bounds_apply_to_data() {
         ),
         ("max-health = 30", "max-health = 0", "max-health"),
         ("safe-fall-m = 4.5", "safe-fall-m = 1001", "safe-fall-m"),
+        ("stars = 0.2", "stars = 1.5", "sky.day_curve[0].stars"),
+        ("hour = 12.0", "hour = 5.0", "sky.day_curve[1].hour"),
+        (
+            "altitude-m = 260.0",
+            "altitude-m = 200.0",
+            "sky.clouds.altitude_m",
+        ),
+        (
+            "thickness-m = 30.0",
+            "thickness-m = 0.5",
+            "sky.clouds.thickness_m",
+        ),
+        ("cover = 0.4", "cover = 1.2", "sky.clouds.cover"),
+        (
+            "wind-speed-m-per-s = 4.0",
+            "wind-speed-m-per-s = 60.0",
+            "sky.clouds.wind_speed_m_per_s",
+        ),
+        (
+            "cloud-cover = 0.5",
+            "cloud-cover = 5.0",
+            "biomes.cloud_cover",
+        ),
+        (
+            "night-music = [\"full:tune\"]",
+            "night-music = [\"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\", \"full:tune\"]",
+            "night-music",
+        ),
     ] {
         refused(replace, with, field);
     }

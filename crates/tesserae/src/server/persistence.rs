@@ -7,12 +7,14 @@ use bevy::ecs::resource::IsResource;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures::check_ready};
 use tesserae_core::save::{self, Content, Generation, Mapping, WorldId, Writer, library};
+use tesserae_core::sky::{Clock, TimeOfDay};
 
 use super::entities::EntityStore;
 use super::fluids::FluidSim;
 use super::items::Items;
 use super::mods::LoadedMods;
 use super::player::Player;
+use super::time_of_day::WorldClock;
 use super::world_state::{ChunkStore, Lifetime};
 use crate::session::{SessionApp, SessionTeardown};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -270,6 +272,7 @@ struct Completed {
     entities: u64,
     containers: u64,
     map: u64,
+    clock: u64,
     details_completed: bool,
     #[cfg(feature = "profiling")]
     write_ms: f64,
@@ -310,6 +313,8 @@ pub struct Persistence {
     initial_containers: Vec<save::containers::SavedContainer>,
     initial_looted: Vec<[i32; 3]>,
     saved_map: u64,
+    /// The [`WorldClock::revision`] last committed: a set clock is a change even while it holds.
+    saved_clock: u64,
     initial_map: Option<save::map::SavedMap>,
     /// The encoding of the Map at the revision it was made, reused while the Map has not moved.
     map_section: Option<(u64, save::map::SavedMap)>,
@@ -326,6 +331,7 @@ pub struct Persistence {
     /// The World's default: the mode a Player with none saved starts in.
     game_mode: save::GameMode,
     reopened_game_mode: Option<save::GameMode>,
+    clock: Clock,
     initial_simulation: Option<RestoredSimulation>,
     initial_chunks: Vec<save::SavedChunk>,
     opening_detail: String,
@@ -396,10 +402,19 @@ impl Persistence {
             .unwrap_or_default();
         let game_mode = changes.default.unwrap_or(game_mode);
         let reopened_game_mode = changes.own.or(reopened_game_mode);
+        let daylight_cycle =
+            changes
+                .daylight_cycle
+                .unwrap_or(match (&opening.recovered, &opening.details) {
+                    (Some(r), _) => r.commit.daylight_cycle,
+                    (None, Some(d)) => d.daylight_cycle,
+                    (None, None) => true,
+                });
         let mut restored_entities = None;
         let mut initial_containers = Vec::new();
         let mut initial_looted = Vec::new();
         let mut initial_map = None;
+        let mut saved_time = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
                 recovered
@@ -410,6 +425,7 @@ impl Persistence {
                 initial_containers = std::mem::take(&mut c.containers);
                 initial_looted = std::mem::take(&mut c.looted);
                 initial_map = Some(std::mem::take(&mut c.map));
+                saved_time = c.time_of_day.map(TimeOfDay::from_steps);
                 let items = loaded.every_item(settings.voxel_size);
                 restored_entities = Some(
                     c.entities
@@ -495,6 +511,8 @@ impl Persistence {
                     "New World - unsaved".into(),
                 )
             };
+        let mut clock = Clock::open(loaded.sky.clone(), saved_time);
+        clock.set_cycle(daylight_cycle);
         let writer = opening
             .directory
             .as_ref()
@@ -512,6 +530,8 @@ impl Persistence {
                 d.last_played_unix_s = library::now_unix_s();
                 d.game_mode = game_mode;
                 d.player_mode = Some(reopened_game_mode.unwrap_or(game_mode));
+                d.sky = loaded.sky.is_some();
+                d.daylight_cycle = daylight_cycle;
                 // Display data only: failing to record last-played never blocks play.
                 if !d.pending
                     && let Err(e) = library::write(&path, &d)
@@ -543,6 +563,7 @@ impl Persistence {
             initial_containers,
             initial_looted,
             saved_map: 0,
+            saved_clock: 0,
             initial_map,
             map_section: None,
             map_tiles: Default::default(),
@@ -563,6 +584,7 @@ impl Persistence {
             reopened_eye,
             game_mode,
             reopened_game_mode,
+            clock,
             initial_simulation,
             initial_chunks,
             opening_detail: detail,
@@ -629,6 +651,7 @@ fn install(world: &mut World) {
         p.saved_entities = entities.revision();
         world.insert_resource(EntityStore(entities));
     }
+    world.insert_resource(super::time_of_day::WorldClock::opened(p.clock.clone()));
     world.insert_resource(super::container::Containers::restore(
         std::mem::take(&mut p.initial_containers),
         std::mem::take(&mut p.initial_looted),
@@ -732,7 +755,7 @@ pub(super) fn drive(
     mut status: ResMut<SaveStatus>,
     mut store: ResMut<ChunkStore>,
     mut sim: ResMut<FluidSim>,
-    (held, time): (Held, Res<Time<Real>>),
+    (held, time, clock): (Held, Res<Time<Real>>, Option<Res<WorldClock>>),
     mut leave: crate::launch::Leave,
     #[cfg(feature = "profiling")] mut profile: ResMut<SaveProfile>,
 ) {
@@ -745,6 +768,7 @@ pub(super) fn drive(
     let map = held_player
         .get::<super::map::PlayerMap>()
         .expect("required by Player");
+    let clock_revision = clock.as_ref().map_or(0, |c| c.revision());
     let now = time.elapsed_secs_f64();
     p.elapsed += (now - p.last_clock).max(0.0);
     p.last_clock = now;
@@ -772,6 +796,7 @@ pub(super) fn drive(
                 p.saved_entities = done.entities;
                 p.saved_containers = done.containers;
                 p.saved_map = done.map;
+                p.saved_clock = done.clock;
                 if done.details_completed
                     && let Some((_, d)) = p.details.as_mut()
                 {
@@ -788,6 +813,7 @@ pub(super) fn drive(
                     && p.saved_entities == entities.revision()
                     && p.saved_containers == containers.revision()
                     && p.saved_map == map.revision()
+                    && p.saved_clock == clock_revision
                 {
                     leave.now();
                 } else if status.quitting {
@@ -814,7 +840,8 @@ pub(super) fn drive(
         || p.saved_simulation != sim.revision
         || p.saved_entities != entities.revision()
         || p.saved_containers != containers.revision()
-        || p.saved_map != map.revision();
+        || p.saved_map != map.revision()
+        || p.saved_clock != clock_revision;
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
         if status.dirty && !status.quitting {
@@ -919,6 +946,11 @@ pub(super) fn drive(
     let generation = p.generation.clone();
     let generator = p.generator;
     let game_mode = p.game_mode;
+    let time_of_day = clock
+        .as_ref()
+        .and_then(|c| c.clock().saved())
+        .map(|t| t.steps());
+    let daylight_cycle = clock.is_none_or(|c| c.clock().cycle());
     let settings = p.settings;
     let id = p.id.clone();
     let pending = p
@@ -971,6 +1003,8 @@ pub(super) fn drive(
                 looted,
                 map: saved_map,
                 game_mode,
+                time_of_day,
+                daylight_cycle,
             };
             writer.write_draft(commit)?;
             if let Err(e) = writer.retain() {
@@ -998,6 +1032,7 @@ pub(super) fn drive(
             entities: entities_revision,
             containers: containers_revision,
             map: map_revision,
+            clock: clock_revision,
             #[cfg(feature = "profiling")]
             write_ms: write_started.elapsed().as_secs_f64() * 1e3,
         }

@@ -196,6 +196,17 @@ impl Default for WorldgenParams {
 }
 
 impl WorldgenParams {
+    /// The band the ground itself is in, below anything a Plant stands up to: the lowest and
+    /// highest metre the landforms can reach. The cloud base is checked against its top.
+    pub fn terrain_band_m(&self) -> (f32, f32) {
+        let land = self.landforms;
+        let sea_m = self.sea_level_m;
+        (
+            sea_m - land.depth_m - land.overhang_m,
+            sea_m + land.height_m + land.overhang_m,
+        )
+    }
+
     /// These parameters with a sea of `material` up to Sea level, and lakes and rivers inland.
     pub fn with_default_lake(self, material: MaterialId) -> Self {
         WorldgenParams {
@@ -1516,6 +1527,17 @@ impl Worldgen {
         self.climate.sky_fog_at(&self.params.biomes, x_m, z_m, site)
     }
 
+    /// The Biomes' cloud cover scale over the column, blended across borders like
+    /// [`Self::sky_fog_at`]: 1 where no Biome scales it. Pure like [`Self::biome_at`].
+    pub fn cloud_scale_at(&self, x_m: f32, z_m: f32) -> f32 {
+        if self.params.biomes.as_slice().is_empty() {
+            return 1.0;
+        }
+        let site = self.terrain.site(x_m, z_m);
+        self.climate
+            .cloud_scale_at(&self.params.biomes, x_m, z_m, site)
+    }
+
     /// `None` when every column has the World's. Asked at the metre position of the column's
     /// surface, so every LOD level reads the same Biome there.
     fn column_grounds(&self, cx: i32, cz: i32) -> Option<ColumnGrounds> {
@@ -2130,14 +2152,8 @@ impl Worldgen {
         (lowest, highest + self.plant_rise_m)
     }
 
-    /// The band the ground itself is in, below anything a Plant stands up to.
     fn terrain_band_m(&self) -> (f32, f32) {
-        let land = self.params.landforms;
-        let sea_m = self.params.sea_level_m;
-        (
-            sea_m - land.depth_m - land.overhang_m,
-            sea_m + land.height_m + land.overhang_m,
-        )
+        self.params.terrain_band_m()
     }
 
     /// A Chunk of terrain at Chunk coordinates `(cx, cy, cz)`.
@@ -4241,6 +4257,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            cloud_cover: None,
             surface_features: SurfaceFeatures::new(&[grass]).unwrap(),
         };
         WorldgenParams {
@@ -4883,6 +4900,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: Some(cave_scale),
+            cloud_cover: None,
             surface_features: Default::default(),
         };
         Worldgen::new(

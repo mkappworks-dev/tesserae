@@ -99,6 +99,36 @@ its Biome, switching hard at the border, and a Biome without `ground` has the
 World's; surface height, relief, sea level and lakes are never a Biome's. A
 World with no ground is empty air whatever its Biomes name.
 
+`[world.sky]` is the Game's alone: `day-length-s`, at least 60; `start-hour`,
+the hour a new World opens at, from 0 up to 24; `day-share`, how much of the day
+the sun is up, above 0 and below 1; and `tilt-deg`, from 0 to 60, how far the
+sun's path leans toward the south (+Z), so the noon sun stands that far from
+overhead. The clock reads 06:00 at sunrise and 18:00 at sunset whatever the
+share. Omitted, the World is held at noon.
+
+`[[world.sky.day-curve]]` rows are the Day curve, 1 to 16 of them in ascending
+`hour` from 0 up to 24, eased linearly between and across midnight. Each row is
+`hour`; `sun`, `moon` (at full moon; a thinner phase lights less) and `ambient`,
+each `{ colour = [r, g, b], strength }`; `sky-tint` and `fog-tint`, each
+`{ colour = [r, g, b], amount }`; and `stars`. Colours are linear and every
+value is from 0 to 1. A strength is a share of the engine's noon, and each
+channel of `ambient`'s colour times its strength is at least 0.0642, the share a
+sealed cave keeps at every hour, so open ground is never darker than a cave. A
+tint moves a Biome's sky or fog colour toward its colour by its amount, in
+linear light; a Cave Biome's air is never tinted. The sun's and moon's light
+fade to nothing at the horizon whatever the curve says. Omitted, the engine's
+default curve is used.
+
+`[world.sky.clouds]` is the Cloud layer: a slab of cloud whose base is at
+`altitude-m`, which must be above the top of the Game's terrain band (Sea level
+plus 192 m of landforms and 12 m of overhang), `thickness-m` thick, from 1 to
+200; `cover`, how much of the sky is cloud, from 0 to 1; and the wind,
+`wind-direction-deg`, where the clouds drift toward in degrees clockwise from
+north (-Z), and `wind-speed-m-per-s`, from 0 to 50. The clouds are lit by the
+sun or the moon, fade into the distance like the terrain and hide the stars; the
+drift is the same for every Player at the same Time of day. Omitted, there are
+no clouds.
+
 An ore is a blob of `vein-size-m` metres at most, in a cube of that edge; a
 `rarity` fraction of the cubes hold one. It replaces rock only, never soil, the
 surface, water or air, inside its depth band and its Biomes. Caves carve the ore
@@ -120,6 +150,11 @@ switches caves off in that Biome. Omitted, the Biome keeps the World's caves.
 Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
 where a cave field meets a solid one. It does nothing in a World without
 `[world.caves]`, and caves still only turn solid into air.
+
+A Biome row may also add `cloud-cover`, a multiplier from 0 to 4 on the Game's
+`[world.sky.clouds]` cover over that Biome, so a dry Biome can have fewer clouds
+and a swamp more; the cover shown is at most 1. Omitted, it is 1. The Server
+blends it across Biome borders as it blends `sky-fog`, and the Client eases it.
 
 A Biome row may also add `surface-features`, at most 16
 `{ material, spacing-m }` or `{ plant, shape, spacing-m }` entries: exactly one
@@ -248,12 +283,28 @@ by distance. A Sound of the wrong category as a bed or track, an unknown name, a
 `context` from a Mod or a second one for a context fails the load naming the
 Mod, the Soundscape and the field.
 
+A bed may add `when`: `day`, `night` or `always`, the default. A day bed plays
+at its volume times Daylight and a night bed times one minus it, so birds give
+way to crickets through dusk and back at dawn; an `always` bed ignores the hour.
+A Soundscape may add `night-music`, at most 8 `music` Sounds by full name: when
+it is set, each track starts from `music` while Daylight is at least 0.5 and
+from `night-music` otherwise, and a playing track is never cut by the hour. An
+empty `night-music` is silence by night. Without it `music` plays at every hour.
+A World whose Game declares no `sky` is held at noon, so its day beds play whole
+and its night beds not at all. The Server still names only the Soundscape; the
+Client mixes it by the hour.
+
 ```toml
 [[soundscapes]]
 name = "open"
 context = "default"
-beds = [{ sound = "plain:wind", volume = 0.6 }]
+beds = [
+  { sound = "plain:wind", volume = 0.6 },
+  { sound = "plain:birds", volume = 0.5, when = "day" },
+  { sound = "plain:crickets", volume = 0.4, when = "night" },
+]
 music = ["plain:morning", "plain:dusk"]
+night-music = ["plain:nocturne"]
 silence-s = { min = 90.0, max = 240.0 }
 ```
 

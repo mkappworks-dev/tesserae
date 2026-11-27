@@ -1,6 +1,8 @@
 //! Materials. Step 9 adds the look-pack API that supplies their WESL.
 
 pub mod chunk_material;
+mod cloud_field;
+pub mod clouds;
 pub mod fog;
 pub mod quad_buffer;
 pub mod sky;
@@ -31,6 +33,7 @@ pub fn plugin(app: &mut App) {
     app.add_plugins((
         MaterialPlugin::<ChunkMaterial>::default(),
         bevy::ui_render::UiMaterialPlugin::<tile_icon::TileIcon>::default(),
+        clouds::plugin,
         fog::plugin,
         quad_buffer::plugin,
         sky::plugin,

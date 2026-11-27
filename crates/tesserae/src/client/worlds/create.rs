@@ -51,6 +51,7 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
             l.form.game = Some(game.id.clone());
             l.form.climate = None;
+            l.form.sky = false;
             l.terrain = None;
             // Each Game starts from the Mods it suggests; picks made for another do not carry over.
             l.form.mods = cx.installed.suggested(&game.id);
@@ -150,6 +151,11 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             l.refocus = Some(Act::Mode(mode));
             l.version += 1;
         }
+        Act::Cycle(on) => {
+            l.form.daylight_cycle = on;
+            l.refocus = Some(Act::Cycle(on));
+            l.version += 1;
+        }
         Act::Create => {
             if !matches!(l.screen, Screen::Create(_)) || reads::pending(l, cx.installed) {
                 return;
@@ -186,6 +192,7 @@ pub(super) fn recreate(l: &mut Launcher, cx: &mut Acting) {
         seed: details.seed.to_string(),
         voxel_size_m: details.voxel_size_m,
         game_mode: modes(&details).default,
+        daylight_cycle: cycle(&details),
         game: details.game.as_ref().map(|g| g.id.clone()),
         mods: details.mods.iter().map(|m| m.id.clone()).collect(),
         seeded: details.biomes.clone(),
@@ -270,6 +277,7 @@ pub(super) fn game_read(
                 climate.set(seeded);
             }
             l.form.climate = Some(climate);
+            l.form.sky = declared.sky;
             l.terrain = declared.source.map(|source| (ids, source));
         }
         Err(e) => {
@@ -422,6 +430,7 @@ impl Form {
         let bare = |f: &Form| Form {
             problem: None,
             climate: climate(f),
+            sky: false,
             ..f.clone()
         };
         bare(self) == bare(initial)
@@ -521,6 +530,8 @@ pub(super) fn create(
         biomes: l.form.edits(),
         player_mode: None,
         mode_changes: Default::default(),
+        sky: l.form.sky,
+        daylight_cycle: l.form.daylight_cycle,
     };
     match library::create(worlds, &sidecar) {
         Ok(path) => {

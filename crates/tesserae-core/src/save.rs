@@ -376,6 +376,31 @@ impl SavedChunk {
     }
 
     pub fn restore(&self, mapping: &Mapping) -> Result<(Chunk, ChunkOverlay), Error> {
+        let (indices, restored) = self.decode(mapping)?;
+        let mut chunk = Chunk::filled(Voxel::AIR);
+        let mut overlay = ChunkOverlay::none();
+        for (i, &k) in indices.iter().enumerate() {
+            let (x, y, z) = (
+                i / (CHUNK_SIZE * CHUNK_SIZE),
+                i / CHUNK_SIZE % CHUNK_SIZE,
+                i % CHUNK_SIZE,
+            );
+            let (voxel, o) = restored[usize::from(k)];
+            chunk.set(x, y, z, voxel);
+            overlay.set(x, y, z, o);
+        }
+        Ok((chunk, overlay))
+    }
+
+    /// Whether [`Self::restore`] would succeed, without building the Chunk: opening a World
+    /// checks its Commit several times, and setting every Voxel was nearly all of each check.
+    pub fn validate(&self, mapping: &Mapping) -> Result<(), Error> {
+        self.decode(mapping).map(drop)
+    }
+
+    /// Every Voxel's index into the cells, each cell restored, checked as [`Self::restore`]
+    /// needs them.
+    fn decode(&self, mapping: &Mapping) -> Result<Decoded, Error> {
         mapping.validate()?;
         if self
             .coord
@@ -403,21 +428,12 @@ impl SavedChunk {
                 ))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut chunk = Chunk::filled(Voxel::AIR);
-        let mut overlay = ChunkOverlay::none();
-        for (i, &k) in indices.iter().enumerate() {
-            let (x, y, z) = (
-                i / (CHUNK_SIZE * CHUNK_SIZE),
-                i / CHUNK_SIZE % CHUNK_SIZE,
-                i % CHUNK_SIZE,
-            );
-            let (voxel, o) = restored[usize::from(k)];
-            chunk.set(x, y, z, voxel);
-            overlay.set(x, y, z, o);
-        }
-        Ok((chunk, overlay))
+        Ok((indices, restored))
     }
 }
+
+/// Each Voxel's index into the cells, and each cell restored.
+type Decoded = (Vec<u16>, Vec<(Voxel, Overlay)>);
 
 /// Timer deadlines are remaining logical steps, never Unix timestamps.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -744,6 +760,9 @@ pub struct SavedBiome {
     /// Absent is the World's own caves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cave_scale: Option<f32>,
+    /// Absent is the Game's own cloud cover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_cover: Option<f32>,
     /// Absent is bare ground, as every Biome was before it could declare features.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub surface_features: Vec<SavedSurfaceFeature>,
@@ -1408,6 +1427,7 @@ fn saved_biome(
         ground: b.ground.map(|g| ground_names(g, mapping)).transpose()?,
         sky_fog: b.sky_fog,
         cave_scale: b.cave_scale,
+        cloud_cover: b.cloud_cover,
         surface_features: b
             .surface_features
             .as_slice()
@@ -1699,6 +1719,7 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
                     .transpose()?,
                 sky_fog: b.sky_fog,
                 cave_scale: b.cave_scale,
+                cloud_cover: b.cloud_cover,
                 surface_features: restored_features(b, &mut variety, mapping)?,
             })
         })
@@ -2260,6 +2281,17 @@ pub struct Commit<C = SavedChunk, P = ([i32; 3], Simulation)> {
     /// modes: those Worlds were Creative.
     #[serde(default)]
     pub game_mode: GameMode,
+    /// The Time of day in logical steps since day 0's midnight. Absent in commits written before
+    /// it, or by a Game with no sky: opens at the Game's start hour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_of_day: Option<u64>,
+    /// Absent in commits written before the setting: those Worlds run their cycle.
+    #[serde(default = "daylight_cycle_on")]
+    pub daylight_cycle: bool,
+}
+
+fn daylight_cycle_on() -> bool {
+    true
 }
 
 impl<C, P> Commit<C, P> {
@@ -2283,6 +2315,8 @@ impl<C, P> Commit<C, P> {
             looted,
             map,
             game_mode,
+            time_of_day,
+            daylight_cycle,
         } = self;
         let head = Commit {
             format,
@@ -2302,6 +2336,8 @@ impl<C, P> Commit<C, P> {
             looted,
             map,
             game_mode,
+            time_of_day,
+            daylight_cycle,
         };
         (head, chunks, paused)
     }
@@ -2361,7 +2397,7 @@ impl Commit {
         let mut coords = BTreeSet::new();
         for chunk in &self.chunks {
             distinct_chunk(&mut coords, chunk.coord)?;
-            chunk.restore(&mapping)?;
+            chunk.validate(&mapping)?;
         }
         let mut homes = self.simulation.homes();
         for (home, paused) in &self.paused {

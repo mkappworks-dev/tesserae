@@ -202,22 +202,18 @@ rings.
   finer level's guaranteed reach in metres, and inside its rows: without that a
   coarse surface up to a coarse Voxel too high stands over the finer horizon at
   ground level.
-- **One camera per level.** Level k is on `RenderLayers` {k} and drawn by its
-  own camera, the coarsest first and the only one to clear, each finer level
-  over the last. A finer level's pixel wins whatever the coarse depth, which is
-  what stops the coarse level poking through in the overlap. The near camera is
-  level 0, the UI and everything that is not terrain. Two suns share a transform
-  because a light's layers are also its shadow-caster mask: the one on layer 0
-  casts shadows, the one on the coarse layers does not, and coarse terrain
-  receives none.
+- **One camera for every level.** Level k is on `RenderLayers` {k}, and one
+  world camera draws them all into one depth buffer: a coarse fragment is
+  discarded wherever a finer level draws its Chunk, and depth decides the rest
+  ([ADR-0019](docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md)).
+  Level 0 is the only shadow caster, and coarse terrain receives none.
 - **Light.** A level above 0 stores none. The mesh job lights a face open sky
   unless it looks into air more than a Voxel under the terrain, which it lights
   dark (`coarse_light`, from the level's generator). See the ADR for what that
   gets wrong.
-- **Fog.** Bevy's `DistanceFog` on all six cameras, built once from one
+- **Fog.** Bevy's `DistanceFog` on the world camera, built from one
   `FogSettings` (a fog colour, a sky colour and `reach_opacity`, 0.95 by
-  default), so a fragment is fogged the same whichever camera draws it. The
-  density is derived from the streamed reach in metres,
+  default). The density is derived from the streamed reach in metres,
   `max(view_distance_m, lod_distance_m)`, and re-derived when the Quality curve
   changes it, so the opacity at the reach is `reach_opacity` at any Voxel size
   and any curve. 0.95 hides the reach's square edge against the sky, which 0.88
@@ -550,7 +546,19 @@ multiplayer is a later transport swap, not a rewrite.
    torches instead of flat ambient. Sky and time of day are World or Game
    settings, not a function of the seed. Biomes are generator behaviour and
    belong to step 13; they are listed there because they change what the sky and
-   fog should be.
+   fog should be. The day and night cycle is specified in
+   `.scratch/2026-11-24-day-night-cycle/spec.md`: a Server-owned Time of day, a
+   moving sun and moon, Moon phases, stars, a Cloud layer and Soundscapes that
+   change with the time, drawn by our own sky shader
+   ([ADR-0039](docs/adr/0039-the-sky-is-our-own-shader-not-bevys-atmosphere.md)).
+   Weather (step 24) adds itself to its Sky state as a later layer. The cycle is
+   done: a Player turns it off per World, Creative sets the hour from the Menu,
+   the night's light follows the Moon's phase down to starlight, and Terra's
+   clouds are an 80 m layer of warped gradient noise, baked once into a
+   repeating texture. Measured against `main` on `flight` at 1080p, the sky and
+   the clouds together cost under 0.1 ms of GPU frame time, inside the 0.3 ms
+   budget; the terrain fogs itself, since bevy_pbr's fog glow samples the shadow
+   map a second time on every pixel.
 
 ### Steps 10 to 29: engine systems and game content
 
@@ -576,7 +584,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                                           | Numbers and rules                  | 15         | Done            |
 | 22  | LOD features            | Trees and Structures drawn at coarse levels as sparse impostors from the same pure draws, and a ring quality curve           | Larger default view distance       | 6, 18, 20  | Done            |
 | 23  | Blueprints and Sites    | Blueprint Items that lay a Site, which builds itself over time from Items brought to it                                      | Blueprints                         | 15, 20     | Not started     |
-| 24  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 13, 17     | Not started     |
+| 24  | Weather                 | Weather state and tick, particles, sky hooks                                                                                 | Weather types, climate rules       | 9, 13, 17  | Not started     |
 | 25  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                                                      | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
 | 26  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                                             | NPC definitions, dialogue          | 15, 25     | Not started     |
 | 27  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                                                       | Machine parts, logic components    | 12, 20     | Not started     |

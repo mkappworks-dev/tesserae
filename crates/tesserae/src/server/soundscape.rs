@@ -188,6 +188,7 @@ mod tests {
                 ground: None,
                 sky_fog: None,
                 cave_scale: None,
+                cloud_cover: None,
                 surface_features: default(),
             })
             .collect();
@@ -280,6 +281,7 @@ mod tests {
             def: tesserae_core::audio::SoundscapeDef {
                 beds: Vec::new(),
                 music: Vec::new(),
+                night_music: None,
                 silence_s: tesserae_core::audio::DEFAULT_SILENCE_S,
             },
         };
