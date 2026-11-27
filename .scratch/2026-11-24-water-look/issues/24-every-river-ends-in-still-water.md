@@ -48,3 +48,4 @@ as a spring pool.
   A wider halo also helps, with inflow: 1.5 km 1.3%, 2 km 0.6%, at about 1.6x
   and 2.6x a region's solve; left at 1 km until the profile shows what the
   solve costs. Test `a_river_keeps_its_width_across_a_region_border`.
+- 2026-11-27: the user kept the 1 km halo.
