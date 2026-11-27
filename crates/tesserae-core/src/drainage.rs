@@ -713,6 +713,12 @@ impl Drainage {
                     (((x - a[0]) * ab[0] + (z - a[1]) * ab[1]) / (ab[0] * ab[0] + ab[1] * ab[1]))
                         .clamp(0.0, 1.0)
                 };
+                if n.to_sea == INLAND
+                    && n.delta == 0
+                    && out_of_reach(n, p, a, ab, along(x_m, z_m), (x_m, z_m))
+                {
+                    continue;
+                }
                 // Bends the lattice's straight 8-way segments into meanders sized by the stream,
                 // blended between its two ends as its width is, so a tributary and the river it
                 // joins bend alike where they meet.
@@ -1202,6 +1208,20 @@ fn opposite(step: usize) -> u8 {
 }
 
 /// A stream's width from its spring pool, a fraction `t` down its first segment `ab`.
+/// Whether an inland segment from `n` to `p` is too far from `(x, z)` to cut it however its
+/// meander bends, at `s` along it unbent: the meander's noise is the costliest part of a column,
+/// and most segments in the stencil are far from it.
+fn out_of_reach(n: Node, p: Node, a: [f32; 2], ab: [f32; 2], s: f32, (x, z): (f32, f32)) -> bool {
+    let mut widest_m = river_width_m(n.catchment).max(river_width_m(p.catchment));
+    if n.lake & HEAD != 0 {
+        widest_m = widest_m.max(SPRING_WIDTH_M);
+    }
+    let bend_m = meander_m(widest_m).0 * core::f32::consts::SQRT_2;
+    let (dx, dz) = (x - a[0] - ab[0] * s, z - a[1] - ab[1] * s);
+    let far_m = valley_reach_m(widest_m) + widest_m / 2.0 + bend_m;
+    dx * dx + dz * dz >= far_m * far_m
+}
+
 fn spring_width_m(t: f32, ab: [f32; 2]) -> f32 {
     let from_m = t * libm::hypotf(ab[0], ab[1]);
     SPRING_WIDTH_M * (1.0 - from_m / SPRING_WIDTH_M).max(0.0)

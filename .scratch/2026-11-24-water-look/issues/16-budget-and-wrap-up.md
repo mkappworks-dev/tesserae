@@ -78,3 +78,11 @@ Measure the finished water against `main` and close the spec.
   per Chunk: straddling dry +7.7 % at 1 m and +7.2 % at 0.5 m, straddling
   crop field +4.3 % at 1 m, every other case within +/-1.5 %. Straddling dry is
   ticket 04's +8.3 %, still over the 5 % gate and still the user's to decide.
+- 2026-11-27, after tickets 17-28. `worldgen_v3` straddling dry was +13% on
+  `main`. Not content: the dry Chunk's ground is the same on both. A sampled
+  profile of that case alone put it in `wet`, which bends every stream segment
+  in the stencil with four noise samples where `main` bent the column once. An
+  inland segment too far to reach the column however it bends is now skipped
+  before its noise, which leaves every recorded Chunk unchanged. Seven
+  interleaved rounds against `main`: dry +4.6% @ 1 m and +0.6% @ 0.5 m, every
+  other case within 2.4% or faster. Full suites: core 1194 and game 2001 pass.
