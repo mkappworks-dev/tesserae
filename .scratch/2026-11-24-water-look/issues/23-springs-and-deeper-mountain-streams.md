@@ -22,3 +22,12 @@ drawing parallel streams. Mountain streams are 1.5 to 2 m deep in their pools.
 - [ ] A mountain stream's pools are at least 1.5 m deep.
 
 ## Comments
+
+- 2026-11-27: a stream's head node is flagged in the solve, and its channel
+  widens to a 5 m spring pool there; a test checks every head stands in one.
+  The narrowest brook lies 1.6 m deep, so its band is up to 8 m across.
+  Parallel streams: a node carries a stream only once two or more nodes drain
+  into it, or once its catchment is four times a stream's, so short brooks
+  no longer start side by side down an even slope. Long parallel pairs a
+  node apart remain on the 1 km map (`25-map-before-after.png`, bottom
+  left); a D-infinity spread is still open for them.

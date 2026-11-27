@@ -1,6 +1,6 @@
 # 22: Stepped river profile and real waterfalls
 
-Status: ready-for-agent
+Status: done
 Blocked by: 21
 
 Spec: [Water that looks natural](../spec.md), Rivers. From the user's review:
@@ -25,3 +25,15 @@ and carries a spill sheet, so no step reads as a dam.
       Fall's own face.
 
 ## Comments
+
+- 2026-11-27: a segment dropping 4 m or more at 10% or steeper holds its
+  upper level and drops down one face 3.5 in 1, at a hashed point between 0.3
+  and 0.7 along it; the heightfield stays a slope. A Fall's pool may lie up
+  to three columns past its lip, and its landing foam is the first wet one.
+  Each lip carries a drawn film a sixteenth over its top, running toward the
+  Fall. Falls of 13 m off the sea cliffs near -5658, -2035:
+  `/tmp/tesserae-water-look-captures/24-after/fall.png`. The coarse digests moved.
+- 2026-11-27, the look. A Fall's wall read as dirty glass: short grey dashes
+  with the rock behind. Falling water is full of air, so at least 0.6 of the
+  wall is white, in long fine strands 0.8 m across and 12 m down, falling at
+  6 m/s. `/tmp/tesserae-water-look-captures/22-falls2/fall.png`.

@@ -1,6 +1,6 @@
 # 19: Coarse water matches at every hour
 
-Status: ready-for-agent
+Status: done
 Blocked by: 16
 
 Spec: [Water that looks natural](../spec.md), Coarse levels. From the user's
@@ -21,3 +21,10 @@ that distance, so the edge between them does not show.
       brightness or roughness.
 
 ## Comments
+
+- 2026-11-27: the far water reflected the pale horizon at nearly full
+  Fresnel, as a flat mirror. The slope variance too fine for the pixel now
+  tilts the normal the view sees toward it, so the far water reflects higher
+  sky and less of it. Before and after at noon, sunset and midnight in
+  `/tmp/tesserae-water-look-captures/19-before/` and `/tmp/tesserae-water-look-captures/19-after/sheet.png`; the user had said the white
+  horizon was the issue.

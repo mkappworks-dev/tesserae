@@ -270,8 +270,8 @@ pub fn water_columns(
         for x in -1..=SIDE {
             let column = [base[0] + x, base[2] + z];
             let Some(scan) = scans[water_index(x, z)] else {
-                // A lip beside water carries the drawn film `fall_sheets` lays over it: shallow,
-                // running toward its Fall and churned white, so the film reads as water spilling.
+                // A lip beside water carries the drawn film `fall_sheets` lays over it: shallow and
+                // running toward its Fall, so the film reads as water spilling.
                 let beside_water = CARDINALS.iter().any(|&[dx, dz]| {
                     let (nx, nz) = (x + dx, z + dz);
                     (-1..=SIDE).contains(&nx)
@@ -280,8 +280,7 @@ pub fn water_columns(
                 });
                 if beside_water && let Some(fall) = answers.fall(column) {
                     let toward = fall.toward.map(|t| t as f32 * LIP_FLOW_M_S);
-                    out[water_index(x, z)] =
-                        WaterColumn::new(toward, LIP_FILM_M, WaterColumn::FOAM);
+                    out[water_index(x, z)] = WaterColumn::new(toward, LIP_FILM_M, 0);
                 }
                 continue;
             };

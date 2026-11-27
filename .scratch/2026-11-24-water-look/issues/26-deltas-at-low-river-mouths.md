@@ -1,6 +1,6 @@
 # 26: Deltas at low river mouths
 
-Status: ready-for-agent
+Status: done
 Blocked by: 25
 
 Spec: [Water that looks natural](../spec.md), Mouths. From the user's review:
@@ -18,3 +18,6 @@ the land between them lifted to just above the sea.
       to the user.
 
 ## Comments
+
+- 2026-11-27: a river from 4 m wide fans into distributaries at the sea,
+  from 10 m. `/tmp/tesserae-water-look-captures/24-after/delta.png`, `estuary.png`.

@@ -414,6 +414,10 @@ fn add_material(
         base: StandardMaterial {
             // The shader premultiplies, so water's reflection is not faded by its body's alpha.
             alpha_mode: AlphaMode::Premultiplied,
+            // Any transmission at all moves the layer into Bevy's transmissive pass, whose copy of
+            // the scene behind it the shader bends through the ripples; the shader zeroes Bevy's
+            // own transmission.
+            specular_transmission: if water_refraction() { 1e-3 } else { 0.0 },
             // The mesher hides water against water, so from inside a lake the
             // surface's underside is the only water face there is.
             double_sided: true,
@@ -445,6 +449,18 @@ fn add_material(
         cutout: materials.add(cutout),
         drawn,
     });
+}
+
+/// Ticket 28's prototype, the bed bent through the water's ripples: under `dev` and `profiling`
+/// only, while it is timed against the frame budget.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn water_refraction() -> bool {
+    std::env::var("TESSERAE_DIAG_WATER_REFRACTION").is_ok_and(|v| v != "0")
+}
+
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
+fn water_refraction() -> bool {
+    false
 }
 
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -993,6 +1009,11 @@ fn spawn_camera(
             super::camera::CameraHome(pose),
         ))
         .id();
+    if water_refraction() {
+        commands
+            .entity(camera)
+            .insert(bevy::pbr::ScreenSpaceTransmission::default());
+    }
     if let Some(fog) = fog::camera_fog(
         fog::enabled(),
         &fog_settings,

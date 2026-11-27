@@ -122,6 +122,9 @@ struct WaterShape {
     sea: f32,
     landing: f32,
     flow: vec2<f32>,
+    // How much silt the water carries, 0 for still water and the sea, from the Flow before it is
+    // calmed with distance, so a river keeps its colour out to level 0's edge.
+    silt: f32,
 }
 
 // Four column values, x then z, at `f` between their centres.
@@ -149,6 +152,7 @@ fn water_shape(water: u32, point: vec2<f32>, level: u32, world_position: vec3<f3
     var landing = vec4<f32>(0.0);
     var flow_x = vec4<f32>(0.0);
     var flow_z = vec4<f32>(0.0);
+    var silt = vec4<f32>(0.0);
     for (var c = 0u; c < 4u; c++) {
         depth[c] = word_depth_m(words[c]);
         sea[c] = word_flag(words[c], constants::CHUNK_WATER_SEA);
@@ -156,6 +160,7 @@ fn water_shape(water: u32, point: vec2<f32>, level: u32, world_position: vec3<f3
         let flow = word_flow(words[c]);
         flow_x[c] = flow.x;
         flow_z[c] = flow.y;
+        silt[c] = smoothstep(SILT_FROM_M_S, SILT_AT_M_S, length(flow)) * (1.0 - sea[c]);
     }
     let wet = vec4<f32>(depth > vec4<f32>(0.0));
     let wet_mean = dot(depth, wet) / max(dot(wet, vec4<f32>(1.0)), 1.0);
@@ -173,6 +178,7 @@ fn water_shape(water: u32, point: vec2<f32>, level: u32, world_position: vec3<f3
         bilinear(sea, f),
         bilinear(landing, f),
         vec2<f32>(bilinear(flow_x, f), bilinear(flow_z, f)) * calm,
+        bilinear(silt, f),
     );
 }
 
@@ -217,8 +223,8 @@ fn flow_taps(uv: vec2<f32>, flow: vec2<f32>, cycle: f32) -> FlowTaps {
 
 // Shallower than this, the sea foams at its shore where the mask says.
 const FOAM_DEPTH_M: f32 = 0.6;
-// The shore band's share at the waterline: below 1, so the mask still breaks it into lace there and
-// it never reads as a solid white strip.
+// The share of the surface the shore band, a breaker or a Fall's landing foams at most: below 1,
+// so the mask still breaks it into lace and it never reads as a solid white patch.
 const SHORE_FOAM_MOST: f32 = 0.6;
 // One repeat of the foam mask.
 const FOAM_TILE_M: f32 = 3.0;
@@ -246,7 +252,7 @@ fn water_foam_share(
 ) -> f32 {
     let shore = (1.0 - smoothstep(0.03, FOAM_DEPTH_M, depth_m)) * sea * SHORE_FOAM_MOST;
     let white = smoothstep(WHITE_FROM_M_S, WHITE_AT_M_S, length(flow));
-    let band = max(max(shore, white), breaking);
+    let band = max(max(shore, white), breaking * SHORE_FOAM_MOST);
     if band <= 0.0 {
         return 0.0;
     }
@@ -265,11 +271,14 @@ fn water_foam_share(
 
 // A wall of water is falling water: a Fall's sheet, a Settlement's waterfall, a poured block's
 // side. Streaks of the foam mask, stretched down the wall, run down it at this speed.
-const FALL_M_S: f32 = 4.0;
-const FALL_ACROSS_M: f32 = 1.5;
-const FALL_DOWN_M: f32 = 6.0;
+const FALL_M_S: f32 = 6.0;
+const FALL_ACROSS_M: f32 = 0.8;
+const FALL_DOWN_M: f32 = 12.0;
+// Falling water is full of air, so most of a wall of it is white and hides the rock behind: the
+// least share of it that is, between the mask's streaks of glassier water.
+const FALL_WHITE_LEAST: f32 = 0.6;
 
-// How much of a wall of water is white: streaks running down it.
+// How much of a wall of water is white: long fine strands running down it over white water.
 fn falling_foam(world_position: vec3<f32>, normal: vec3<f32>, cycle: f32) -> f32 {
     let across = select(world_position.x, world_position.z, abs(normal.x) > 0.5);
     let uv = vec2<f32>(across / FALL_ACROSS_M, -world_position.y / FALL_DOWN_M);
@@ -282,7 +291,7 @@ fn falling_foam(world_position: vec3<f32>, normal: vec3<f32>, cycle: f32) -> f32
         ),
         taps.weights,
     ) / (taps.weights.x + taps.weights.y);
-    return smoothstep(0.3, 0.7, mask);
+    return mix(FALL_WHITE_LEAST, 1.0, smoothstep(0.3, 0.7, mask));
 }
 
 // The body of water under a fragment, premultiplied: what it sends toward the eye as albedo, and
@@ -292,15 +301,29 @@ struct WaterBody {
     alpha: f32,
 }
 
-// Each channel keeps exp(-absorption x path) of the floor, the path being the depth over the
-// cosine of the view; what is lost is replaced by the scatter tint. The floor is blended by one
-// alpha, so alpha follows the mean of the three.
-fn water_body(slot: u32, depth_m: f32, cos_view: f32, foam: f32) -> WaterBody {
+// Running water carries silt: none below the first speed, a river's full load from the second.
+// A lake's drift stays under the first, and a pool of the slowest brook is just past it.
+const SILT_FROM_M_S: f32 = 0.15;
+const SILT_AT_M_S: f32 = 0.6;
+// A river's silt, in metres a ray crosses per e-fold lost: a few metres of it hide the bed, as
+// in a lowland river, while a lake and the sea stay as clear as their own water.
+const SILT_PER_M: f32 = 0.45;
+// What the silt scatters back, linear: a dull, warm grey-green.
+const SILT_COLOUR: vec3<f32> = vec3<f32>(0.09, 0.09, 0.055);
+
+// Each channel keeps exp(-extinction x path) of the floor, the path being the depth over the
+// cosine of the view, the extinction the water's own absorption plus its silt; what is lost is
+// replaced by each one's tint by its share of the extinction. The floor is blended by one alpha,
+// so alpha follows the mean of the three.
+fn water_body(slot: u32, depth_m: f32, cos_view: f32, foam: f32, silt: f32) -> WaterBody {
     let absorption = water_table[slot * 3u].xyz;
     let scatter = water_table[slot * 3u + 1u].xyz;
     let path = depth_m / max(cos_view, 0.05);
-    let lost = vec3<f32>(1.0) - exp(-absorption * path);
-    let body = WaterBody(scatter * lost, (lost.x + lost.y + lost.z) / 3.0);
+    let clouded = vec3<f32>(SILT_PER_M * silt);
+    let extinction = absorption + clouded;
+    let lost = vec3<f32>(1.0) - exp(-extinction * path);
+    let tint = (scatter * absorption + SILT_COLOUR * clouded) / max(extinction, vec3<f32>(1e-4));
+    let body = WaterBody(tint * lost, (lost.x + lost.y + lost.z) / 3.0);
     let foam_colour = water_table[slot * 3u + 2u].xyz;
     return WaterBody(mix(body.albedo, foam_colour, foam), mix(body.alpha, 1.0, foam));
 }

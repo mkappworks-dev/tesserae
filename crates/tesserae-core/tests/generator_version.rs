@@ -609,24 +609,24 @@ const RECORDED_PLANT: [&str; 4] = [
 const RECORDED_FOREST: [&str; 4] = [
     "208e96faaaba0382cf0f8c97f854af1eef84fc08009456eea5f1b552837aa09a",
     "2cfb0213c80b50a85fe81127378521c803038e63dee8600e378ae2aca62ee34b",
-    "5ced9a6a5d38f78a54d558498ff69c728c24b879450ffedae7ceaf47118649c0",
-    "dbae335dfab55261370553635cfe9f03e6ec78aad8cfb980b612c480a0a10daa",
+    "d9a6b14b88a2c46112fe68caa32abd8909b7a790977f65b3bfffac1eda8d0a06",
+    "8d515a93868374b079ce2b70d09bffb4e031105c46a5e3a9e9baab2e92eaabfb",
 ];
 
 /// Recorded with storeys and canopy variants, on macOS arm64.
 const RECORDED_STOREYED_FOREST: [&str; 4] = [
     "dc60515327b244703bf9b85064e50f1211a19114b4573a27181774c23cada099",
     "bce614fe180c9cfbd29d3e0f1d7d781f09ea8697a9952a82458972d1d771b4af",
-    "d8e048ea8aee25d59e9f5b91f1a2fd98388db23413ad031aea2c3d37bbbd843b",
-    "e5d39098a34865ce7aa27c25ba4a555d98ac6db1222a7497436a69c47ae18e5c",
+    "4822fef053ff3fbc38b2725d04f77811060b5b44b3dba4ccd10131b74e32bdd7",
+    "71f886dcb7e45dc096b40c945245bcf14426f2147a2ecf4c8e68556e3ac6c642",
 ];
 
 /// Recorded on 0b03c594, before storeys, on macOS arm64.
 const RECORDED_MIXED_FOREST: [&str; 4] = [
     "e84dcd6e9606a26104c32bffa3c3561152911c5b6191472324e1f093168e90b9",
     "bff2e32d9bbcd52f4bac5b29478037707ea336c3efd3136e951804ab918d0843",
-    "ed6d4b962fe696dd022c548b4e05a1272fd8d37be7590505e08efbec29371a81",
-    "889496d6ef6ba10661d721cd5b3277d327cf0b7f8111623000d60463ad1c0bc1",
+    "650b54253e59c727af339536a4e6b0b5051e7ea7f4c3dce7746061bccff7484c",
+    "7be06b0c57383b2aea9c28417fa4afa0e90e83dd011eacc41302c28b32465110",
 ];
 
 /// The content's then the forest's, compared bit for bit.

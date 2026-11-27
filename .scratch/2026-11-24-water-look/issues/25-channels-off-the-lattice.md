@@ -1,6 +1,6 @@
 # 25: Channels off the lattice
 
-Status: ready-for-agent
+Status: done
 Blocked by: 24
 
 Spec: [Water that looks natural](../spec.md), Rivers. From the user's review:
@@ -21,3 +21,12 @@ budget, so the ground does not step at the stencil's edge.
 - [ ] `worldgen_v3` within 5% of before, or the cost named for the user.
 
 ## Comments
+
+- 2026-11-27: each node stands up to 0.3 of a node off its lattice point,
+  hashed, and the valley's reach gives up as much, so it stays in the
+  stencil. The Fall's face takes the jittered segment's own length. Curves
+  through four nodes were left out: on a 1 km map the meander and jitter
+  leave far fewer straight runs, judged by eye, not measured.
+- 2026-11-27: the offset is hashed once per node in the solve and kept in it,
+  as every column of a channel asks it; hashing it per column cost the
+  straddling-dry case 7%.

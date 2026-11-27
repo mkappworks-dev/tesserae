@@ -33,6 +33,9 @@ const FLOODED_M: f32 = 0.05;
 /// Catchment, in nodes, above which a node carries a stream: a brook of 0.025 km² starts high on
 /// a slope, a few nodes below its ridge. Lower, and a brook runs through most lattice cells.
 const STREAM_NODES: u32 = 24;
+/// Catchment from which a line of nodes no other joins carries a stream all the same: down a long
+/// even slope.
+const SLOPE_STREAM_NODES: u32 = 4 * STREAM_NODES;
 /// Catchment, in nodes, from which a stream is a river at its full least width; below it a
 /// brook narrows to [`BROOK_WIDTH_M`].
 const RIVER_NODES: u32 = 120;
@@ -52,7 +55,26 @@ const BANK_SLOPE: f32 = 0.5;
 /// Short enough that every segment reaching a point is in its stencil: a segment outside it is at
 /// least `STENCIL - 1` nodes away, less the meander's push. A reach past that dropped a segment at
 /// a node line while its valley still applied, and the ground stepped there.
-const VALLEY_REACH_M: f32 = (STENCIL - 1) as f32 * NODE_M - MEANDER_M;
+const VALLEY_REACH_M: f32 = (STENCIL - 1) as f32 * NODE_M - MEANDER_M - JITTER_M;
+/// A pond may stand in each cell this wide, with [`POND_CHANCE`].
+const POND_CELL_M: f32 = 128.0;
+const POND_CHANCE: f32 = 0.2;
+const POND_SEED: u32 = 0x7044_0d5e;
+/// A pond's radius, most of them small.
+const POND_RADIUS_M: (f32, f32) = (2.5, 10.0);
+/// The bank round a pond its bowl reaches out over.
+const POND_BANK_M: f32 = 4.0;
+/// How deep a pond is at its middle, and how far under its rim's lowest point its water stands.
+const POND_DEPTH_M: f32 = 1.8;
+const POND_BELOW_RIM_M: f32 = 0.4;
+/// A pond stands only where its rim is this level, and this far above the sea.
+const POND_LEVEL_M: f32 = 1.5;
+const POND_ABOVE_SEA_M: f32 = 2.0;
+
+/// How far a channel's node stands off its lattice point, at most, along each axis: enough that
+/// channels stop running in straight lattice lines, little enough to stay in the stencil.
+const JITTER_M: f32 = 0.3 * NODE_M;
+const JITTER_SEED: u32 = 0x6a17_7e2d;
 /// How far a stream of `width_m` swings to either side, up to [`MEANDER_M`], which the stencil
 /// and the valley's reach are bounded by; and how much of its bending is long bends rather than
 /// tight wiggles, 0 for the narrowest brook and 1 for a river of [`LONG_BEND_WIDTH_M`].
@@ -91,6 +113,8 @@ const LAKE: u8 = 1;
 const SPILLED: u8 = 2;
 /// A stream's first node: no stream runs into it, so its water rises there from a spring.
 const HEAD: u8 = 4;
+/// A node that carries a stream: see [`Drainage::solve`].
+const STREAM: u8 = 8;
 /// A spring's pool, round about a stream's head, from which its channel narrows to its own width
 /// over as far again.
 const SPRING_WIDTH_M: f32 = 5.0;
@@ -151,6 +175,9 @@ struct Node {
     to_sea: u8,
     /// One bit per step in [`STEPS`] its river also flows down as a delta's distributary.
     delta: u8,
+    /// How far its channel's point stands off its lattice point, in 127ths of [`JITTER_M`]: hashed
+    /// once in the solve, as every column of a channel asks it.
+    off: [i8; 2],
 }
 
 pub(crate) struct Region {
@@ -160,6 +187,10 @@ pub(crate) struct Region {
 impl Node {
     fn is_lake(&self) -> bool {
         self.lake & LAKE != 0
+    }
+
+    fn is_stream(&self) -> bool {
+        self.lake & STREAM != 0
     }
 
     fn is_spilled(&self) -> bool {
@@ -215,8 +246,12 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// region is a pure function of its Drainage, so this only skips the lock and the map.
 type LastRegion = Option<(u64, [i32; 2], Arc<Region>)>;
 
+/// The pond cell this thread asked last, by Drainage, and its rim's lowest point if it holds one.
+type LastPond = Option<(u64, [i32; 2], Option<f32>)>;
+
 thread_local! {
     static LAST: RefCell<LastRegion> = const { RefCell::new(None) };
+    static LAST_POND: RefCell<LastPond> = const { RefCell::new(None) };
 }
 
 fn sortable(f: f32) -> u32 {
@@ -263,6 +298,16 @@ impl Drainage {
             .filter(|n| n.is_lake())
             .map(|n| n.level_m)
             .reduce(f32::max)
+    }
+
+    /// Where a channel's node `[i, j]` stands, in metres: off its lattice point by a hash of it, so
+    /// channels joining nodes bend at each instead of running along the lattice.
+    fn node_at(&self, n: Node, i: i32, j: i32) -> [f32; 2] {
+        let off = |k: usize| JITTER_M * f32::from(n.off[k]) / 127.0;
+        [
+            i as f32 * self.node_m + off(0),
+            j as f32 * self.node_m + off(1),
+        ]
     }
 
     /// Drops the cache and this thread's last region; another thread keeps its own until it next
@@ -393,11 +438,27 @@ impl Drainage {
                 catchment[p] += catchment[at];
             }
         }
-        let mut fed = vec![false; size];
+        // A stream starts only where water gathers: in a hollow two or more nodes drain into, or
+        // once a whole slope's worth has run down one line. On an even slope every line of nodes
+        // gathers alike, and starting them all at one catchment drew brooks side by side.
+        let up_of = |at: usize| {
+            let (di, dj) = STEPS[parent[at] as usize];
+            idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj)
+        };
+        let mut inflows = vec![0u8; size];
         for at in 0..size {
-            if parent[at] != NO_PARENT && catchment[at] >= STREAM_NODES {
-                let (di, dj) = STEPS[parent[at] as usize];
-                fed[idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj)] = true;
+            if parent[at] != NO_PARENT {
+                inflows[up_of(at)] = inflows[up_of(at)].saturating_add(1);
+            }
+        }
+        let mut stream = vec![false; size];
+        let mut fed = vec![false; size];
+        for &at in order.iter().rev() {
+            stream[at] = fed[at]
+                || (catchment[at] >= STREAM_NODES
+                    && (inflows[at] >= 2 || catchment[at] >= SLOPE_STREAM_NODES));
+            if stream[at] && parent[at] != NO_PARENT {
+                fed[up_of(at)] = true;
             }
         }
         let inside = |i: i32, j: i32| (0..WINDOW).contains(&i) && (0..WINDOW).contains(&j);
@@ -426,6 +487,14 @@ impl Drainage {
         for lj in 0..STORED {
             for li in 0..STORED {
                 let at = idx(li - MARGIN + HALO_NODES, lj - MARGIN + HALO_NODES);
+                let (gi, gj) = (
+                    key[0] * REGION_NODES + li - MARGIN,
+                    key[1] * REGION_NODES + lj - MARGIN,
+                );
+                let off = |salt: i32| {
+                    let h = crate::noise::lattice3(gi, gj, salt, JITTER_SEED);
+                    (254.0 * h - 127.0).round() as i8
+                };
                 nodes.push(Node {
                     #[cfg(test)]
                     height_m: height[at],
@@ -436,13 +505,11 @@ impl Drainage {
                         LAKE | (spilled[at] as u8 * SPILLED)
                     } else {
                         0
-                    } | if catchment[at] >= STREAM_NODES && !fed[at] {
-                        HEAD
-                    } else {
-                        0
-                    },
+                    } | if stream[at] && !fed[at] { HEAD } else { 0 }
+                        | if stream[at] { STREAM } else { 0 },
                     to_sea: to_sea[at],
                     delta: delta[at],
+                    off: [off(0), off(1)],
                 });
             }
         }
@@ -474,7 +541,7 @@ impl Drainage {
                 if n.down == NO_PARENT {
                     continue;
                 }
-                if n.catchment < STREAM_NODES {
+                if !n.is_stream() {
                     // Too small for a stream of its own, but a step from the sea a delta beside
                     // it may still feed it a distributary.
                     if n.to_sea == 1
@@ -493,11 +560,8 @@ impl Drainage {
                 if p.is_lake() && n.is_lake() {
                     continue;
                 }
-                let a = [ni as f32 * self.node_m, nj as f32 * self.node_m];
-                let b = [
-                    (ni + si) as f32 * self.node_m,
-                    (nj + sj) as f32 * self.node_m,
-                ];
+                let a = self.node_at(n, ni, nj);
+                let b = self.node_at(p, ni + si, nj + sj);
                 let ab = [b[0] - a[0], b[1] - a[1]];
                 let along = |x: f32, z: f32| {
                     (((x - a[0]) * ab[0] + (z - a[1]) * ab[1]) / (ab[0] * ab[0] + ab[1] * ab[1]))
@@ -523,7 +587,7 @@ impl Drainage {
                 if n.lake & HEAD != 0 {
                     width = width.max(spring_width_m(t, ab));
                 }
-                let surface = water_surface_m(n, p, (ni, nj), t, self.node_m);
+                let surface = water_surface_m(n, p, (ni, nj), t, libm::hypotf(ab[0], ab[1]));
                 let edge = (d - width / 2.0).max(0.0);
                 let mut reach_m = valley_reach_m(width);
                 if near_sea {
@@ -564,11 +628,71 @@ impl Drainage {
                 }
             }
         }
+        if self.coarse.is_some()
+            && let Some((cut, surface)) = self.pond(x_m, z_m, ground_m)
+        {
+            cut_m = cut_m.max(cut);
+            level_m = Some(level_m.map_or(surface, |l| l.max(surface)));
+        }
         Wet {
             level_m,
             cut_m,
             river_cut_m,
         }
+    }
+
+    /// The cut and water level of the pond over `(x_m, z_m)`, if one stands there. Each
+    /// [`POND_CELL_M`] cell may hold one, at a hashed point and size, where the ground round it is
+    /// near level and well above the sea: a bowl whose water stands just under the lowest of its
+    /// rim, so it needs no lip. Rivers' and lakes' own water wins where they meet one.
+    fn pond(&self, x_m: f32, z_m: f32, ground_m: f32) -> Option<(f32, f32)> {
+        let cell = [
+            (x_m / POND_CELL_M).floor() as i32,
+            (z_m / POND_CELL_M).floor() as i32,
+        ];
+        let hash = |salt: i32| crate::noise::lattice3(cell[0], cell[1], salt, POND_SEED);
+        if hash(0) >= POND_CHANCE {
+            return None;
+        }
+        let radius = POND_RADIUS_M.0 + (POND_RADIUS_M.1 - POND_RADIUS_M.0) * hash(1) * hash(1);
+        let margin = POND_CELL_M / 2.0 - POND_RADIUS_M.1 - POND_BANK_M;
+        let centre = [
+            (cell[0] as f32 + 0.5) * POND_CELL_M + margin * (2.0 * hash(2) - 1.0),
+            (cell[1] as f32 + 0.5) * POND_CELL_M + margin * (2.0 * hash(3) - 1.0),
+        ];
+        let d = libm::hypotf(x_m - centre[0], z_m - centre[1]);
+        if d >= radius + POND_BANK_M {
+            return None;
+        }
+        // Every column of a pond asks its rim; this thread keeps the last cell's.
+        let hit = LAST_POND.with(|l| {
+            l.borrow()
+                .filter(|(id, c, _)| *id == self.id && *c == cell)
+                .map(|(_, _, low)| low)
+        });
+        let low = hit.unwrap_or_else(|| {
+            let rim = radius + POND_BANK_M / 2.0;
+            let ring = (self.base)(
+                [centre[0] + rim, centre[0] - rim, centre[0], centre[0]],
+                [centre[1], centre[1], centre[1] + rim, centre[1] - rim],
+            );
+            let (low, high) = ring
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(l, h), &v| (l.min(v), h.max(v)));
+            let low =
+                (high - low <= POND_LEVEL_M && low >= self.sea_m + POND_ABOVE_SEA_M).then_some(low);
+            LAST_POND.with(|l| *l.borrow_mut() = Some((self.id, cell, low)));
+            low
+        })?;
+        let surface = low - POND_BELOW_RIM_M;
+        let r = d / radius;
+        let depth = POND_DEPTH_M * (1.0 - r * r).max(0.0);
+        let bank = (d - radius).max(0.0) * BANK_SLOPE;
+        let target = surface - depth + bank;
+        // Faded out over the bank, as a stream's valley is, so the ground meets its own unbroken.
+        let fade = 1.0 - smoothstep(radius, radius + POND_BANK_M, d);
+        let cut = (ground_m - target).max(0.0) * fade;
+        Some((cut, if d < radius { surface } else { f32::MIN }))
     }
 
     /// The cut and water level a delta's distributary of `width_m`, from node `n` at `at` down
@@ -588,8 +712,9 @@ impl Drainage {
         (x_m, z_m): (f32, f32),
         ground_m: f32,
     ) -> (f32, f32) {
-        let a = [at.0 as f32 * self.node_m, at.1 as f32 * self.node_m];
-        let ab = [si as f32 * self.node_m, sj as f32 * self.node_m];
+        let a = self.node_at(n, at.0, at.1);
+        let b = self.node_at(p, at.0 + si, at.1 + sj);
+        let ab = [b[0] - a[0], b[1] - a[1]];
         let along = |x: f32, z: f32| {
             (((x - a[0]) * ab[0] + (z - a[1]) * ab[1]) / (ab[0] * ab[0] + ab[1] * ab[1]))
                 .clamp(0.0, 1.0)
@@ -643,7 +768,7 @@ impl Drainage {
                 }
                 let step = STEPS[n.down as usize];
                 let p = region.node(at.0 + step.0, at.1 + step.1, key);
-                if n.catchment < STREAM_NODES {
+                if !n.is_stream() {
                     if n.to_sea == 1
                         && let Some(w) = delta_fed_m(&region, key, at)
                     {
@@ -748,8 +873,9 @@ impl Drainage {
         channel: Channel,
         (x_m, z_m): (f32, f32),
     ) -> Option<(f32, [f32; 2])> {
-        let a = [at.0 as f32 * self.node_m, at.1 as f32 * self.node_m];
-        let ab = [si as f32 * self.node_m, sj as f32 * self.node_m];
+        let a = self.node_at(n, at.0, at.1);
+        let b = self.node_at(p, at.0 + si, at.1 + sj);
+        let ab = [b[0] - a[0], b[1] - a[1]];
         let length_m = (ab[0] * ab[0] + ab[1] * ab[1]).sqrt();
         let along = |x: f32, z: f32| {
             (((x - a[0]) * ab[0] + (z - a[1]) * ab[1]) / (length_m * length_m)).clamp(0.0, 1.0)
@@ -774,7 +900,7 @@ impl Drainage {
         if edge >= reach_m || edge * BANK_SLOPE >= dig * channel.band {
             return None;
         }
-        let surface = water_surface_m(n, p, at, t, self.node_m);
+        let surface = water_surface_m(n, p, at, t, length_m);
         let slope = (n.level_m - p.level_m).max(0.0) / length_m;
         let catchment = n.catchment as f32 * (1.0 - t) + p.catchment as f32 * t;
         let area_km2 = catchment * self.node_m * self.node_m * 1e-6;
@@ -853,14 +979,8 @@ const FALL_SPAN: (f32, f32) = (0.3, 0.7);
 /// The water's surface a fraction `t` down the segment from `n` at node `at` to `p`: straight
 /// between their levels, or held at the upper level and dropped down one steep face where the
 /// segment falls steeply enough to make a waterfall.
-fn water_surface_m(n: Node, p: Node, at: (i32, i32), t: f32, node_m: f32) -> f32 {
+fn water_surface_m(n: Node, p: Node, at: (i32, i32), t: f32, length_m: f32) -> f32 {
     let drop = n.level_m - p.level_m;
-    let length_m = node_m
-        * if at_diagonal(n) {
-            core::f32::consts::SQRT_2
-        } else {
-            1.0
-        };
     let level = if drop >= FALL_DROP_M && drop / length_m >= FALL_SLOPE {
         let h = (at.0 as u32)
             .wrapping_mul(0x9e37_79b9)
@@ -875,11 +995,6 @@ fn water_surface_m(n: Node, p: Node, at: (i32, i32), t: f32, node_m: f32) -> f32
         n.level_m * (1.0 - t) + p.level_m * t
     };
     level - SURFACE_BELOW_M
-}
-
-fn at_diagonal(n: Node) -> bool {
-    let (di, dj) = STEPS[n.down as usize];
-    di != 0 && dj != 0
 }
 
 /// Widens with the square root of catchment, as rivers do; a brook's banks start at the river's
@@ -1061,7 +1176,7 @@ mod tests {
         };
         let mut checked = 0;
         for (i, j, n) in region_nodes(&d, key) {
-            if n.catchment < STREAM_NODES {
+            if !n.is_stream() {
                 continue;
             }
             let (mut at, mut node) = ((i, j), n);
@@ -1130,7 +1245,7 @@ mod tests {
             tops += 1;
             let near = (-BROOK_REACH_NODES..=BROOK_REACH_NODES).any(|dj| {
                 (-BROOK_REACH_NODES..=BROOK_REACH_NODES)
-                    .any(|di| region.node(i + di, j + dj, key).catchment >= STREAM_NODES)
+                    .any(|di| region.node(i + di, j + dj, key).is_stream())
             });
             fed += near as u32;
         }
@@ -1151,14 +1266,12 @@ mod tests {
         };
         let (mut heads, mut pooled) = (0, 0);
         for (i, j, n) in region_nodes(&d, key) {
-            if !inner(i, j) || n.catchment < STREAM_NODES || n.is_lake() {
+            if !inner(i, j) || !n.is_stream() || n.is_lake() {
                 continue;
             }
             let fed = STEPS.iter().any(|&(di, dj)| {
                 let c = region.node(i + di, j + dj, key);
-                c.down != NO_PARENT
-                    && c.catchment >= STREAM_NODES
-                    && STEPS[c.down as usize] == (-di, -dj)
+                c.down != NO_PARENT && c.is_stream() && STEPS[c.down as usize] == (-di, -dj)
             });
             assert_eq!(n.lake & HEAD != 0, !fed, "the head flag at {i},{j}");
             if fed {
@@ -1166,7 +1279,7 @@ mod tests {
             }
             heads += 1;
             // Wet a pool's radius out from the head on every side, where a brook alone is not.
-            let (x, z) = (i as f32 * NODE_M, j as f32 * NODE_M);
+            let [x, z] = d.node_at(n, i, j);
             let r = SPRING_WIDTH_M / 2.0 - 0.5;
             pooled += usize::from(
                 [(r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r)]
@@ -1453,7 +1566,8 @@ mod tests {
                 assert_eq!(f, [0.0; 2], "flow on dry ground at {x},{z}");
                 continue;
             };
-            if d.lake_level_at(x, z) == Some(level) {
+            let pond = d.pond(x, z, f32::MIN).is_some_and(|(_, l)| l == level);
+            if d.lake_level_at(x, z) == Some(level) || pond {
                 continue;
             }
             let v = speed(f);

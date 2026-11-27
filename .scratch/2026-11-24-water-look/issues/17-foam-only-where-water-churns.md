@@ -1,6 +1,6 @@
 # 17: Foam only where water churns
 
-Status: ready-for-agent
+Status: done
 Blocked by: 16
 
 Spec: [Water that looks natural](../spec.md), Foam. From the user's review of
@@ -20,3 +20,9 @@ landing and fast, steep water still foam.
       coast's shore with its band, shown to the user.
 
 ## Comments
+
+- 2026-11-27: the shore band is scaled by the sea's share, and it, a breaker
+  and a Fall's landing foam at most 0.6 of the surface, so the mask breaks
+  them into lace. The crop field's canals in the user's World lost their
+  white band. Captures in `/tmp/tesserae-water-look-captures/18-blackspot/field-yaw270.png` and
+  `/tmp/tesserae-water-look-captures/20-day/`.

@@ -1,6 +1,6 @@
 # 21: Stream speed from discharge
 
-Status: ready-for-agent
+Status: done
 Blocked by: 16
 
 Spec: [Water that looks natural](../spec.md), Flow. From the user's review: a
@@ -24,3 +24,8 @@ changes.
 - [ ] World digests unchanged.
 
 ## Comments
+
+- 2026-11-27: a pool runs 0.6 m/s per km² of catchment to the 0.1, up to 2.5
+  times that on a reach of 4% or steeper, held under Froude 0.9. Over the
+  river, estuary and delta fixtures none runs past 2.5 m/s, against 40 to 70%
+  past 3 m/s before. Flow is not in any digest.

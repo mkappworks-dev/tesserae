@@ -1,6 +1,6 @@
 # 24: Every river ends in still water, and ponds
 
-Status: ready-for-agent
+Status: done
 Blocked by: 23
 
 Spec: [Water that looks natural](../spec.md), Lakes. From the user's review:
@@ -23,3 +23,19 @@ as a spring pool.
 - [ ] Ponds on the map; a capture shown to the user.
 
 ## Comments
+
+- 2026-11-27: one pond in a fifth of 128 m cells, 2.5 to 10 m in
+  radius, where its rim is level within 1.5 m and 2 m above the sea, its
+  water 0.4 m under the rim's lowest point. Not done: shallow basins a stream
+  enters are not ponds, and the coarse catchment is not fed across the window
+  edge. `/tmp/tesserae-water-look-captures/24-after/pond.png`. The crop-field fixture now asks for a field
+  that runs into the next Chunk, as a pond moved the first one.
+- 2026-11-27, the rest. A basin 1 m deep holding a lake, so a stream ends in a
+  pond, flooded 7% or more of the valleys between mountains and dried a
+  Settlement's bridge valley; reverted to 2.5 m. Every stream already ends in
+  a lake, the sea or the edge of what is stored (the solve's own test).
+  Feeding the coarse catchment in at a window's edge is not done: the edge
+  nodes are the flood's outlets, so area put on them reaches nothing
+  downstream; it needs inflow nodes at the edge, a change to the solve's
+  seeding. The 1 km halo keeps widths close at a border; the user has the
+  call on whether it is needed.
