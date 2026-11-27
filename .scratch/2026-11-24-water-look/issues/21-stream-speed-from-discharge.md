@@ -21,7 +21,7 @@ changes.
 - [ ] Pools and the delta run under 1 m/s; a step or rapid may run faster.
 - [ ] No white water on the river, estuary and delta fixtures away from steps
       and Falls; captures shown to the user.
-- [ ] World digests unchanged.
+- [x] World digests unchanged.
 
 ## Comments
 

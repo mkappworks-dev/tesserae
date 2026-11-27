@@ -16,10 +16,10 @@ drawing parallel streams. Mountain streams are 1.5 to 2 m deep in their pools.
 
 ## Acceptance criteria
 
-- [ ] Every stream begins at a spring pool or a lake's outlet, never mid-slope
+- [x] Every stream begins at a spring pool or a lake's outlet, never mid-slope
       at full width.
 - [ ] No two streams run side by side a node apart.
-- [ ] A mountain stream's pools are at least 1.5 m deep.
+- [x] A mountain stream's pools are at least 1.5 m deep.
 
 ## Comments
 

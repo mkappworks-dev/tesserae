@@ -18,7 +18,7 @@ budget, so the ground does not step at the stencil's edge.
 
 - [ ] A map of the network shows no straight lattice-aligned runs over a
       node long.
-- [ ] `worldgen_v3` within 5% of before, or the cost named for the user.
+- [x] `worldgen_v3` within 5% of before, or the cost named for the user.
 
 ## Comments
 

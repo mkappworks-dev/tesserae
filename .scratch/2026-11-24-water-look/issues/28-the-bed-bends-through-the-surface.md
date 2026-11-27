@@ -16,7 +16,7 @@ it.
 
 ## Acceptance criteria
 
-- [ ] A prototype's captures and GPU timing, shown to the user, and their
+- [x] A prototype's captures and GPU timing, shown to the user, and their
       decision recorded here.
 
 ## Comments

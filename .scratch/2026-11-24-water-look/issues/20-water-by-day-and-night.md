@@ -15,7 +15,7 @@ colour at sunset, the reflection and body at night.
 ## Acceptance criteria
 
 - [ ] A capture sheet at the three hours, shown to the user.
-- [ ] Whatever reads wrong fixed, with a capture of the fix.
+- [x] Whatever reads wrong fixed, with a capture of the fix.
 
 ## Comments
 

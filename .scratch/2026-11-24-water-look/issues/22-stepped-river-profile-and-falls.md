@@ -21,7 +21,7 @@ and carries a spill sheet, so no step reads as a dam.
 - [ ] No lip stands above the upper pool's surface.
 - [ ] A Fall of 4 m or more on the slope fixture, with a plunge pool; captures
       shown to the user.
-- [ ] Containment still leaves no generated water beside open air, except the
+- [x] Containment still leaves no generated water beside open air, except the
       Fall's own face.
 
 ## Comments

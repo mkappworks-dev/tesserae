@@ -15,7 +15,7 @@ landing and fast, steep water still foam.
 
 ## Acceptance criteria
 
-- [ ] The shore band is scaled by the sea's share of the columns.
+- [x] The shore band is scaled by the sea's share of the columns.
 - [ ] A capture of a Settlement pond and a lake's margin with no foam, and the
       coast's shore with its band, shown to the user.
 

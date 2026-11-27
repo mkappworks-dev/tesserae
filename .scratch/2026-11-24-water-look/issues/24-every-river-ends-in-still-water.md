@@ -17,7 +17,7 @@ as a spring pool.
 
 ## Acceptance criteria
 
-- [ ] Every stream ends in a lake, a pond or the sea, or leaves what is
+- [x] Every stream ends in a lake, a pond or the sea, or leaves what is
       stored; a test walks every stream.
 - [ ] A river's width agrees on both sides of a region border; a test.
 - [ ] Ponds on the map; a capture shown to the user.
