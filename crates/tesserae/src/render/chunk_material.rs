@@ -87,8 +87,11 @@ pub struct LodParams {
 pub struct WaterView {
     /// The sky material's zenith, linear.
     pub zenith: Vec4,
-    /// x and y: the distances in metres over which Flow fades to calm water.
+    /// x and y: the distances in metres over which Flow fades to calm water; z: the World's
+    /// Voxel size in metres.
     pub flow_fade_m: Vec4,
+    /// x and y: where the Wind blows toward; z: its strength, 0 to 1.
+    pub wind: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]

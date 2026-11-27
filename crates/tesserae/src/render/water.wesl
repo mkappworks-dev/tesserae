@@ -22,6 +22,7 @@ var water_normals_sampler: sampler;
 struct WaterView {
     zenith: vec4<f32>,
     flow_fade_m: vec4<f32>,
+    wind: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(110)
@@ -86,17 +87,33 @@ fn column_point(key: u32, uv: vec2<f32>) -> vec2<f32> {
     }
 }
 
+fn column_word(water: u32, column: vec2<i32>) -> u32 {
+    let side = i32(constants::CHUNK_WATER_SIDE);
+    return quads[water + u32((column.y + 1) * side + column.x + 1)];
+}
+
 // `tesserae_core::water_columns::WaterColumn`'s depth, at column `x`, `z` of the apron'd grid.
 fn column_depth_m(water: u32, column: vec2<i32>) -> f32 {
-    let side = i32(constants::CHUNK_WATER_SIDE);
-    let word = quads[water + u32((column.y + 1) * side + column.x + 1)];
+    let word = column_word(water, column);
     return f32((word >> 16u) & 0xffu) * bitcast<f32>(constants::CHUNK_WATER_DEPTH_STEP_M);
 }
 
-// Depth filtered between column centres. The apron holds the neighbours' columns, so two Chunks
-// of one lake meet with no step. A dry column stands as deep below as the wet ones beside it are
-// above, so the depth runs out to nothing at the waterline and not half a column short of it.
-fn water_depth_m(water: u32, point: vec2<f32>) -> f32 {
+fn column_sea(water: u32, column: vec2<i32>) -> f32 {
+    return select(0.0, 1.0, ((column_word(water, column) >> 24u) & constants::CHUNK_WATER_SEA) != 0u);
+}
+
+// The water under a fragment, filtered between column centres: its depth, how the depth slopes
+// in metres per metre along x and z, and how much of it is the sea.
+struct WaterShape {
+    depth_m: f32,
+    slope: vec2<f32>,
+    sea: f32,
+}
+
+// The apron holds the neighbours' columns, so two Chunks of one lake meet with no step. A dry
+// column stands as deep below as the wet ones beside it are above, so the depth runs out to
+// nothing at the waterline and not half a column short of it.
+fn water_shape(water: u32, point: vec2<f32>) -> WaterShape {
     let q = point - 0.5;
     let last = i32(constants::CHUNK_CELLS) - 1;
     let i = clamp(vec2<i32>(floor(q)), vec2<i32>(-1), vec2<i32>(last));
@@ -107,17 +124,27 @@ fn water_depth_m(water: u32, point: vec2<f32>) -> f32 {
         column_depth_m(water, i + vec2<i32>(0, 1)),
         column_depth_m(water, i + vec2<i32>(1, 1)),
     );
+    let sea = vec4<f32>(
+        column_sea(water, i),
+        column_sea(water, i + vec2<i32>(1, 0)),
+        column_sea(water, i + vec2<i32>(0, 1)),
+        column_sea(water, i + vec2<i32>(1, 1)),
+    );
     let wet = vec4<f32>(depth > vec4<f32>(0.0));
     let wet_mean = dot(depth, wet) / max(dot(wet, vec4<f32>(1.0)), 1.0);
     depth = select(vec4<f32>(-wet_mean), depth, depth > vec4<f32>(0.0));
     let filtered = mix(mix(depth.x, depth.y, f.x), mix(depth.z, depth.w, f.x), f.y);
-    return max(filtered, 0.0);
+    let per_voxel = vec2<f32>(
+        mix(depth.y - depth.x, depth.w - depth.z, f.y),
+        mix(depth.z - depth.x, depth.w - depth.y, f.x),
+    );
+    let sea_share = mix(mix(sea.x, sea.y, f.x), mix(sea.z, sea.w, f.x), f.y);
+    return WaterShape(max(filtered, 0.0), per_voxel / water_view.flow_fade_m.z, sea_share);
 }
 
 // `WaterColumn`'s Flow at column `x`, `z`, in m/s along x and z: two signed bytes.
 fn column_flow(water: u32, column: vec2<i32>) -> vec2<f32> {
-    let side = i32(constants::CHUNK_WATER_SIDE);
-    let word = quads[water + u32((column.y + 1) * side + column.x + 1)];
+    let word = column_word(water, column);
     let steps = vec2<i32>(bitcast<i32>(word << 24u) >> 24u, bitcast<i32>(word << 16u) >> 24u);
     return vec2<f32>(steps) * bitcast<f32>(constants::CHUNK_WATER_FLOW_STEP_M_S);
 }
@@ -194,18 +221,19 @@ const FOAM_EDGE: f32 = 0.12;
 const WHITE_FROM_M_S: f32 = 3.0;
 const WHITE_AT_M_S: f32 = 3.9;
 
-// How much of the surface is foam: a band along the shore, and white water where it runs fast,
-// each broken up by the mask, which runs with the Flow.
+// How much of the surface is foam: a band along the shore, white water where it runs fast, and
+// the sea's `breaking`, each broken up by the mask, which runs with the Flow.
 fn water_foam_share(
     xz: vec2<f32>,
     gradient: WaterGradient,
     depth_m: f32,
     flow: vec2<f32>,
     cycle: f32,
+    breaking: f32,
 ) -> f32 {
     let shore = 1.0 - smoothstep(0.03, FOAM_DEPTH_M, depth_m);
     let white = smoothstep(WHITE_FROM_M_S, WHITE_AT_M_S, length(flow));
-    let band = max(shore, white);
+    let band = max(max(shore, white), breaking);
     if band <= 0.0 {
         return 0.0;
     }
@@ -220,6 +248,28 @@ fn water_foam_share(
         taps.weights,
     ) / (taps.weights.x + taps.weights.y);
     return smoothstep(1.0 - band, 1.0 - band + FOAM_EDGE, mask);
+}
+
+// A wall of water is falling water: a Fall's sheet, a Settlement's waterfall, a poured block's
+// side. Streaks of the foam mask, stretched down the wall, run down it at this speed.
+const FALL_M_S: f32 = 4.0;
+const FALL_ACROSS_M: f32 = 1.5;
+const FALL_DOWN_M: f32 = 6.0;
+
+// How much of a wall of water is white: streaks running down it.
+fn falling_foam(world_position: vec3<f32>, normal: vec3<f32>, cycle: f32) -> f32 {
+    let across = select(world_position.x, world_position.z, abs(normal.x) > 0.5);
+    let uv = vec2<f32>(across / FALL_ACROSS_M, -world_position.y / FALL_DOWN_M);
+    let taps = flow_taps(uv, vec2<f32>(0.0, FALL_M_S / FALL_DOWN_M), cycle);
+    // Walls are seen near; the mask's second mip keeps the streaks soft without derivatives.
+    let mask = dot(
+        vec2<f32>(
+            textureSampleLevel(water_foam, water_foam_sampler, taps.first, 1.0).r,
+            textureSampleLevel(water_foam, water_foam_sampler, taps.second, 1.0).r,
+        ),
+        taps.weights,
+    ) / (taps.weights.x + taps.weights.y);
+    return smoothstep(0.3, 0.7, mask);
 }
 
 // The body of water under a fragment, premultiplied: what it sends toward the eye as albedo, and
@@ -297,6 +347,98 @@ fn ripple_layer(
 // How much rougher running water's ripples are, per m/s, so steep reaches read as rapids.
 const FLOW_STRENGTH_PER_M_S: f32 = 0.35;
 
+const GRAVITY_M_S2: f32 = 9.81;
+const TAU: f32 = 6.28318531;
+
+// A beach's slope, one in twenty, which the shoaling phase below is worked out for.
+const BEACH_SLOPE: f32 = 0.05;
+
+// The most the shoaling phase may add to a wave's wavenumber, in deep-water wavenumbers.
+const SHOALING_PULL: f32 = 1.5;
+
+// Shallower than this the sea breaks: a band of foam travelling in on the swell's crests.
+const BREAKER_DEPTH_M: f32 = 1.5;
+
+// The sea's waves at a point: the slope they add, the slope variance a pixel's footprint averaged
+// away, and how much of the surface is breaking.
+struct SeaWaves {
+    slope: vec2<f32>,
+    lost: f32,
+    breaking: f32,
+}
+
+// `water::SEA_WAVES[i]`: cycles per period, radians off the Wind, steepness.
+fn sea_wave(i: u32) -> vec3<f32> {
+    switch i {
+        case 0u: { return vec3<f32>(f32(constants::CHUNK_WAVE0_CYCLES), bitcast<f32>(constants::CHUNK_WAVE0_OFF_WIND), bitcast<f32>(constants::CHUNK_WAVE0_STEEPNESS)); }
+        case 1u: { return vec3<f32>(f32(constants::CHUNK_WAVE1_CYCLES), bitcast<f32>(constants::CHUNK_WAVE1_OFF_WIND), bitcast<f32>(constants::CHUNK_WAVE1_STEEPNESS)); }
+        case 2u: { return vec3<f32>(f32(constants::CHUNK_WAVE2_CYCLES), bitcast<f32>(constants::CHUNK_WAVE2_OFF_WIND), bitcast<f32>(constants::CHUNK_WAVE2_STEEPNESS)); }
+        case 3u: { return vec3<f32>(f32(constants::CHUNK_WAVE3_CYCLES), bitcast<f32>(constants::CHUNK_WAVE3_OFF_WIND), bitcast<f32>(constants::CHUNK_WAVE3_STEEPNESS)); }
+        case 4u: { return vec3<f32>(f32(constants::CHUNK_WAVE4_CYCLES), bitcast<f32>(constants::CHUNK_WAVE4_OFF_WIND), bitcast<f32>(constants::CHUNK_WAVE4_STEEPNESS)); }
+        default: { return vec3<f32>(f32(constants::CHUNK_WAVE5_CYCLES), bitcast<f32>(constants::CHUNK_WAVE5_OFF_WIND), bitcast<f32>(constants::CHUNK_WAVE5_STEEPNESS)); }
+    }
+}
+
+// Over depth D a wave of deep-water wavenumber k0 has k = k0 / sqrt(tanh(k0 D)) (Eckart's
+// solution of w^2 = g k tanh(k D)); its phase gains the integral of k - k0 as it runs into the
+// shallows. Up a beach of `BEACH_SLOPE` that integral is a function of the depth alone,
+// 1.04 exp(-2.7 (k0 D)^0.7) / BEACH_SLOPE, fitted to within 0.01: a phase that never tears where
+// the depth changes, whose crests shorten and turn along the depth's contours toward the shore.
+fn shoaling(u: f32) -> f32 {
+    return 1.04 * exp(-2.7 * pow(u, 0.7)) / BEACH_SLOPE;
+}
+
+fn sea_waves(xz: vec2<f32>, gradient: WaterGradient, shape: WaterShape, wind: vec4<f32>) -> SeaWaves {
+    var out = SeaWaves(vec2<f32>(0.0), 0.0, 0.0);
+    let strength = wind.z * shape.sea;
+    if strength <= 0.0 {
+        return out;
+    }
+    let downwind = atan2(wind.y, wind.x);
+    let footprint = max(length(gradient.ddx), length(gradient.ddy));
+    let depth = max(shape.depth_m, 0.05);
+    var steepest = 0.0;
+    var swell = 0.0;
+    var lift = 0.0;
+    for (var i = 0u; i < 6u; i++) {
+        let wave = sea_wave(i);
+        let omega = TAU * wave.x / f32(constants::CHUNK_CLOCK_PERIOD_S);
+        let k0 = omega * omega / GRAVITY_M_S2;
+        let u = k0 * depth;
+        let shallow = 1.0 / sqrt(tanh(u));
+        let toward = vec2<f32>(cos(downwind + wave.y), sin(downwind + wave.y));
+        // The phase's gradient: the deep-water wavenumber along the wave, and the shoaling
+        // phase's along the depth's slope.
+        // The filtered depth's slope jumps at every column's centre, so only its direction is
+        // taken, the beach assumed `BEACH_SLOPE` steep as the phase is: its size would draw a band
+        // across the sea along each row of columns.
+        let shoreward = -shape.slope / max(length(shape.slope), 1e-4);
+        let across = k0 * (toward + min(shallow - 1.0, SHOALING_PULL) * shoreward);
+        let k = length(across);
+        // A whole number of cycles per period, so this is continuous where the clock wraps.
+        let travel = TAU * fract(clock() * (wave.x / f32(constants::CHUNK_CLOCK_PERIOD_S)));
+        let theta = k0 * dot(toward, xz) + shoaling(u) - travel + f32(i) * 1.7;
+        // Waves steepen as they shorten, and too short a wave for the pixel is dropped.
+        let steepness = wave.z * strength * min(shallow, 2.0);
+        let seen = 1.0 - smoothstep(0.25, 0.5, footprint * k / TAU);
+        out.slope += steepness * seen * (across / k) * cos(theta);
+        out.lost += 0.5 * steepness * steepness * (1.0 - seen);
+        lift += steepness * seen * sin(theta);
+        steepest += steepness;
+        if i == 0u {
+            swell = sin(theta);
+        }
+    }
+    // Their steepnesses sum to at most 1 in deep water; where the shallows push past it, all are
+    // scaled back so no crest loops.
+    let scale = 1.0 / max(steepest, 1.0);
+    out.slope = out.slope * scale / (1.0 - lift * scale);
+    out.lost *= scale * scale;
+    let band = 1.0 - smoothstep(0.2, BREAKER_DEPTH_M, shape.depth_m);
+    out.breaking = band * strength * smoothstep(0.4, 0.95, swell);
+    return out;
+}
+
 struct WaterSurface {
     normal: vec3<f32>,
     perceptual_roughness: f32,
@@ -313,6 +455,7 @@ fn water_surface(
     calm: f32,
     flow: vec2<f32>,
     cycle: f32,
+    sea: SeaWaves,
 ) -> WaterSurface {
     let base = roughness_of(slot);
     if abs(normal.y) < 0.5 {
@@ -338,11 +481,14 @@ fn water_surface(
         cycle,
     );
     let turned_back = vec2<f32>(-b.slope.y, b.slope.x);
-    let slope = (a.slope + turned_back) * calm * (1.0 + FLOW_STRENGTH_PER_M_S * length(flow));
+    // Ripples rise with the Wind: half as tall in a breeze, a third taller in the strongest.
+    let windy = mix(0.5, 1.35, water_view.wind.z);
+    let slope = (a.slope + turned_back) * calm * windy * (1.0 + FLOW_STRENGTH_PER_M_S * length(flow))
+        + sea.slope;
     let up = sign(normal.y);
     let rippled = normalize(vec3<f32>(-slope.x, 1.0, -slope.y) * vec3<f32>(1.0, up, 1.0));
     // Beckmann's alpha squared is twice the slope variance; bevy_pbr's alpha is roughness squared.
-    let alpha = sqrt(base * base * base * base + 2.0 * (a.lost + b.lost));
+    let alpha = sqrt(base * base * base * base + 2.0 * (a.lost + b.lost + sea.lost));
     return WaterSurface(rippled, min(sqrt(alpha), max(base, FAR_ROUGHNESS)));
 }
 

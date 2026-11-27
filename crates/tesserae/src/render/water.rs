@@ -74,6 +74,53 @@ pub const FLOW_CYCLES_PER_PERIOD: u32 = CLOCK_PERIOD_S;
 /// cycles. Whole repeats over a clock period, so nothing jumps where it wraps.
 pub const FLOW_JUMP: [f32; 2] = [0.2, 0.25];
 
+/// One Gerstner wave of the sea, drawn in the normals only.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeaWave {
+    /// Whole cycles in one clock period: its angular frequency is this times 2π/3600 s.
+    pub cycles_per_period: u32,
+    /// How far it runs from the Wind's direction, in radians.
+    pub off_wind_rad: f32,
+    /// Its steepness, wavenumber times amplitude, at the strongest Wind.
+    pub steepness: f32,
+}
+
+/// Periods from 7.2 s, an 81 m swell in deep water, down to 2.4 s, a 9 m chop, spread either side
+/// of the Wind. Their steepnesses sum to 0.28, a fresh sea's slopes; under 1, no crest loops over
+/// itself even where the shallows steepen them.
+pub const SEA_WAVES: [SeaWave; 6] = [
+    SeaWave {
+        cycles_per_period: 500,
+        off_wind_rad: 0.0,
+        steepness: 0.08,
+    },
+    SeaWave {
+        cycles_per_period: 600,
+        off_wind_rad: 0.44,
+        steepness: 0.06,
+    },
+    SeaWave {
+        cycles_per_period: 720,
+        off_wind_rad: -0.35,
+        steepness: 0.05,
+    },
+    SeaWave {
+        cycles_per_period: 900,
+        off_wind_rad: 0.7,
+        steepness: 0.035,
+    },
+    SeaWave {
+        cycles_per_period: 1200,
+        off_wind_rad: -0.61,
+        steepness: 0.03,
+    },
+    SeaWave {
+        cycles_per_period: 1500,
+        off_wind_rad: 0.17,
+        steepness: 0.025,
+    },
+];
+
 /// The ripples as `constants::CHUNK_RIPPLE<i>_*`: floats as bit patterns, which the shader
 /// bitcasts back.
 pub fn ripple_shader_defs() -> Vec<ShaderDefVal> {
@@ -83,6 +130,22 @@ pub fn ripple_shader_defs() -> Vec<ShaderDefVal> {
         ShaderDefVal::UInt("CHUNK_FLOW_JUMP_X".into(), FLOW_JUMP[0].to_bits()),
         ShaderDefVal::UInt("CHUNK_FLOW_JUMP_Z".into(), FLOW_JUMP[1].to_bits()),
     ];
+    for (i, wave) in SEA_WAVES.iter().enumerate() {
+        defs.extend([
+            ShaderDefVal::UInt(
+                format!("CHUNK_WAVE{i}_CYCLES").into(),
+                wave.cycles_per_period,
+            ),
+            ShaderDefVal::UInt(
+                format!("CHUNK_WAVE{i}_OFF_WIND").into(),
+                wave.off_wind_rad.to_bits(),
+            ),
+            ShaderDefVal::UInt(
+                format!("CHUNK_WAVE{i}_STEEPNESS").into(),
+                wave.steepness.to_bits(),
+            ),
+        ]);
+    }
     for (i, ripple) in RIPPLES.iter().enumerate() {
         let [x, z] = ripple.tiles_per_period;
         defs.extend([
@@ -124,6 +187,7 @@ pub fn column_shader_defs() -> Vec<ShaderDefVal> {
             u32::from(WaterColumn::FALLING),
         ),
         ShaderDefVal::UInt("CHUNK_WATER_FOAM".into(), u32::from(WaterColumn::FOAM)),
+        ShaderDefVal::UInt("CHUNK_WATER_SEA".into(), u32::from(WaterColumn::SEA)),
     ]
 }
 
@@ -360,6 +424,15 @@ mod tests {
             (cycles_at_wrap - cycles_at_wrap.round()).abs() < 1e-4,
             "flow: {cycles_at_wrap}"
         );
+        for wave in SEA_WAVES {
+            let at_wrap = period * (wave.cycles_per_period as f32 / period);
+            assert!(
+                (at_wrap - at_wrap.round()).abs() < 1e-4,
+                "{wave:?}: {at_wrap}"
+            );
+        }
+        let steepness: f32 = SEA_WAVES.iter().map(|w| w.steepness).sum();
+        assert!(steepness <= 1.0, "crests would loop: {steepness}");
         for jump in FLOW_JUMP {
             let repeats = cycles_at_wrap.round() * jump;
             assert!(

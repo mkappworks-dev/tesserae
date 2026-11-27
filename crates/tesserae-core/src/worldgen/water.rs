@@ -86,6 +86,10 @@ impl crate::water_columns::WaterAnswers for Worldgen {
     fn fall(&self, [gx, gz]: [i32; 2]) -> Option<Fall> {
         self.fall_at(gx, gz)
     }
+
+    fn sea_level_m(&self) -> Option<f32> {
+        self.water_level_of(None)
+    }
 }
 
 #[cfg(test)]

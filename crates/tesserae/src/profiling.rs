@@ -432,6 +432,7 @@ fn save(
             ))
             .chain((0..CAMERAS).map(|c| format!(",draws_camera{c}")))
             .chain((0..CASCADES).map(|i| format!(",shadow_casters_cascade{i},shadow_draws_cascade{i}")))
+            .chain(std::iter::once(",sort_waiting".to_string()))
             .collect::<String>()
     )?;
     for r in &profile.rows {
@@ -510,7 +511,7 @@ fn save(
         for (casters, draws) in r.visible.casters.iter().zip(r.visible.cascade_draws) {
             write!(out, ",{casters},{draws}")?;
         }
-        writeln!(out)?;
+        writeln!(out, ",{}", r.cost.sort_waiting)?;
     }
     out.flush()?;
     let mut meta = BufWriter::new(

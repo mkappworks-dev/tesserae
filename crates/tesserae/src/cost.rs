@@ -22,6 +22,7 @@ pub struct MainThreadCost {
     uploads: u32,
     sort_s: f32,
     sorts: u32,
+    sort_waiting: u32,
 }
 
 /// What one frame spent, taken and cleared.
@@ -33,6 +34,12 @@ pub struct FrameCost {
     pub uploads: u32,
     pub sort_s: f32,
     pub sorts: u32,
+    /// Blended meshes whose order went stale and that the frame's budget left for a later frame.
+    #[cfg_attr(
+        not(feature = "profiling"),
+        expect(dead_code, reason = "only the profiling CSV reads it")
+    )]
+    pub sort_waiting: u32,
     #[cfg_attr(
         not(feature = "profiling"),
         expect(dead_code, reason = "only the profiling CSV reads it")
@@ -55,10 +62,12 @@ impl MainThreadCost {
         self.uploads += meshes;
     }
 
-    /// `meshes` is how many were re-indexed, not how many were looked at.
-    pub fn sorted(&mut self, took: Duration, meshes: u32) {
+    /// `meshes` is how many were re-indexed, not how many were looked at; `waiting`, how many
+    /// stale ones the budget left.
+    pub fn sorted(&mut self, took: Duration, meshes: u32, waiting: u32) {
         self.sort_s += took.as_secs_f32();
         self.sorts += meshes;
+        self.sort_waiting = waiting;
     }
 
     pub fn frame(&self) -> FrameCost {
@@ -69,6 +78,7 @@ impl MainThreadCost {
             uploads: self.uploads,
             sort_s: self.sort_s,
             sorts: self.sorts,
+            sort_waiting: self.sort_waiting,
             rescore_s: RESCORE_NS.load(Relaxed) as f32 * 1e-9,
         }
     }

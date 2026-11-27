@@ -262,11 +262,13 @@ pub(super) fn plugin(app: &mut App) {
 fn add_view_systems(app: &mut App) {
     app.init_session_state::<super::material_textures::Textures>()
         .init_session_state::<Building>()
+        .init_session_state::<CurrentWind>()
         .init_session_state::<Placeholders>();
     app.add_session_systems(
         Update,
         (
             update_textures.after(super::material_textures::receive),
+            receive_wind,
             follow_view,
             receive_meshes,
             drop_meshes,
@@ -307,11 +309,28 @@ const ZENITH_STEP: f32 = 1.0 / 512.0;
 /// coarse water, which carries no Flow, without a step.
 const FLOW_FADE: [f32; 2] = [0.6, 0.9];
 
-/// Keeps what water reflects in step with the sky's zenith, and where its Flow fades with the
-/// reach. Only the blended layer draws water.
+/// The World's Wind, as the Server sent it at the session's start.
+#[derive(Resource, Default)]
+struct CurrentWind(Option<tesserae_core::wind::Wind>);
+
+fn receive_wind(
+    mut messages: MessageReader<crate::content::WorldWind>,
+    mut wind: ResMut<CurrentWind>,
+) {
+    if let Some(message) = messages.read().last() {
+        wind.0 = Some(message.0);
+    }
+}
+
+/// Keeps what water reflects in step with the sky's zenith, where its Flow fades with the reach,
+/// and the Wind its waves run along. Only the blended layer draws water.
 fn follow_view(
-    (settings, streaming): (Option<Res<FogSettings>>, Option<Res<StreamingSettings>>),
-    terrain: Res<TerrainMaterial>,
+    (settings, streaming, world): (
+        Option<Res<FogSettings>>,
+        Option<Res<StreamingSettings>>,
+        Option<Res<WorldSettings>>,
+    ),
+    (terrain, wind): (Res<TerrainMaterial>, Res<CurrentWind>),
     mut materials: ResMut<Assets<ChunkMaterial>>,
 ) {
     let (Some(settings), Some(streaming)) = (settings, streaming) else {
@@ -319,12 +338,18 @@ fn follow_view(
     };
     let zenith = crate::render::sky::zenith(settings.sky);
     let [from, to] = FLOW_FADE.map(|share| share * streaming.view_distance_m);
-    let flow_fade_m = Vec4::new(from, to, 0.0, 0.0);
+    let voxel_m = world.map_or(1.0, |w| w.voxel_size);
+    let flow_fade_m = Vec4::new(from, to, voxel_m, 0.0);
+    let wind = wind.0.map_or(Vec4::ZERO, |w| {
+        Vec4::new(w.toward[0], w.toward[1], w.strength, 0.0)
+    });
     let Some(now) = materials.get(&terrain.blended) else {
         return;
     };
     let view = &now.extension.water_view;
-    if (view.zenith - zenith).abs().max_element() <= ZENITH_STEP && view.flow_fade_m == flow_fade_m
+    if (view.zenith - zenith).abs().max_element() <= ZENITH_STEP
+        && view.flow_fade_m == flow_fade_m
+        && view.wind == wind
     {
         return;
     }
@@ -332,6 +357,7 @@ fn follow_view(
         material.extension.water_view = WaterView {
             zenith,
             flow_fade_m,
+            wind,
         };
     }
 }
@@ -1210,6 +1236,7 @@ mod tests {
             .add_message::<LodUnloaded>()
             .add_message::<crate::content::MaterialPalette>()
             .add_message::<crate::content::MaterialWaterLooks>()
+            .add_message::<crate::content::WorldWind>()
             .add_systems(Startup, add_material);
         add_view_systems(&mut app);
         // The mesh systems take the dev-only counter as a `ResMut`, so without

@@ -17,7 +17,7 @@ use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_cells};
 #[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::visibility::{Connectivity, connectivity};
-use tesserae_core::water_columns::water_columns;
+use tesserae_core::water_columns::{fall_sheets, water_columns};
 use tesserae_core::{
     Chunk, ChunkLight, ChunkMesh, ChunkOverlay, LitChunk, Tables, Worldgen, mesh_chunk,
 };
@@ -388,6 +388,9 @@ pub(in crate::server) fn build_mesh(
     let mut mesh = mesh_chunk(lit(center), neighbors, tables);
     let coord = [coord.x, coord.y, coord.z];
     mesh.water = water_columns(coord, lit(center), neighbors, &tables.fluids, worldgen);
+    mesh.blended
+        .quads
+        .extend(fall_sheets(coord, lit(center), worldgen));
     Built {
         mesh,
         #[cfg(any(feature = "dev", feature = "profiling"))]

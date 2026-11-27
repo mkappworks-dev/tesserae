@@ -6,6 +6,10 @@ use tesserae_core::{MaterialId, ShapeId};
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 
+/// The World's Wind, sent when a World session starts; constant for the World.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct WorldWind(pub tesserae_core::wind::Wind);
+
 /// How water Materials are drawn, beside [`MaterialPalette`]: tags, Fluid rows and render classes
 /// never reach the Client, so the Server decides which Materials are water.
 #[derive(Message, Clone, Debug, Default, PartialEq)]

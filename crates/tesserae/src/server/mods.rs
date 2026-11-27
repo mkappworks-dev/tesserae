@@ -929,6 +929,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<CharacterModel>()
         .add_session_message::<MaterialPalette>()
         .add_session_message::<MaterialWaterLooks>()
+        .add_session_message::<crate::content::WorldWind>()
         .add_session_message::<ContentCatalogue>()
         .add_session_message::<crate::content::WorldFacts>()
         .add_session_message::<crate::content::SoundLibrary>()
@@ -1109,6 +1110,9 @@ fn install(world: &mut World) {
     });
     world.write_message(MaterialPalette(loaded.appearance));
     world.write_message(MaterialWaterLooks(loaded.water_looks));
+    world.write_message(crate::content::WorldWind(tesserae_core::wind::wind(
+        settings.seed,
+    )));
     world.write_message(MaterialTextures(loaded.textures));
     world.write_message(CharacterModel(loaded.character.map(std::sync::Arc::new)));
     world.write_message(catalogue);
@@ -2865,6 +2869,13 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .next()
             .unwrap();
         assert_eq!(message.0, vec![(8, [64, 128, 192, 128])]);
+        let wind = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::WorldWind>>()
+            .drain()
+            .next()
+            .expect("the Wind reaches the Client as the session starts");
+        assert_eq!(wind.0, tesserae_core::wind::wind(123));
         let mut uniform = ChunkMaterialExtension::default();
         uniform.apply_palette(&message);
         let expected = Color::srgba(64.0 / 255.0, 128.0 / 255.0, 192.0 / 255.0, 128.0 / 255.0)

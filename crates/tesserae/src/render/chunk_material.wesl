@@ -29,9 +29,9 @@ import super::{
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
     water::{
-        WATER_REFLECTANCE, ambient_specular, column_depth_m, column_point, flow_cycle, fresnel, is_water,
-        sky_reflection, water_body, water_depth_m, water_flow, water_foam_share, water_gradient,
-        water_surface,
+        SeaWaves, WATER_REFLECTANCE, ambient_specular, column_depth_m, column_point,
+        falling_foam, flow_cycle, fresnel, is_water, sea_waves, sky_reflection, water_body,
+        water_flow, water_foam_share, water_gradient, water_shape, water_surface, water_view,
     },
 };
 
@@ -316,18 +316,31 @@ fn fragment(
         var depth_m = 0.0;
         var flow = vec2<f32>(0.0);
         var foam = 0.0;
+        var waves = SeaWaves(vec2<f32>(0.0), 0.0, 0.0);
         let cycle = flow_cycle(in.world_position.xz);
         if columns {
             let point = column_point(in.voxel, in.uv);
             // Depth, Flow and foam are the top's: a wall of water stands at its column's edge,
             // where the filtered depth runs out as at a shore, so it takes its own column's.
             if abs(pbr_input.world_normal.y) > 0.5 {
-                depth_m = water_depth_m(in.water, point);
+                let shape = water_shape(in.water, point);
+                depth_m = shape.depth_m;
                 flow = water_flow(in.water, point, in.world_position.xyz);
-                foam = water_foam_share(in.world_position.xz, water_grad, depth_m, flow, cycle);
+                waves = sea_waves(in.world_position.xz, water_grad, shape, water_view.wind);
+                foam = water_foam_share(
+                    in.world_position.xz,
+                    water_grad,
+                    depth_m,
+                    flow,
+                    cycle,
+                    waves.breaking,
+                );
             } else {
                 depth_m = column_depth_m(in.water, vec2<i32>(floor(point)));
             }
+        }
+        if abs(pbr_input.world_normal.y) <= 0.5 {
+            foam = falling_foam(in.world_position.xyz, pbr_input.world_normal, cycle);
         }
         let calm = select(1.0, smoothstep(0.0, CALM_DEPTH_M, depth_m), columns);
         let surface = water_surface(
@@ -338,6 +351,7 @@ fn fragment(
             calm,
             flow,
             cycle,
+            waves,
         );
         pbr_input.N = surface.normal;
         pbr_input.material.perceptual_roughness = mix(surface.perceptual_roughness, 1.0, foam);

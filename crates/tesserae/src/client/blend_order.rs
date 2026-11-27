@@ -344,9 +344,17 @@ pub(super) fn sort_blended(
         })
         .collect();
     stale.sort_by(|a, b| a.0.total_cmp(&b.0));
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let mut waiting = 0;
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let stale_count = stale.len() as u32;
     for (n, (_, local, mut order, quads)) in stale.into_iter().enumerate() {
         // The nearest mesh always sorts, so a slow frame cannot starve it.
         if n > 0 && started.elapsed() > FRAME_BUDGET {
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            {
+                waiting = stale_count - n as u32;
+            }
             break;
         }
         let Some(order) = order.resort(local) else {
@@ -360,6 +368,6 @@ pub(super) fn sort_blended(
     }
     #[cfg(any(feature = "dev", feature = "profiling"))]
     if cost.enabled() {
-        cost.sorted(started.elapsed(), sorted);
+        cost.sorted(started.elapsed(), sorted, waiting);
     }
 }

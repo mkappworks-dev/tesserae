@@ -4,8 +4,10 @@
 
 use crate::chunk::CHUNK_SIZE;
 use crate::fluid::FluidTable;
-use crate::mesh::{LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use crate::light::{Light, MAX_LIGHT};
+use crate::mesh::{LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z, Quad};
 use crate::occupants::{Fluid, Occupants};
+use crate::shape::SUBDIV;
 use crate::voxel::MaterialId;
 use crate::worldgen::Fall;
 
@@ -26,6 +28,8 @@ pub trait WaterAnswers {
     fn flow(&self, column: [i32; 2]) -> [f32; 2];
     /// The Fall over a column, if it is a lip with a lower pool past it.
     fn fall(&self, column: [i32; 2]) -> Option<Fall>;
+    /// The sea's Water surface in metres, `None` in a World without a sea.
+    fn sea_level_m(&self) -> Option<f32>;
 }
 
 /// One column's water, 4 bytes: zero for a dry column.
@@ -48,6 +52,8 @@ impl WaterColumn {
     pub const FALLING: u8 = 1;
     /// A Fall lands in it.
     pub const FOAM: u8 = 2;
+    /// The Generator's sea, which runs in waves from the Wind; a lake only ripples.
+    pub const SEA: u8 = 4;
 
     fn new(flow_m_s: [f32; 2], depth_m: f32, flags: u8) -> Self {
         let step = |v: f32| (v / Self::FLOW_STEP_M_S).round().clamp(-127.0, 127.0) as i8;
@@ -75,6 +81,62 @@ impl WaterColumn {
 pub fn water_index(x: i32, z: i32) -> usize {
     debug_assert!((-1..=CHUNK_SIZE as i32).contains(&x) && (-1..=CHUNK_SIZE as i32).contains(&z));
     (z + 1) as usize * WATER_SIDE + (x + 1) as usize
+}
+
+/// The sheets of water pouring over the Generator's lips in the Chunk at `coord`, for its blended
+/// layer: one per lip column with a lower pool past it, on the lip's far face a sixteenth off the
+/// rock, from the upper Water surface down to the lower, cut to the Chunk. Drawn only: nothing is
+/// added to the World (ADR-0038). Lit as the air past the lip is.
+pub fn fall_sheets(
+    coord: [i32; 3],
+    center: LitChunk<'_>,
+    answers: &impl WaterAnswers,
+) -> Vec<Quad> {
+    let Some(water) = answers.water_material() else {
+        return Vec::new();
+    };
+    let sub = SUBDIV as i32;
+    let size = answers.voxel_size();
+    let base = [coord[0] * SIDE, coord[1] * SIDE, coord[2] * SIDE];
+    let mut sheets = Vec::new();
+    for z in 0..SIDE {
+        for x in 0..SIDE {
+            let Some(fall) = answers.fall([base[0] + x, base[2] + z]) else {
+                continue;
+            };
+            let in_chunk = |m: f32| (((m / size) - base[1] as f32) * sub as f32).round() as i32;
+            let low = in_chunk(fall.to_m).max(0);
+            let high = in_chunk(fall.from_m).min(SIDE * sub);
+            if low >= high {
+                continue;
+            }
+            let [dx, dz] = fall.toward;
+            let (face, plane) = match (dx, dz) {
+                (1, 0) => (POS_X, (x + 1) * sub + 1),
+                (-1, 0) => (NEG_X, x * sub - 1),
+                (0, 1) => (POS_Z, (z + 1) * sub + 1),
+                _ => (NEG_Z, z * sub - 1),
+            };
+            let along = |c: i32| [(c * sub) as u16, ((c + 1) * sub) as u16];
+            let height = [low as u16, high as u16];
+            // A face's u and v are its next two axes in turn: y then z across x, x then y across z.
+            let (u, v) = if dx != 0 {
+                (height, along(z))
+            } else {
+                (along(x), height)
+            };
+            let past = [x + dx, (high - 1) / sub, z + dz];
+            let light = if past.iter().all(|&c| (0..SIDE).contains(&c)) {
+                center
+                    .light
+                    .get(past[0] as usize, past[1] as usize, past[2] as usize)
+            } else {
+                Light::new(MAX_LIGHT, 0)
+            };
+            sheets.push(Quad::face(face, plane, u, v, u32::from(water), light));
+        }
+    }
+    sheets
 }
 
 /// How fast simulated water runs down a surface sloping one in one.
@@ -119,14 +181,17 @@ pub fn water_columns(
     }
     let base = [coord[0] * SIDE, coord[1] * SIDE, coord[2] * SIDE];
     let size = answers.voxel_size();
-    let generated = |column: [i32; 2], top: i32| {
+    let sea_m = answers.sea_level_m();
+    let generated = |column: [i32; 2], level_m: f32, top: i32| {
         let depth_m = (top + 1) as f32 * size - answers.ground_m(column);
         let foam = CARDINALS.iter().any(|&[dx, dz]| {
             answers
                 .fall([column[0] - dx, column[1] - dz])
                 .is_some_and(|f| f.toward == [dx, dz])
         });
-        let flags = if foam { WaterColumn::FOAM } else { 0 };
+        let sea = sea_m.is_some_and(|sea_m| level_m <= sea_m);
+        let flags =
+            if foam { WaterColumn::FOAM } else { 0 } | if sea { WaterColumn::SEA } else { 0 };
         WaterColumn::new(answers.flow(column), depth_m, flags)
     };
     let mut out = vec![WaterColumn::default(); WATER_SIDE * WATER_SIDE];
@@ -140,10 +205,10 @@ pub fn water_columns(
             let world_water =
                 scan.fluid.source && Some(scan.fluid.material) == answers.water_material();
             if world_water
-                && let Some((_, k)) = answers.water_top(column)
+                && let Some((level_m, k)) = answers.water_top(column)
                 && (k == top || (scan.ceiling && k > top))
             {
-                out[water_index(x, z)] = generated(column, k);
+                out[water_index(x, z)] = generated(column, level_m, k);
                 continue;
             }
             let height = |x: i32, z: i32| {
@@ -182,7 +247,9 @@ pub fn water_columns(
         let column = [base[0] + x, base[2] + z];
         out[water_index(x, z)] = answers
             .water_top(column)
-            .map_or(out[water_index(x, held_z)], |(_, k)| generated(column, k));
+            .map_or(out[water_index(x, held_z)], |(level_m, k)| {
+                generated(column, level_m, k)
+            });
     }
     out
 }
@@ -296,6 +363,7 @@ mod tests {
         top: Option<(f32, i32)>,
         flow: [f32; 2],
         falls: Vec<([i32; 2], Fall)>,
+        sea_m: Option<f32>,
     }
 
     impl WaterAnswers for Double {
@@ -319,6 +387,9 @@ mod tests {
                 .iter()
                 .find(|(c, _)| *c == column)
                 .map(|(_, f)| *f)
+        }
+        fn sea_level_m(&self) -> Option<f32> {
+            self.sea_m
         }
     }
 
@@ -390,6 +461,7 @@ mod tests {
             top,
             flow: [0.5, -0.25],
             falls: Vec::new(),
+            sea_m: None,
         }
     }
 
@@ -434,6 +506,86 @@ mod tests {
             }
         }
         assert!(got[water_index(-1, -1)].is_wet(), "the Generator's corner");
+    }
+
+    #[test]
+    fn generated_water_at_sea_level_is_the_sea_and_a_lake_above_it_is_not() {
+        let mut chunk = ground();
+        for y in FLOOR..=9 {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    chunk.set(x, y, z, Voxel::cube(water()));
+                }
+            }
+        }
+        let none = ChunkOverlay::none();
+        let mut sea = generator(Some((9.6, 9)));
+        sea.sea_m = Some(9.6);
+        let got = columns(&chunk, &none, &sea);
+        assert!(got[water_index(3, 3)].flags & WaterColumn::SEA != 0);
+        sea.sea_m = Some(5.0);
+        let got = columns(&chunk, &none, &sea);
+        assert!(
+            got[water_index(3, 3)].flags & WaterColumn::SEA == 0,
+            "a lake"
+        );
+    }
+
+    #[test]
+    fn a_lip_with_a_lower_pool_past_it_pours_one_sheet_from_surface_to_surface() {
+        let chunk = ground();
+        let light = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mut answers = generator(Some((9.6, 9)));
+        answers.falls.push((
+            [5, 7],
+            Fall {
+                toward: [1, 0],
+                from_m: 11.5,
+                to_m: 9.25,
+            },
+        ));
+        answers.falls.push((
+            [9, 3],
+            Fall {
+                toward: [0, -1],
+                from_m: 12.0,
+                to_m: 10.0,
+            },
+        ));
+        let sheets = fall_sheets([0, 0, 0], LitChunk::new(&chunk, &light), &answers);
+        assert_eq!(sheets.len(), 2);
+        let corners = |q: &Quad| q.corners().map(|c| c.position);
+        // Row by row along z, so the lip at z 3 comes first.
+        let (north, east) = (corners(&sheets[0]), corners(&sheets[1]));
+        assert!(east.iter().all(|p| p[0] == 6.0 + 1.0 / 16.0), "{east:?}");
+        let (ys, zs): (Vec<f32>, Vec<f32>) = east.iter().map(|p| (p[1], p[2])).unzip();
+        assert_eq!(ys.iter().copied().fold(f32::MAX, f32::min), 9.25);
+        assert_eq!(ys.iter().copied().fold(f32::MIN, f32::max), 11.5);
+        assert_eq!(zs.iter().copied().fold(f32::MAX, f32::min), 7.0);
+        assert_eq!(zs.iter().copied().fold(f32::MIN, f32::max), 8.0);
+        assert!(north.iter().all(|p| p[2] == 3.0 - 1.0 / 16.0), "{north:?}");
+        assert!(sheets.iter().all(|q| q.material == u32::from(water())));
+    }
+
+    #[test]
+    fn a_lip_beside_dry_ground_pours_nothing() {
+        let chunk = ground();
+        let light = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let answers = generator(Some((9.6, 9)));
+        assert!(fall_sheets([0, 0, 0], LitChunk::new(&chunk, &light), &answers).is_empty());
+        let high = fall_sheets([0, 1, 0], LitChunk::new(&chunk, &light), &{
+            let mut answers = generator(Some((9.6, 9)));
+            answers.falls.push((
+                [5, 7],
+                Fall {
+                    toward: [1, 0],
+                    from_m: 11.5,
+                    to_m: 9.25,
+                },
+            ));
+            answers
+        });
+        assert!(high.is_empty(), "a Fall below the Chunk is cut away");
     }
 
     #[test]
