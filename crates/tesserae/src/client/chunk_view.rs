@@ -1105,7 +1105,7 @@ mod tests {
             drawn: Handle::default(),
         });
         app.world_mut().spawn((Camera3d::default(), MainCamera));
-        let mut state = |app: &mut App| {
+        let state = |app: &mut App| {
             app.world_mut().run_system_once(follow_refraction).unwrap();
             let copied = app
                 .world_mut()
