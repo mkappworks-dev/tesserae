@@ -65,13 +65,24 @@ pub const RIPPLES: [Ripple; 2] = [
     },
 ];
 
+/// Flow-mapped normals cycle this many times a clock period: each cycle drags the normal map
+/// along Flow for one second, then fades to its twin half a cycle behind before the drag shows.
+pub const FLOW_CYCLES_PER_PERIOD: u32 = CLOCK_PERIOD_S;
+
+/// Where each new flow cycle starts the normal map, in its repeats. Two taps half a cycle apart
+/// otherwise repeat every half cycle, a pulse in place; with this the surface repeats every 20
+/// cycles. Whole repeats over a clock period, so nothing jumps where it wraps.
+pub const FLOW_JUMP: [f32; 2] = [0.2, 0.25];
+
 /// The ripples as `constants::CHUNK_RIPPLE<i>_*`: floats as bit patterns, which the shader
 /// bitcasts back.
 pub fn ripple_shader_defs() -> Vec<ShaderDefVal> {
-    let mut defs = vec![ShaderDefVal::UInt(
-        "CHUNK_CLOCK_PERIOD_S".into(),
-        CLOCK_PERIOD_S,
-    )];
+    let mut defs = vec![
+        ShaderDefVal::UInt("CHUNK_CLOCK_PERIOD_S".into(), CLOCK_PERIOD_S),
+        ShaderDefVal::UInt("CHUNK_FLOW_CYCLES".into(), FLOW_CYCLES_PER_PERIOD),
+        ShaderDefVal::UInt("CHUNK_FLOW_JUMP_X".into(), FLOW_JUMP[0].to_bits()),
+        ShaderDefVal::UInt("CHUNK_FLOW_JUMP_Z".into(), FLOW_JUMP[1].to_bits()),
+    ];
     for (i, ripple) in RIPPLES.iter().enumerate() {
         let [x, z] = ripple.tiles_per_period;
         defs.extend([
@@ -343,6 +354,18 @@ mod tests {
                     "{ripple:?}: {at_wrap}"
                 );
             }
+        }
+        let cycles_at_wrap = period * (FLOW_CYCLES_PER_PERIOD as f32 / period);
+        assert!(
+            (cycles_at_wrap - cycles_at_wrap.round()).abs() < 1e-4,
+            "flow: {cycles_at_wrap}"
+        );
+        for jump in FLOW_JUMP {
+            let repeats = cycles_at_wrap.round() * jump;
+            assert!(
+                (repeats - repeats.round()).abs() < 1e-3,
+                "flow jump: {repeats}"
+            );
         }
     }
 

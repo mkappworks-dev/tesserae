@@ -18,13 +18,14 @@ var water_normals: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(109)
 var water_normals_sampler: sampler;
 
-// Mirrors WaterSky in chunk_material.rs.
-struct WaterSky {
+// Mirrors WaterView in chunk_material.rs.
+struct WaterView {
     zenith: vec4<f32>,
+    flow_fade_m: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(110)
-var<uniform> water_sky: WaterSky;
+var<uniform> water_view: WaterView;
 @group(constants::MATERIAL_BIND_GROUP) @binding(111)
 var water_foam: texture_2d<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(112)
@@ -113,6 +114,71 @@ fn water_depth_m(water: u32, point: vec2<f32>) -> f32 {
     return max(filtered, 0.0);
 }
 
+// `WaterColumn`'s Flow at column `x`, `z`, in m/s along x and z: two signed bytes.
+fn column_flow(water: u32, column: vec2<i32>) -> vec2<f32> {
+    let side = i32(constants::CHUNK_WATER_SIDE);
+    let word = quads[water + u32((column.y + 1) * side + column.x + 1)];
+    let steps = vec2<i32>(bitcast<i32>(word << 24u) >> 24u, bitcast<i32>(word << 16u) >> 24u);
+    return vec2<f32>(steps) * bitcast<f32>(constants::CHUNK_WATER_FLOW_STEP_M_S);
+}
+
+// Flow filtered between column centres as depth is, faded to calm toward the edge of level 0,
+// so it meets coarse water, which carries none, without a step.
+fn water_flow(water: u32, point: vec2<f32>, world_position: vec3<f32>) -> vec2<f32> {
+    let q = point - 0.5;
+    let last = i32(constants::CHUNK_CELLS) - 1;
+    let i = clamp(vec2<i32>(floor(q)), vec2<i32>(-1), vec2<i32>(last));
+    let f = clamp(q - vec2<f32>(i), vec2<f32>(0.0), vec2<f32>(1.0));
+    let low = mix(column_flow(water, i), column_flow(water, i + vec2<i32>(1, 0)), f.x);
+    let high = mix(
+        column_flow(water, i + vec2<i32>(0, 1)),
+        column_flow(water, i + vec2<i32>(1, 1)),
+        f.x,
+    );
+    let distance = length(world_position - view.world_position.xyz);
+    let fade = 1.0 - smoothstep(water_view.flow_fade_m.x, water_view.flow_fade_m.y, distance);
+    return mix(low, high, f.y) * fade;
+}
+
+// Scale of the slow noise that staggers the flow cycle from place to place, so the cross-fade's
+// pulse never sweeps a whole river at once.
+const FLOW_STAGGER_M: f32 = 23.0;
+
+// How many one-second flow cycles have passed at `xz`. A whole number of cycles per period, so
+// it steps by a whole number where the clock wraps.
+fn flow_cycle(xz: vec2<f32>) -> f32 {
+    let stagger = textureSampleLevel(water_foam, water_foam_sampler, xz / FLOW_STAGGER_M, 3.0).r;
+    return clock() * (f32(constants::CHUNK_FLOW_CYCLES) / f32(constants::CHUNK_CLOCK_PERIOD_S)) + stagger;
+}
+
+// `water::FLOW_JUMP`: where each new cycle starts the texture, so the surface does not repeat
+// every half cycle.
+fn flow_jump() -> vec2<f32> {
+    return vec2<f32>(bitcast<f32>(constants::CHUNK_FLOW_JUMP_X), bitcast<f32>(constants::CHUNK_FLOW_JUMP_Z));
+}
+
+// Two samples of a texture dragged along `flow` half a cycle apart, each weighted by how near the
+// middle of its drag it is, so neither is seen at the end of its drag where it stretches most.
+// `flow` is in the texture's repeats per cycle. Cross-faded noise loses contrast midway; the
+// weights' length puts it back.
+struct FlowTaps {
+    first: vec2<f32>,
+    second: vec2<f32>,
+    weights: vec2<f32>,
+}
+
+fn flow_taps(uv: vec2<f32>, flow: vec2<f32>, cycle: f32) -> FlowTaps {
+    let first = fract(cycle);
+    let second = fract(cycle + 0.5);
+    let first_weight = 1.0 - abs(2.0 * first - 1.0);
+    let weights = vec2<f32>(first_weight, 1.0 - first_weight) / length(vec2<f32>(first_weight, 1.0 - first_weight));
+    return FlowTaps(
+        uv - flow * (first - 0.5) + floor(cycle) * flow_jump(),
+        uv - flow * (second - 0.5) + floor(cycle + 0.5) * flow_jump() + 0.5,
+        weights,
+    );
+}
+
 // Shallower than this, the water foams where the mask says.
 const FOAM_DEPTH_M: f32 = 0.6;
 // One repeat of the foam mask.
@@ -122,18 +188,37 @@ const FOAM_EDGE: f32 = 0.12;
 
 // How much of the surface is foam at `depth_m`: a band along the shore whose inner edge the mask
 // breaks into streaks.
-fn shore_foam(xz: vec2<f32>, gradient: WaterGradient, depth_m: f32) -> f32 {
-    let band = 1.0 - smoothstep(0.03, FOAM_DEPTH_M, depth_m);
+// White water: from this speed the surface starts to foam, and at the next it is all foam where
+// the mask allows. The Generator's pools run near 3 m/s and its steepest reaches at its 4 m/s
+// cap, so white water is kept to those.
+const WHITE_FROM_M_S: f32 = 3.0;
+const WHITE_AT_M_S: f32 = 3.9;
+
+// How much of the surface is foam: a band along the shore, and white water where it runs fast,
+// each broken up by the mask, which runs with the Flow.
+fn water_foam_share(
+    xz: vec2<f32>,
+    gradient: WaterGradient,
+    depth_m: f32,
+    flow: vec2<f32>,
+    cycle: f32,
+) -> f32 {
+    let shore = 1.0 - smoothstep(0.03, FOAM_DEPTH_M, depth_m);
+    let white = smoothstep(WHITE_FROM_M_S, WHITE_AT_M_S, length(flow));
+    let band = max(shore, white);
     if band <= 0.0 {
         return 0.0;
     }
-    let mask = textureSampleGrad(
-        water_foam,
-        water_foam_sampler,
-        xz / FOAM_TILE_M,
-        gradient.ddx / FOAM_TILE_M,
-        gradient.ddy / FOAM_TILE_M,
-    ).r;
+    let ddx = gradient.ddx / FOAM_TILE_M;
+    let ddy = gradient.ddy / FOAM_TILE_M;
+    let taps = flow_taps(xz / FOAM_TILE_M, flow / FOAM_TILE_M, cycle);
+    let mask = dot(
+        vec2<f32>(
+            textureSampleGrad(water_foam, water_foam_sampler, taps.first, ddx, ddy).r,
+            textureSampleGrad(water_foam, water_foam_sampler, taps.second, ddx, ddy).r,
+        ),
+        taps.weights,
+    ) / (taps.weights.x + taps.weights.y);
     return smoothstep(1.0 - band, 1.0 - band + FOAM_EDGE, mask);
 }
 
@@ -174,12 +259,18 @@ struct Ripples {
     lost: f32,
 }
 
+// Below this speed, in m/s, a layer is not flow-mapped: one sample, as still water.
+const STILL_M_S: f32 = 0.02;
+
+// `flow` in m/s along the layer's own axes.
 fn ripple_layer(
     xz: vec2<f32>,
     gradient: WaterGradient,
     tile_m: f32,
     tiles_per_period: vec2<f32>,
     strength: f32,
+    flow: vec2<f32>,
+    cycle: f32,
 ) -> Ripples {
     // A whole number of repeats per period, so this is continuous where `globals.time` wraps.
     let drift = clock() * (tiles_per_period / f32(constants::CHUNK_CLOCK_PERIOD_S));
@@ -189,10 +280,22 @@ fn ripple_layer(
     // How many of the layer's shortest crests one pixel spans.
     let crests = max(length(ddx), length(ddy)) * MOST_CRESTS;
     let lost = smoothstep(0.25, 2.0, crests);
-    let slope = textureSampleGrad(water_normals, water_normals_sampler, uv, ddx, ddy).rg * strength;
+    var slope: vec2<f32>;
+    if length(flow) < STILL_M_S {
+        slope = textureSampleGrad(water_normals, water_normals_sampler, uv, ddx, ddy).rg;
+    } else {
+        // One cycle is one second, so Flow in m/s is the drag in metres a cycle.
+        let taps = flow_taps(uv, flow / tile_m, cycle);
+        slope = textureSampleGrad(water_normals, water_normals_sampler, taps.first, ddx, ddy).rg * taps.weights.x
+            + textureSampleGrad(water_normals, water_normals_sampler, taps.second, ddx, ddy).rg * taps.weights.y;
+    }
+    slope *= strength;
     // A sine's slope variance is half its peak squared.
     return Ripples(slope * (1.0 - lost), 0.5 * strength * strength * lost);
 }
+
+// How much rougher running water's ripples are, per m/s, so steep reaches read as rapids.
+const FLOW_STRENGTH_PER_M_S: f32 = 0.35;
 
 struct WaterSurface {
     normal: vec3<f32>,
@@ -201,13 +304,15 @@ struct WaterSurface {
 
 // `normal` faces the viewer, as bevy_pbr's double-sided flip leaves it. Ripples move only the
 // tops and undersides; a wall of water keeps its face's normal.
-// `calm` scales the ripples: 0 flat, 1 full.
+// `calm` scales the ripples: 0 flat, 1 full. `flow` drags them, in m/s along x and z.
 fn water_surface(
     slot: u32,
     world_position: vec3<f32>,
     gradient: WaterGradient,
     normal: vec3<f32>,
     calm: f32,
+    flow: vec2<f32>,
+    cycle: f32,
 ) -> WaterSurface {
     let base = roughness_of(slot);
     if abs(normal.y) < 0.5 {
@@ -219,6 +324,8 @@ fn water_surface(
         bitcast<f32>(constants::CHUNK_RIPPLE0_TILE_M),
         vec2<f32>(f32(constants::CHUNK_RIPPLE0_X), f32(constants::CHUNK_RIPPLE0_Z)),
         bitcast<f32>(constants::CHUNK_RIPPLE0_STRENGTH),
+        flow,
+        cycle,
     );
     let b = ripple_layer(
         // Turned against the first, so the two layers' texels never line up.
@@ -227,9 +334,11 @@ fn water_surface(
         bitcast<f32>(constants::CHUNK_RIPPLE1_TILE_M),
         vec2<f32>(f32(constants::CHUNK_RIPPLE1_X), f32(constants::CHUNK_RIPPLE1_Z)),
         bitcast<f32>(constants::CHUNK_RIPPLE1_STRENGTH),
+        vec2<f32>(flow.y, -flow.x),
+        cycle,
     );
     let turned_back = vec2<f32>(-b.slope.y, b.slope.x);
-    let slope = (a.slope + turned_back) * calm;
+    let slope = (a.slope + turned_back) * calm * (1.0 + FLOW_STRENGTH_PER_M_S * length(flow));
     let up = sign(normal.y);
     let rippled = normalize(vec3<f32>(-slope.x, 1.0, -slope.y) * vec3<f32>(1.0, up, 1.0));
     // Beckmann's alpha squared is twice the slope variance; bevy_pbr's alpha is roughness squared.
@@ -246,7 +355,7 @@ fn fresnel(cos_view: f32) -> f32 {
 // this has no view of.
 fn sky_reflection(view_toward: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     let ray = reflect(-view_toward, normal);
-    return sky_before_tonemap(normalize(vec3<f32>(ray.x, abs(ray.y), ray.z)), water_sky.zenith.rgb);
+    return sky_before_tonemap(normalize(vec3<f32>(ray.x, abs(ray.y), ray.z)), water_view.zenith.rgb);
 }
 
 // What bevy_pbr's `ambient_light` adds for water's specular, worked out as it does and scaled by

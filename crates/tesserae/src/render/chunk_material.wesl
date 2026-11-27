@@ -29,8 +29,9 @@ import super::{
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
     water::{
-        WATER_REFLECTANCE, ambient_specular, column_point, fresnel, is_water, shore_foam,
-        sky_reflection, water_body, water_depth_m, water_gradient, water_surface,
+        WATER_REFLECTANCE, ambient_specular, column_depth_m, column_point, flow_cycle, fresnel, is_water,
+        sky_reflection, water_body, water_depth_m, water_flow, water_foam_share, water_gradient,
+        water_surface,
     },
 };
 
@@ -313,13 +314,31 @@ fn fragment(
         let from_below = pbr_input.world_normal.y < -0.5;
         let columns = in.water != 0u && !from_below;
         var depth_m = 0.0;
+        var flow = vec2<f32>(0.0);
         var foam = 0.0;
+        let cycle = flow_cycle(in.world_position.xz);
         if columns {
-            depth_m = water_depth_m(in.water, column_point(in.voxel, in.uv));
-            foam = shore_foam(in.world_position.xz, water_grad, depth_m);
+            let point = column_point(in.voxel, in.uv);
+            // Depth, Flow and foam are the top's: a wall of water stands at its column's edge,
+            // where the filtered depth runs out as at a shore, so it takes its own column's.
+            if abs(pbr_input.world_normal.y) > 0.5 {
+                depth_m = water_depth_m(in.water, point);
+                flow = water_flow(in.water, point, in.world_position.xyz);
+                foam = water_foam_share(in.world_position.xz, water_grad, depth_m, flow, cycle);
+            } else {
+                depth_m = column_depth_m(in.water, vec2<i32>(floor(point)));
+            }
         }
         let calm = select(1.0, smoothstep(0.0, CALM_DEPTH_M, depth_m), columns);
-        let surface = water_surface(slot, in.world_position.xyz, water_grad, pbr_input.N, calm);
+        let surface = water_surface(
+            slot,
+            in.world_position.xyz,
+            water_grad,
+            pbr_input.N,
+            calm,
+            flow,
+            cycle,
+        );
         pbr_input.N = surface.normal;
         pbr_input.material.perceptual_roughness = mix(surface.perceptual_roughness, 1.0, foam);
         pbr_input.material.reflectance = vec3<f32>(WATER_REFLECTANCE);

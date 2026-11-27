@@ -26,7 +26,7 @@ use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::{ChunkQuads, Placeholders};
 use crate::client::drawn_mask::{self, DrawnMask};
 use crate::client::in_flight::InFlight;
-use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
+use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams, WaterView};
 use crate::render::fog::{self, FogSettings};
 use crate::render::quad_buffer::QuadBuffer;
 use crate::server::streaming::{
@@ -267,7 +267,7 @@ fn add_view_systems(app: &mut App) {
         Update,
         (
             update_textures.after(super::material_textures::receive),
-            follow_sky,
+            follow_view,
             receive_meshes,
             drop_meshes,
             land_meshes,
@@ -303,28 +303,36 @@ fn update_textures(
 /// re-uploads the blended material, and the zenith moves every frame through the day.
 const ZENITH_STEP: f32 = 1.0 / 512.0;
 
-/// Keeps the zenith water reflects in step with the sky's. Only the blended layer draws water.
-fn follow_sky(
-    settings: Option<Res<FogSettings>>,
+/// Where running water calms, as shares of the level-0 reach: gone by its edge, so it meets
+/// coarse water, which carries no Flow, without a step.
+const FLOW_FADE: [f32; 2] = [0.6, 0.9];
+
+/// Keeps what water reflects in step with the sky's zenith, and where its Flow fades with the
+/// reach. Only the blended layer draws water.
+fn follow_view(
+    (settings, streaming): (Option<Res<FogSettings>>, Option<Res<StreamingSettings>>),
     terrain: Res<TerrainMaterial>,
     mut materials: ResMut<Assets<ChunkMaterial>>,
 ) {
-    let Some(settings) = settings else {
+    let (Some(settings), Some(streaming)) = (settings, streaming) else {
         return;
     };
     let zenith = crate::render::sky::zenith(settings.sky);
+    let [from, to] = FLOW_FADE.map(|share| share * streaming.view_distance_m);
+    let flow_fade_m = Vec4::new(from, to, 0.0, 0.0);
     let Some(now) = materials.get(&terrain.blended) else {
         return;
     };
-    if (now.extension.water_sky.zenith - zenith)
-        .abs()
-        .max_element()
-        <= ZENITH_STEP
+    let view = &now.extension.water_view;
+    if (view.zenith - zenith).abs().max_element() <= ZENITH_STEP && view.flow_fade_m == flow_fade_m
     {
         return;
     }
     if let Some(mut material) = materials.get_mut(&terrain.blended) {
-        material.extension.water_sky.zenith = zenith;
+        material.extension.water_view = WaterView {
+            zenith,
+            flow_fade_m,
+        };
     }
 }
 

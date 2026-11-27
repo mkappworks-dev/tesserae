@@ -81,11 +81,14 @@ pub struct LodParams {
     pub tint: u32,
 }
 
-/// Mirrors `WaterSky` in `water.wesl`: what water reflects, kept in step with the sky's.
+/// Mirrors `WaterView` in `water.wesl`: what water reflects, kept in step with the sky's, and
+/// where its Flow fades.
 #[derive(Reflect, ShaderType, Debug, Clone, Copy, Default, PartialEq)]
-pub struct WaterSky {
+pub struct WaterView {
     /// The sky material's zenith, linear.
     pub zenith: Vec4,
+    /// x and y: the distances in metres over which Flow fades to calm water.
+    pub flow_fade_m: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -119,7 +122,7 @@ pub struct ChunkMaterialExtension {
     #[sampler(109)]
     pub water_normals: Option<Handle<Image>>,
     #[uniform(110)]
-    pub water_sky: WaterSky,
+    pub water_view: WaterView,
     /// `water::foam_mask`; `None` until the Client has built it.
     #[texture(111)]
     #[sampler(112)]
@@ -172,7 +175,7 @@ impl Default for ChunkMaterialExtension {
             quads: Handle::default(),
             water: [Vec4::ZERO; water::TABLE_LEN],
             water_normals: None,
-            water_sky: WaterSky::default(),
+            water_view: WaterView::default(),
             water_foam: None,
             coverage_test: true,
         }
