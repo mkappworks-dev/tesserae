@@ -1,6 +1,6 @@
 # 29: Seeing under water
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 28
 
 Spec: [Water that looks natural](../spec.md), Under water. From the user's
@@ -23,9 +23,15 @@ near; a thin white line crosses the view looking down.
 
 ## Acceptance criteria
 
-- [ ] A floor 5 m off keeps most of its colour in Terra's lake; one 30 m off is
-      mostly the water's colour.
+- [ ] Under water reads as clear water with a light blue tint at any distance:
+      a floor 5 m off and one 30 m off both keep their colours, tinted; only
+      near the edge of what is streamed does the view fade to the water.
 - [ ] A shallow floor lit brighter than a deep one, by the water above it.
 - [ ] Caustics move on the floor near the surface and fade with depth.
 - [ ] No white line across the view under water.
 - [ ] Captures at the four angles, before and after, shown to the user.
+
+## Comments
+
+- 2026-11-27: the user chose clear water with a light blue tint at any
+  distance over a realistic fade by 30 m.

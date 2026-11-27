@@ -1,6 +1,6 @@
 # 30: Seeing out from under water
 
-Status: needs-info
+Status: ready-for-agent
 Blocked by: 29
 
 Spec: [Water that looks natural](../spec.md), Under water. From the user's
@@ -26,3 +26,8 @@ it, and white lines run along the edges of the surface's quads.
 - [ ] No white lines along the surface's quads from below.
 - [ ] GPU time under water against before, in Comments.
 - [ ] Captures shown to the user.
+
+## Comments
+
+- 2026-11-27: the user chose clear water with a light blue tint at any
+  distance over a realistic fade by 30 m.
