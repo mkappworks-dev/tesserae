@@ -57,3 +57,24 @@ Measure the finished water against `main` and close the spec.
   Chunk. Not changed, by the spec: version 3 changes in place before the first
   release, and a Fall's sheet is drawn from the Generator's answers even where a
   Player has since dug the lip or drained the pool.
+- The full suite at 024c975b (`cargo nextest run --workspace --locked
+  --features tesserae/dev`, `RUSTFLAGS="-D warnings"`): 3 526 run, two fail,
+  both from the hydrology tickets. They fail the same way at f9428bf5, the
+  last hydrology commit, with its own Game build:
+  - `server::mods::demo_games::structures::terra_lays_out_a_town_of_cobbled_roads`:
+    the town lays 8 buildings, under 15.
+  - `server::lod::agreement::coarse_ground_agrees_with_level_zero_at_each_column_centre_over_terra_coast_and_forest`:
+    level 5 over the coast window, 3 columns' Canopy cover differ from level
+    0's past one column.
+
+  Both wait on the user: the terrain under them changed by design, so the
+  tests' expectations or the windows they look at need a decision. The two
+  `client::sky` underwater tests that also failed were this branch's (their app
+  lacked the water-look message) and pass now. Clippy (`--workspace
+  --all-targets --all-features`), `cargo fmt` and Prettier are clean; clippy
+  found `f32::hypot` in the drainage (ADR-0032), now `libm::hypotf`, which
+  left every digest test passing.
+- `worldgen_v3` against `main` (454d4f96), 7 interleaved rounds, load 5-10, CPU
+  per Chunk: straddling dry +7.7 % at 1 m and +7.2 % at 0.5 m, straddling
+  crop field +4.3 % at 1 m, every other case within +/-1.5 %. Straddling dry is
+  ticket 04's +8.3 %, still over the 5 % gate and still the user's to decide.
