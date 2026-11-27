@@ -50,7 +50,7 @@ impl Worldgen {
     }
 
     /// The Fall over the column at global Voxel `[gx, gz]`, if it is a lip with a lower pool past
-    /// it; of several, the longest drop, the first along [`CARDINALS`] on a tie. A lip is asked on
+    /// it; of several, the longest drop, the first along `CARDINALS` on a tie. A lip is asked on
     /// each Voxel size's own lattice, so a Fall is pure in the seed, metres and Voxel size.
     pub fn fall_at(&self, gx: i32, gz: i32) -> Option<Fall> {
         self.water?;
