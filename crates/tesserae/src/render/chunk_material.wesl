@@ -31,7 +31,8 @@ import super::{
     water::{
         FOAM_DEPTH_M, STILL_M_S, SeaWaves, WATER_REFLECTANCE, ambient_specular, column_depth_m,
         column_point, falling_foam, flow_cycle, fresnel, is_water, sea_waves, sky_reflection,
-        water_body, water_foam_share, water_gradient, water_shape, water_surface, water_view,
+        seen_normal, water_body, water_foam_share, water_gradient, water_shape, water_surface,
+        water_view,
     },
 };
 
@@ -329,8 +330,8 @@ fn fragment(
                 waves = sea_waves(in.world_position.xz, water_grad, shape, water_view.wind);
                 // Only running water, foam and falling water move with the flow cycle; still
                 // water skips its noise lookup.
-                if length(flow) >= STILL_M_S || depth_m < FOAM_DEPTH_M || shape.landing > 0.0
-                    || waves.breaking > 0.0
+                if length(flow) >= STILL_M_S || (depth_m < FOAM_DEPTH_M && shape.sea > 0.0)
+                    || shape.landing > 0.0 || waves.breaking > 0.0
                 {
                     cycle = flow_cycle(in.world_position.xz);
                 }
@@ -338,6 +339,7 @@ fn fragment(
                     in.world_position.xz,
                     water_grad,
                     depth_m,
+                    shape.sea,
                     flow,
                     cycle,
                     max(waves.breaking, shape.landing),
@@ -364,7 +366,8 @@ fn fragment(
         pbr_input.N = surface.normal;
         pbr_input.material.perceptual_roughness = mix(surface.perceptual_roughness, 1.0, foam);
         pbr_input.material.reflectance = vec3<f32>(WATER_REFLECTANCE);
-        let facing = dot(surface.normal, pbr_input.V);
+        let seen = seen_normal(surface.normal, pbr_input.V, surface.lost_slope);
+        let facing = dot(seen, pbr_input.V);
         let mirrored = select(fresnel(facing), 0.0, from_below) * (1.0 - foam);
         var albedo = pbr_input.material.base_color.rgb * pbr_input.material.base_color.a;
         var hides = pbr_input.material.base_color.a;
@@ -375,7 +378,7 @@ fn fragment(
             hides = body.alpha;
         }
         pbr_input.material.base_color = vec4<f32>(albedo * (1.0 - mirrored), 1.0);
-        reflection = mirrored * sky * sky_reflection(pbr_input.V, surface.normal);
+        reflection = mirrored * sky * sky_reflection(pbr_input.V, seen);
         water_alpha = hides * (1.0 - mirrored) + mirrored;
     }
 

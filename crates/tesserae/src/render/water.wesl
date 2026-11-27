@@ -215,33 +215,36 @@ fn flow_taps(uv: vec2<f32>, flow: vec2<f32>, cycle: f32) -> FlowTaps {
     );
 }
 
-// Shallower than this, the water foams where the mask says.
+// Shallower than this, the sea foams at its shore where the mask says.
 const FOAM_DEPTH_M: f32 = 0.6;
+// The shore band's share at the waterline: below 1, so the mask still breaks it into lace there and
+// it never reads as a solid white strip.
+const SHORE_FOAM_MOST: f32 = 0.6;
 // One repeat of the foam mask.
 const FOAM_TILE_M: f32 = 3.0;
 // How soft the foam's edge is, in the mask's units.
 const FOAM_EDGE: f32 = 0.12;
 
-// How much of the surface is foam at `depth_m`: a band along the shore whose inner edge the mask
-// breaks into streaks.
 // White water: from this speed the surface starts to foam, and at the next it is all foam where
 // the mask allows. The Generator's pools run near 3 m/s and its steepest reaches at its 4 m/s
 // cap, so white water is kept to those.
 const WHITE_FROM_M_S: f32 = 3.0;
 const WHITE_AT_M_S: f32 = 3.9;
 
-// How much of the surface is foam: a band along the shore, white water where it runs fast, and
-// `breaking`, the sea's breakers or a Fall's landing, each broken up by the mask, which runs with
-// the Flow.
+// How much of the surface is foam: a band along the sea's shore, white water where it runs fast,
+// and `breaking`, the sea's breakers or a Fall's landing, each broken up by the mask, which runs
+// with the Flow. Still water never foams at its edge: only the sea's swash churns a shore, and a
+// shallow pond or a lake's margin is as clear as its middle.
 fn water_foam_share(
     xz: vec2<f32>,
     gradient: WaterGradient,
     depth_m: f32,
+    sea: f32,
     flow: vec2<f32>,
     cycle: f32,
     breaking: f32,
 ) -> f32 {
-    let shore = 1.0 - smoothstep(0.03, FOAM_DEPTH_M, depth_m);
+    let shore = (1.0 - smoothstep(0.03, FOAM_DEPTH_M, depth_m)) * sea * SHORE_FOAM_MOST;
     let white = smoothstep(WHITE_FROM_M_S, WHITE_AT_M_S, length(flow));
     let band = max(max(shore, white), breaking);
     if band <= 0.0 {
@@ -452,6 +455,8 @@ fn sea_waves(xz: vec2<f32>, gradient: WaterGradient, shape: WaterShape, wind: ve
 struct WaterSurface {
     normal: vec3<f32>,
     perceptual_roughness: f32,
+    // The variance of the slopes too fine for the pixel, which `normal` leaves out.
+    lost_slope: f32,
 }
 
 // `normal` faces the viewer, as bevy_pbr's double-sided flip leaves it. Ripples move only the
@@ -469,7 +474,7 @@ fn water_surface(
 ) -> WaterSurface {
     let base = roughness_of(slot);
     if abs(normal.y) < 0.5 {
-        return WaterSurface(normal, base);
+        return WaterSurface(normal, base, 0.0);
     }
     let a = ripple_layer(
         world_position.xz,
@@ -499,11 +504,25 @@ fn water_surface(
     let rippled = normalize(vec3<f32>(-slope.x, 1.0, -slope.y) * vec3<f32>(1.0, up, 1.0));
     // Beckmann's alpha squared is twice the slope variance; bevy_pbr's alpha is roughness squared.
     let alpha = sqrt(base * base * base * base + 2.0 * (a.lost + b.lost + sea.lost));
-    return WaterSurface(rippled, min(sqrt(alpha), max(base, FAR_ROUGHNESS)));
+    let lost = a.lost + b.lost + sea.lost;
+    return WaterSurface(rippled, min(sqrt(alpha), max(base, FAR_ROUGHNESS)), lost);
 }
 
 fn fresnel(cos_view: f32) -> f32 {
     return WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - clamp(cos_view, 0.0, 1.0), 5.0);
+}
+
+// The normal the view sees on average over a pixel whose slopes are too fine to draw: a viewer
+// low over the water sees mostly the facets tilted toward it, which reflect sky higher up and
+// reflect less of it. Without it the far water mirrors the pale horizon at nearly full Fresnel
+// and reads as a white sheet past level 0.
+fn seen_normal(normal: vec3<f32>, view_toward: vec3<f32>, lost_slope: f32) -> vec3<f32> {
+    let across = vec2<f32>(view_toward.x, view_toward.z);
+    if lost_slope <= 0.0 || dot(across, across) < 1e-6 {
+        return normal;
+    }
+    let toward = normalize(across) * sqrt(lost_slope) * sign(normal.y);
+    return normalize(normal + vec3<f32>(toward.x, 0.0, toward.y));
 }
 
 // The sky along `normal`'s reflection of the view, before tonemapping. A ripple can tip the ray

@@ -15,6 +15,9 @@ pub struct Fall {
     pub to_m: f32,
 }
 
+/// How many columns past its lip a Fall's lower pool may lie.
+pub const FALL_REACH: i32 = 3;
+
 impl Worldgen {
     /// The Flow over a column, in m/s along x and z: down a river or brook, or a lake's slow drift
     /// toward its outlet. Zero on dry ground and on the sea, whose motion is waves from Wind. Pure
@@ -46,7 +49,10 @@ impl Worldgen {
         let fall = CARDINALS
             .iter()
             .filter_map(|&(dx, dz, _)| {
-                let (from_m, to_m) = (surface(dx, dz)?, surface(-dx, -dz)?);
+                let from_m = surface(dx, dz)?;
+                // A tall Fall's face is a short steep slope, dry below the lip; the pool it lands
+                // in lies a few columns out.
+                let to_m = (1..=FALL_REACH).find_map(|k| surface(-k * dx, -k * dz))?;
                 (self.level_top(to_m) < self.level_top(from_m)).then_some(Fall {
                     toward: [-dx, -dz],
                     from_m,
@@ -124,7 +130,7 @@ mod tests {
 
     /// The 1 m Chunks, as metre boxes, over steep brooks: one stepping down in Falls, one whose
     /// lips stand beside dry ground, and one of both.
-    const BOXES_M: [[f32; 2]; 3] = [[-5536.0, 512.0], [7680.0, -1504.0], [-5760.0, -1952.0]];
+    const BOXES_M: [[f32; 2]; 3] = [[-5568.0, 576.0], [4608.0, 5088.0], [-5760.0, -1952.0]];
 
     /// Every global column of a box at `voxel_size`.
     fn columns(voxel_size: f32) -> impl Iterator<Item = [i32; 2]> {
@@ -193,7 +199,9 @@ mod tests {
                 let over: Vec<Fall> = CARDINALS
                     .iter()
                     .filter_map(|&(dx, dz, _)| {
-                        let (up, down) = (surface(gx + dx, gz + dz)?, surface(gx - dx, gz - dz)?);
+                        let up = surface(gx + dx, gz + dz)?;
+                        let down =
+                            (1..=FALL_REACH).find_map(|k| surface(gx - k * dx, gz - k * dz))?;
                         below(up, down).then_some(Fall {
                             toward: [-dx, -dz],
                             from_m: up,
@@ -212,8 +220,10 @@ mod tests {
                 assert_eq!(surface(gx, gz), None, "the lip at {gx},{gz} is wet");
                 falls += 1;
             }
+            // A steep reach drops at one tall Fall rather than a Voxel at a time, so the boxes
+            // hold few.
             assert!(
-                falls > 50 && dry_past > 20,
+                falls > 10 && dry_past > 20,
                 "{falls} Falls and {dry_past} lips beside dry ground at {size} m"
             );
         }

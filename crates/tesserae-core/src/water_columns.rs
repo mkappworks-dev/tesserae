@@ -125,6 +125,27 @@ pub fn fall_sheets(
             } else {
                 (along(x), height)
             };
+            // The water runs over the lip's top as a film a sixteenth over the rock, flush with the
+            // pool behind it, so a step reads as water spilling and not as a dam across the river.
+            let lip_top = (crate::worldgen::level_index(fall.from_m, size) + 1 - base[1]) * sub;
+            if (1..=SIDE * sub).contains(&lip_top) {
+                let over = [x, (lip_top - 1) / sub + 1, z];
+                let light = if over[1] < SIDE {
+                    center
+                        .light
+                        .get(over[0] as usize, over[1] as usize, over[2] as usize)
+                } else {
+                    Light::new(MAX_LIGHT, 0)
+                };
+                sheets.push(Quad::face(
+                    POS_Y,
+                    lip_top + 1,
+                    along(z),
+                    along(x),
+                    u32::from(water),
+                    light,
+                ));
+            }
             let past = [x + dx, (high - 1) / sub, z + dz];
             let light = if past.iter().all(|&c| (0..SIDE).contains(&c)) {
                 center
@@ -175,6 +196,9 @@ pub fn coarse_water_columns(
     if wet { out } else { Vec::new() }
 }
 
+/// The film of water drawn over a lip, and how fast it runs off toward the Fall.
+const LIP_FILM_M: f32 = 0.1;
+const LIP_FLOW_M_S: f32 = 1.5;
 /// How fast simulated water runs down a surface sloping one in one.
 const SLOPE_FLOW_M_S: f32 = 2.0;
 const MAX_FLOW_M_S: f32 = 4.0;
@@ -220,10 +244,21 @@ pub fn water_columns(
     let sea_m = answers.sea_level_m();
     let generated = |column: [i32; 2], level_m: f32, top: i32| {
         let depth_m = (top + 1) as f32 * size - answers.ground_m(column);
+        // A Fall lands in the first wet column past its lip, which may lie a few columns out
+        // below a tall Fall's dry face.
+        let dry = |gx: i32, gz: i32| {
+            let (x, z) = (gx - base[0], gz - base[2]);
+            let in_apron = (-1..=SIDE).contains(&x) && (-1..=SIDE).contains(&z);
+            !in_apron || scans[water_index(x, z)].is_none()
+        };
         let foam = CARDINALS.iter().any(|&[dx, dz]| {
-            answers
-                .fall([column[0] - dx, column[1] - dz])
-                .is_some_and(|f| f.toward == [dx, dz])
+            (1..=crate::worldgen::FALL_REACH)
+                .take_while(|&k| k == 1 || dry(column[0] - (k - 1) * dx, column[1] - (k - 1) * dz))
+                .any(|k| {
+                    answers
+                        .fall([column[0] - k * dx, column[1] - k * dz])
+                        .is_some_and(|f| f.toward == [dx, dz])
+                })
         });
         let sea = sea_m.is_some_and(|sea_m| level_m <= sea_m);
         let flags =
@@ -233,10 +268,23 @@ pub fn water_columns(
     let mut out = vec![WaterColumn::default(); WATER_SIDE * WATER_SIDE];
     for z in -1..=SIDE {
         for x in -1..=SIDE {
+            let column = [base[0] + x, base[2] + z];
             let Some(scan) = scans[water_index(x, z)] else {
+                // A lip beside water carries the drawn film `fall_sheets` lays over it: shallow,
+                // running toward its Fall and churned white, so the film reads as water spilling.
+                let beside_water = CARDINALS.iter().any(|&[dx, dz]| {
+                    let (nx, nz) = (x + dx, z + dz);
+                    (-1..=SIDE).contains(&nx)
+                        && (-1..=SIDE).contains(&nz)
+                        && scans[water_index(nx, nz)].is_some()
+                });
+                if beside_water && let Some(fall) = answers.fall(column) {
+                    let toward = fall.toward.map(|t| t as f32 * LIP_FLOW_M_S);
+                    out[water_index(x, z)] =
+                        WaterColumn::new(toward, LIP_FILM_M, WaterColumn::FOAM);
+                }
                 continue;
             };
-            let column = [base[0] + x, base[2] + z];
             let top = base[1] + scan.top;
             let world_water =
                 scan.fluid.source && Some(scan.fluid.material) == answers.water_material();
@@ -590,9 +638,14 @@ mod tests {
                 to_m: 10.0,
             },
         ));
-        let sheets = fall_sheets([0, 0, 0], LitChunk::new(&chunk, &light), &answers);
-        assert_eq!(sheets.len(), 2);
+        let quads = fall_sheets([0, 0, 0], LitChunk::new(&chunk, &light), &answers);
         let corners = |q: &Quad| q.corners().map(|c| c.position);
+        let flat = |q: &Quad| corners(q).iter().all(|p| p[1] == corners(q)[0][1]);
+        let (films, sheets): (Vec<Quad>, Vec<Quad>) = quads.iter().partition(|q| flat(q));
+        assert_eq!((films.len(), sheets.len()), (2, 2));
+        // A film a sixteenth over each lip's top, the top of the upper pool's highest Voxel.
+        let film_y: Vec<f32> = films.iter().map(|q| corners(q)[0][1]).collect();
+        assert_eq!(film_y, [12.0 + 1.0 / 16.0, 12.0 + 1.0 / 16.0]);
         // Row by row along z, so the lip at z 3 comes first.
         let (north, east) = (corners(&sheets[0]), corners(&sheets[1]));
         assert!(east.iter().all(|p| p[0] == 6.0 + 1.0 / 16.0), "{east:?}");
@@ -602,7 +655,7 @@ mod tests {
         assert_eq!(zs.iter().copied().fold(f32::MAX, f32::min), 7.0);
         assert_eq!(zs.iter().copied().fold(f32::MIN, f32::max), 8.0);
         assert!(north.iter().all(|p| p[2] == 3.0 - 1.0 / 16.0), "{north:?}");
-        assert!(sheets.iter().all(|q| q.material == u32::from(water())));
+        assert!(quads.iter().all(|q| q.material == u32::from(water())));
     }
 
     #[test]

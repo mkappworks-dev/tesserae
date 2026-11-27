@@ -36,6 +36,8 @@ const STREAM_NODES: u32 = 24;
 /// Catchment, in nodes, from which a stream is a river at its full least width; below it a
 /// brook narrows to [`BROOK_WIDTH_M`].
 const RIVER_NODES: u32 = 120;
+/// How deep the narrowest brook's bed lies under its surface.
+const BROOK_DIG_M: f32 = 1.6;
 /// The narrowest brook: wider than a 1 m Voxel's diagonal, so a brook running across the grid
 /// still holds two neighbouring columns in each row and its water joins up face to face.
 const BROOK_WIDTH_M: f32 = 1.6;
@@ -87,13 +89,18 @@ const LAKE: u8 = 1;
 /// A lake node whose way down leaves its lake by a spill its window sees, not by the window's
 /// edge.
 const SPILLED: u8 = 2;
+/// A stream's first node: no stream runs into it, so its water rises there from a spring.
+const HEAD: u8 = 4;
+/// A spring's pool, round about a stream's head, from which its channel narrows to its own width
+/// over as far again.
+const SPRING_WIDTH_M: f32 = 5.0;
 const INLAND: u8 = u8::MAX;
 /// Steps from the sea over which a river's channel widens into its mouth.
 const MOUTH_NODES: u8 = 2;
 /// How many times its channel's width a river's mouth is at the sea.
 const MOUTH_WIDEN: f32 = 3.0;
 /// The channel width from which a river reaching the sea fans into distributaries.
-const DELTA_WIDTH_M: f32 = 10.0;
+const DELTA_WIDTH_M: f32 = 4.0;
 /// A distributary's width against its river's.
 const DISTRIBUTARY: f32 = 0.5;
 /// The farthest any channel cuts from its centre line: a 48 m river's half width and whole
@@ -102,10 +109,21 @@ const CHANNEL_REACH_M: f32 = 24.0 + VALLEY_REACH_M;
 const MEANDER_SEED: u32 = 0x1a4d_00b1;
 /// A lake's drift, slowest where little of it has passed and fastest near the spill.
 const LAKE_DRIFT_M_S: (f32, f32) = (0.02, 0.2);
-/// Running water, from slack water to rapids.
-const STREAM_M_S: (f32, f32) = (0.3, 4.0);
-/// Manning's roughness of a natural stream bed, in s/m^(1/3).
-const BED_ROUGHNESS: f32 = 0.035;
+/// Running water, from a brook's slack pool to a big river's steepest reach.
+const STREAM_M_S: (f32, f32) = (0.2, 2.5);
+/// A pool's speed over a catchment of one square kilometre. Speed grows with discharge only as
+/// its tenth power (Leopold and Maddock's hydraulic geometry), so a brook and a great river pool
+/// within a factor of two of each other: the water is drawn as a staircase of flat pools, and a
+/// speed from the node-to-node slope ran most rivers at their cap, all white water.
+const POOL_M_S_PER_KM2: f32 = 0.6;
+const POOL_SPEED_EXPONENT: f32 = 0.1;
+/// A reach this steep runs as a riffle, [`RIFFLE_GAIN`] times faster than its pool would.
+const RIFFLE_SLOPE: f32 = 0.04;
+const RIFFLE_GAIN: f32 = 2.5;
+/// Under this share of the speed a shallow wave runs at its depth (Froude 1): a reach faster than
+/// that would stand in a hydraulic jump, which the drawn water has no shape for.
+const MOST_FROUDE: f32 = 0.9;
+const GRAVITY_M_S2: f32 = 9.81;
 const STEPS: [(i32, i32); 8] = [
     (-1, -1),
     (0, -1),
@@ -375,6 +393,13 @@ impl Drainage {
                 catchment[p] += catchment[at];
             }
         }
+        let mut fed = vec![false; size];
+        for at in 0..size {
+            if parent[at] != NO_PARENT && catchment[at] >= STREAM_NODES {
+                let (di, dj) = STEPS[parent[at] as usize];
+                fed[idx((at as i32 % WINDOW) + di, (at as i32 / WINDOW) + dj)] = true;
+            }
+        }
         let inside = |i: i32, j: i32| (0..WINDOW).contains(&i) && (0..WINDOW).contains(&j);
         let mut delta = vec![0u8; size];
         for at in 0..size {
@@ -409,6 +434,10 @@ impl Drainage {
                     down: parent[at],
                     lake: if lake[at] {
                         LAKE | (spilled[at] as u8 * SPILLED)
+                    } else {
+                        0
+                    } | if catchment[at] >= STREAM_NODES && !fed[at] {
+                        HEAD
                     } else {
                         0
                     },
@@ -491,7 +520,10 @@ impl Drainage {
                 if near_sea {
                     width = mouth_width_m(width, sea_steps(n, p, t));
                 }
-                let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
+                if n.lake & HEAD != 0 {
+                    width = width.max(spring_width_m(t, ab));
+                }
+                let surface = water_surface_m(n, p, (ni, nj), t, self.node_m);
                 let edge = (d - width / 2.0).max(0.0);
                 let mut reach_m = valley_reach_m(width);
                 if near_sea {
@@ -734,15 +766,23 @@ impl Drainage {
             width = mouth_width_m(width, sea_steps(n, p, t));
             reach_m = valley_reach_m(width).min(CHANNEL_REACH_M - width / 2.0);
         }
+        if n.lake & HEAD != 0 {
+            width = width.max(spring_width_m(t, ab));
+        }
         let edge = ((dx * dx + dz * dz).sqrt() - width / 2.0).max(0.0);
         let dig = dig_m(width);
         if edge >= reach_m || edge * BANK_SLOPE >= dig * channel.band {
             return None;
         }
-        let surface = (n.level_m * (1.0 - t) + p.level_m * t) - SURFACE_BELOW_M;
+        let surface = water_surface_m(n, p, at, t, self.node_m);
         let slope = (n.level_m - p.level_m).max(0.0) / length_m;
-        // Manning's formula, the channel's depth standing in for its hydraulic radius.
-        let speed = (libm::cbrtf(dig * dig) * slope.sqrt() / BED_ROUGHNESS)
+        let catchment = n.catchment as f32 * (1.0 - t) + p.catchment as f32 * t;
+        let area_km2 = catchment * self.node_m * self.node_m * 1e-6;
+        let pool = POOL_M_S_PER_KM2 * libm::powf(area_km2, POOL_SPEED_EXPONENT);
+        let riffle = 1.0 + (RIFFLE_GAIN - 1.0) * (slope / RIFFLE_SLOPE).min(1.0);
+        let froude = MOST_FROUDE * libm::sqrtf(GRAVITY_M_S2 * dig);
+        let speed = (pool * riffle)
+            .min(froude)
             .clamp(STREAM_M_S.0, STREAM_M_S.1);
         let [ux, uz] = meandered_along(x_m, z_m, (amount_m, long), ab);
         Some((surface, [ux * speed, uz * speed]))
@@ -794,6 +834,54 @@ fn opposite(step: usize) -> u8 {
     (STEPS.len() - 1 - step) as u8
 }
 
+/// A stream's width from its spring pool, a fraction `t` down its first segment `ab`.
+fn spring_width_m(t: f32, ab: [f32; 2]) -> f32 {
+    let from_m = t * libm::hypotf(ab[0], ab[1]);
+    SPRING_WIDTH_M * (1.0 - from_m / SPRING_WIDTH_M).max(0.0)
+}
+
+/// A segment dropping this far and this steeply drops all at once, as one Fall over a cliff,
+/// instead of a staircase of one-Voxel steps each held by a lip.
+const FALL_DROP_M: f32 = 4.0;
+const FALL_SLOPE: f32 = 0.1;
+/// How steep a Fall's face is, rise over run: steep enough that its Voxels stand as a wall of
+/// several, while the heightfield stays a slope, as every cliff it draws is.
+const FALL_FACE_STEEPNESS: f32 = 3.5;
+/// Where along a falling segment its Fall stands, hashed per node within this span.
+const FALL_SPAN: (f32, f32) = (0.3, 0.7);
+
+/// The water's surface a fraction `t` down the segment from `n` at node `at` to `p`: straight
+/// between their levels, or held at the upper level and dropped down one steep face where the
+/// segment falls steeply enough to make a waterfall.
+fn water_surface_m(n: Node, p: Node, at: (i32, i32), t: f32, node_m: f32) -> f32 {
+    let drop = n.level_m - p.level_m;
+    let length_m = node_m
+        * if at_diagonal(n) {
+            core::f32::consts::SQRT_2
+        } else {
+            1.0
+        };
+    let level = if drop >= FALL_DROP_M && drop / length_m >= FALL_SLOPE {
+        let h = (at.0 as u32)
+            .wrapping_mul(0x9e37_79b9)
+            .wrapping_add((at.1 as u32).wrapping_mul(0x85eb_ca6b));
+        let h = (h ^ (h >> 15)).wrapping_mul(0x2c1b_3c6d);
+        let at_t =
+            FALL_SPAN.0 + (FALL_SPAN.1 - FALL_SPAN.0) * ((h >> 8) as f32 / (1u32 << 24) as f32);
+        let face = drop / FALL_FACE_STEEPNESS / length_m;
+        let s = ((t - at_t) / face).clamp(0.0, 1.0);
+        n.level_m + (p.level_m - n.level_m) * s
+    } else {
+        n.level_m * (1.0 - t) + p.level_m * t
+    };
+    level - SURFACE_BELOW_M
+}
+
+fn at_diagonal(n: Node) -> bool {
+    let (di, dj) = STEPS[n.down as usize];
+    di != 0 && dj != 0
+}
+
 /// Widens with the square root of catchment, as rivers do; a brook's banks start at the river's
 /// least width and fall away toward its head, never below [`BROOK_WIDTH_M`].
 fn river_width_m(catchment: u32) -> f32 {
@@ -802,8 +890,8 @@ fn river_width_m(catchment: u32) -> f32 {
 }
 
 /// How far under its surface a stream's bed lies: a river's as it was, and a brook's shallower
-/// with its width, down to a metre at the narrowest, so its banks meet the ground close in and
-/// every Voxel of its channel still holds water at 1 m.
+/// with its width, down to [`BROOK_DIG_M`] at the narrowest, so its banks meet the ground close
+/// in and a mountain stream still runs as a stream and not a film.
 fn dig_m(width_m: f32) -> f32 {
     let river = |w: f32| 1.2 + 0.25 * w.sqrt();
     let least_m = river_width_m(RIVER_NODES);
@@ -811,7 +899,7 @@ fn dig_m(width_m: f32) -> f32 {
         return river(width_m);
     }
     let t = (width_m - BROOK_WIDTH_M) / (least_m - BROOK_WIDTH_M);
-    1.0 + t * (river(least_m) - 1.0)
+    BROOK_DIG_M + t * (river(least_m) - BROOK_DIG_M)
 }
 
 /// How far from its water a stream's valley cuts the ground: a river's whole reach, and a brook's
@@ -1054,6 +1142,48 @@ mod tests {
     }
 
     #[test]
+    fn every_stream_rises_from_a_spring_pool_at_its_head() {
+        let d = drainage();
+        let key = [0, 0];
+        let region = d.solve(key);
+        let inner = |i: i32, j: i32| {
+            (8..REGION_NODES - 8).contains(&i) && (8..REGION_NODES - 8).contains(&j)
+        };
+        let (mut heads, mut pooled) = (0, 0);
+        for (i, j, n) in region_nodes(&d, key) {
+            if !inner(i, j) || n.catchment < STREAM_NODES || n.is_lake() {
+                continue;
+            }
+            let fed = STEPS.iter().any(|&(di, dj)| {
+                let c = region.node(i + di, j + dj, key);
+                c.down != NO_PARENT
+                    && c.catchment >= STREAM_NODES
+                    && STEPS[c.down as usize] == (-di, -dj)
+            });
+            assert_eq!(n.lake & HEAD != 0, !fed, "the head flag at {i},{j}");
+            if fed {
+                continue;
+            }
+            heads += 1;
+            // Wet a pool's radius out from the head on every side, where a brook alone is not.
+            let (x, z) = (i as f32 * NODE_M, j as f32 * NODE_M);
+            let r = SPRING_WIDTH_M / 2.0 - 0.5;
+            pooled += usize::from(
+                [(r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r)]
+                    .iter()
+                    .filter(|(dx, dz)| d.wet(x + dx, z + dz, f32::MAX).level_m.is_some())
+                    .count()
+                    >= 3,
+            );
+        }
+        assert!(heads > 10, "{heads} heads");
+        assert!(
+            pooled * 10 >= heads * 9,
+            "{pooled} of {heads} heads stand in a spring pool"
+        );
+    }
+
+    #[test]
     fn a_brook_is_a_voxel_wide_and_widens_downstream_into_the_rivers() {
         assert!(river_width_m(STREAM_NODES) >= std::f32::consts::SQRT_2);
         assert!(
@@ -1070,10 +1200,11 @@ mod tests {
             let was = (1.5 + 0.0045 * (c as f32 * NODE_M * NODE_M).sqrt()).min(48.0);
             assert_eq!(river_width_m(c), was, "catchment {c}");
         }
-        // A brook's wet band, from bank to bank, stays narrow.
+        // A brook's wet band, from bank to bank, stays narrow: its 1-in-2 banks reach out twice
+        // its depth each side.
         let w = river_width_m(STREAM_NODES);
         assert!(
-            w + 2.0 * dig_m(w) / BANK_SLOPE <= 6.0,
+            w + 2.0 * dig_m(w) / BANK_SLOPE <= 8.5,
             "a {w} m brook draws a wide band"
         );
         let r = river_width_m(RIVER_NODES);
