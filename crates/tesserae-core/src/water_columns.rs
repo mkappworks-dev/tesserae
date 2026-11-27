@@ -139,6 +139,42 @@ pub fn fall_sheets(
     sheets
 }
 
+/// The water columns of a coarse Chunk whose corner is at `origin_m` (x and z) and whose cells
+/// are `cell_m` across: over each column's centre, from `level_m`'s Water surface down to
+/// `ground_m`, calm, and flagged as the sea at or below `sea_m`. Coarse levels draw the
+/// Generator's water and keep none of the World's own, so its answers are the whole rule. Empty
+/// where none of the Chunk's own columns is wet.
+pub fn coarse_water_columns(
+    origin_m: [f32; 2],
+    cell_m: f32,
+    level_m: impl Fn(f32, f32) -> Option<f32>,
+    ground_m: impl Fn(f32, f32) -> f32,
+    sea_m: Option<f32>,
+) -> Vec<WaterColumn> {
+    let mut out = vec![WaterColumn::default(); WATER_SIDE * WATER_SIDE];
+    let mut wet = false;
+    for z in -1..=SIDE {
+        for x in -1..=SIDE {
+            let at = [
+                origin_m[0] + (x as f32 + 0.5) * cell_m,
+                origin_m[1] + (z as f32 + 0.5) * cell_m,
+            ];
+            let Some(surface_m) = level_m(at[0], at[1]) else {
+                continue;
+            };
+            let depth_m = surface_m - ground_m(at[0], at[1]);
+            if depth_m <= 0.0 {
+                continue;
+            }
+            let sea = sea_m.is_some_and(|sea_m| surface_m <= sea_m);
+            let flags = if sea { WaterColumn::SEA } else { 0 };
+            out[water_index(x, z)] = WaterColumn::new([0.0; 2], depth_m, flags);
+            wet |= (0..SIDE).contains(&x) && (0..SIDE).contains(&z);
+        }
+    }
+    if wet { out } else { Vec::new() }
+}
+
 /// How fast simulated water runs down a surface sloping one in one.
 const SLOPE_FLOW_M_S: f32 = 2.0;
 const MAX_FLOW_M_S: f32 = 4.0;

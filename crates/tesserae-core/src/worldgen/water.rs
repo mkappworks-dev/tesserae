@@ -139,6 +139,47 @@ mod tests {
         columns(size).map(|[gx, gz]| g.fall_at(gx, gz)).collect()
     }
 
+    /// A level-1 water column, over the centre of a 2 m cell, against the level-0 columns it
+    /// covers: the generated rule's depth, from the drawn top to the ground.
+    #[test]
+    fn a_coarse_columns_depth_agrees_with_level_zeros_within_a_coarse_voxel() {
+        use crate::water_columns::{WaterAnswers, coarse_water_columns, water_index};
+        let fine = wet(1.0);
+        let coarse_m = 2.0;
+        let origin = [-8256.0f32, 2464.0];
+        let coarse = coarse_water_columns(
+            origin,
+            coarse_m,
+            |x, z| fine.water_level_m(x, z),
+            |x, z| fine.surface_height_m(x, z),
+            WaterAnswers::sea_level_m(&fine),
+        );
+        assert!(!coarse.is_empty(), "the coast fixture's sea");
+        let mut compared = 0;
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                let column = coarse[water_index(x, z)];
+                if !column.is_wet() || column.depth == u8::MAX {
+                    continue;
+                }
+                for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let g = [origin[0] as i32 + 2 * x + dx, origin[1] as i32 + 2 * z + dz];
+                    let Some((_, top)) = WaterAnswers::water_top(&fine, g) else {
+                        continue;
+                    };
+                    let fine_m = (top + 1) as f32 - WaterAnswers::ground_m(&fine, g);
+                    assert!(
+                        (column.depth_m() - fine_m).abs() <= coarse_m,
+                        "{g:?}: {} against {fine_m}",
+                        column.depth_m()
+                    );
+                    compared += 1;
+                }
+            }
+        }
+        assert!(compared > 100, "{compared} columns compared");
+    }
+
     #[test]
     fn a_fall_runs_over_every_lip_with_a_lower_pool_past_it_and_nowhere_else() {
         for size in [1.0, 0.5] {

@@ -1479,6 +1479,15 @@ fn mesh_coarse(
             &center.overlay,
             level_at,
         );
+        if !mesh.blended.is_empty() {
+            mesh.water = tesserae_core::water_columns::coarse_water_columns(
+                [origin_m.x, origin_m.z],
+                voxel_m,
+                |x, z| surface.water_level_m(x, z),
+                |x, z| surface.height_m(x, z),
+                Some(water.level_m),
+            );
+        }
     }
     mesh
 }

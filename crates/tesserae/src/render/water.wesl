@@ -113,7 +113,8 @@ struct WaterShape {
 // The apron holds the neighbours' columns, so two Chunks of one lake meet with no step. A dry
 // column stands as deep below as the wet ones beside it are above, so the depth runs out to
 // nothing at the waterline and not half a column short of it.
-fn water_shape(water: u32, point: vec2<f32>) -> WaterShape {
+// `level` is the layer's LOD level: its cells are 2^level Voxels across.
+fn water_shape(water: u32, point: vec2<f32>, level: u32) -> WaterShape {
     let q = point - 0.5;
     let last = i32(constants::CHUNK_CELLS) - 1;
     let i = clamp(vec2<i32>(floor(q)), vec2<i32>(-1), vec2<i32>(last));
@@ -139,7 +140,8 @@ fn water_shape(water: u32, point: vec2<f32>) -> WaterShape {
         mix(depth.z - depth.x, depth.w - depth.y, f.x),
     );
     let sea_share = mix(mix(sea.x, sea.y, f.x), mix(sea.z, sea.w, f.x), f.y);
-    return WaterShape(max(filtered, 0.0), per_voxel / water_view.flow_fade_m.z, sea_share);
+    let cell_m = water_view.flow_fade_m.z * exp2(f32(level));
+    return WaterShape(max(filtered, 0.0), per_voxel / cell_m, sea_share);
 }
 
 // `WaterColumn`'s Flow at column `x`, `z`, in m/s along x and z: two signed bytes.

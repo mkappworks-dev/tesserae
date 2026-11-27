@@ -323,7 +323,7 @@ fn fragment(
             // Depth, Flow and foam are the top's: a wall of water stands at its column's edge,
             // where the filtered depth runs out as at a shore, so it takes its own column's.
             if abs(pbr_input.world_normal.y) > 0.5 {
-                let shape = water_shape(in.water, point);
+                let shape = water_shape(in.water, point, in.level);
                 depth_m = shape.depth_m;
                 flow = water_flow(in.water, point, in.world_position.xyz);
                 waves = sea_waves(in.world_position.xz, water_grad, shape, water_view.wind);
