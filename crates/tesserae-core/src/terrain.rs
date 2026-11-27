@@ -1096,6 +1096,37 @@ mod tests {
         floor_m <= -SEABED_CLEAR_M && b.formation_m(wx, wz, floor_m) >= 1.0
     }
 
+    /// Each region solves its rivers over a window of its own, so a river's width comes from two
+    /// catchments either side of a border. The coarse solve's rivers fed in at a window's edge
+    /// bring 5.3% of border stream nodes more than a fifth apart down to 3.5%; the rest are
+    /// valleys its 128 m lattice cannot see.
+    #[test]
+    fn a_river_keeps_its_width_across_a_region_border() {
+        let p = crate::testgen::world_params();
+        let (mut nodes, mut apart) = (0, 0);
+        for seed in 0..8u32 {
+            let t = Terrain::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for key in [
+                [0, 0],
+                [-1, 0],
+                [0, -1],
+                [-1, -1],
+                [1, 1],
+                [2, -2],
+                [-3, 2],
+                [4, 1],
+            ] {
+                let (n, a, _) = t.drainage.border_widths(key);
+                (nodes, apart) = (nodes + n, apart + a);
+            }
+        }
+        assert!(nodes > 1000, "{nodes} stream nodes on the borders");
+        assert!(
+            apart * 100 <= nodes * 4,
+            "{apart} of {nodes} border stream nodes are a fifth apart in width"
+        );
+    }
+
     #[test]
     fn one_ask_of_a_column_is_its_separate_asks_bit_for_bit() {
         let p = crate::testgen::world_params();

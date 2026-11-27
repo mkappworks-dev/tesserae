@@ -118,6 +118,9 @@ const STREAM: u8 = 8;
 /// A spring's pool, round about a stream's head, from which its channel narrows to its own width
 /// over as far again.
 const SPRING_WIDTH_M: f32 = 5.0;
+/// How far along a window's edge either side of a river coming in is kept from being an outlet:
+/// a coarse node's spacing, as far off as the coarse river may cross.
+const ENTRY_NODES: i32 = 4;
 const INLAND: u8 = u8::MAX;
 /// Steps from the sea over which a river's channel widens into its mouth.
 const MOUTH_NODES: u8 = 2;
@@ -300,6 +303,83 @@ impl Drainage {
             .reduce(f32::max)
     }
 
+    /// What this coarse solve's rivers carry into a finer window at `origin`, by the finer
+    /// lattice's index, in its nodes: each river that crosses the window's edge inward puts what it
+    /// gathered outside on the lowest edge node near where it crosses. Without it a river's width
+    /// is the area inside each window, and two regions draw it at two widths across their border.
+    fn inflow(&self, origin: [i32; 2], fine_m: f32, height: &[f32]) -> Vec<u32> {
+        let mut inflow = vec![0u32; (WINDOW * WINDOW) as usize];
+        let lo = origin.map(|o| o as f32 * fine_m);
+        let hi = origin.map(|o| (o + WINDOW - 1) as f32 * fine_m);
+        let inside =
+            |c: [i32; 2]| (0..2).all(|k| (lo[k]..=hi[k]).contains(&(c[k] as f32 * self.node_m)));
+        let node = |c: [i32; 2]| {
+            let key = c.map(|v| v.div_euclid(REGION_NODES));
+            self.region(key).node(c[0], c[1], key)
+        };
+        let down = |c: [i32; 2], n: Node| {
+            let (di, dj) = STEPS[n.down as usize];
+            [c[0] + di, c[1] + dj]
+        };
+        let per_node = ((self.node_m / fine_m) * (self.node_m / fine_m)) as u32;
+        let first = lo.map(|m| (m / self.node_m).floor() as i32 - 1);
+        let last = hi.map(|m| (m / self.node_m).ceil() as i32 + 1);
+        // A river the coarse lattice takes out of the window and back in brings back what the
+        // finer solve already gathered inside: that is not new water where it comes back.
+        let mut returned: HashMap<[i32; 2], u32> = HashMap::new();
+        let mut crossings = Vec::new();
+        for cj in first[1]..=last[1] {
+            for ci in first[0]..=last[0] {
+                let c = [ci, cj];
+                let n = node(c);
+                if n.down == NO_PARENT || n.is_lake() {
+                    continue;
+                }
+                let next = down(c, n);
+                match (inside(c), inside(next)) {
+                    (false, true) => crossings.push((c, n.catchment)),
+                    (true, false) => {
+                        let (mut at, mut on) = (next, node(next));
+                        for _ in 0..REGION_NODES {
+                            if on.down == NO_PARENT {
+                                break;
+                            }
+                            let ahead = down(at, on);
+                            if inside(ahead) {
+                                *returned.entry(at).or_default() += n.catchment;
+                                break;
+                            }
+                            (at, on) = (ahead, node(ahead));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (c, catchment) in crossings {
+            let gathered = catchment.saturating_sub(returned.get(&c).copied().unwrap_or(0));
+            if gathered * per_node < STREAM_NODES {
+                continue;
+            }
+            let at = c.map(|v| v as f32 * self.node_m);
+            let cross = std::array::from_fn::<i32, 2, _>(|k| {
+                ((at[k].clamp(lo[k], hi[k]) / fine_m).round() as i32 - origin[k])
+                    .clamp(0, WINDOW - 1)
+            });
+            let along = usize::from(cross[0] == 0 || cross[0] == WINDOW - 1);
+            let lowest = (-2..=2)
+                .map(|d| {
+                    let mut p = cross;
+                    p[along] = (p[along] + d).clamp(0, WINDOW - 1);
+                    (p[1] * WINDOW + p[0]) as usize
+                })
+                .min_by(|&a, &b| height[a].total_cmp(&height[b]))
+                .unwrap();
+            inflow[lowest] += gathered * per_node;
+        }
+        inflow
+    }
+
     /// Where a channel's node `[i, j]` stands, in metres: off its lattice point by a hash of it, so
     /// channels joining nodes bend at each instead of running along the lattice.
     fn node_at(&self, n: Node, i: i32, j: i32) -> [f32; 2] {
@@ -343,6 +423,41 @@ impl Drainage {
         region
     }
 
+    /// Stream nodes stored by both `key` and its east or south neighbour: how many, how many of
+    /// them differ in width by more than a fifth, and the worst share with its two widths.
+    #[cfg(test)]
+    pub(crate) fn border_widths(&self, key: [i32; 2]) -> (u32, u32, (f32, f32, f32)) {
+        let mut worst = (0.0f32, 0.0, 0.0);
+        let (mut compared, mut apart) = (0, 0);
+        let a = self.solve(key);
+        for across in [true, false] {
+            let b_key = if across {
+                [key[0] + 1, key[1]]
+            } else {
+                [key[0], key[1] + 1]
+            };
+            let b = self.solve(b_key);
+            for along in -MARGIN..REGION_NODES + MARGIN {
+                for over in REGION_NODES..REGION_NODES + MARGIN {
+                    let (i, j) = if across { (over, along) } else { (along, over) };
+                    let (i, j) = (i + key[0] * REGION_NODES, j + key[1] * REGION_NODES);
+                    let (na, nb) = (a.node(i, j, key), b.node(i, j, b_key));
+                    if !na.is_stream() || !nb.is_stream() || na.is_lake() || nb.is_lake() {
+                        continue;
+                    }
+                    let (wa, wb) = (river_width_m(na.catchment), river_width_m(nb.catchment));
+                    let off = (wa - wb).abs() / wa.max(wb);
+                    if off > worst.0 {
+                        worst = (off, wa, wb);
+                    }
+                    compared += 1;
+                    apart += (off > 0.2) as u32;
+                }
+            }
+        }
+        (compared, apart, worst)
+    }
+
     fn solve(&self, key: [i32; 2]) -> Region {
         let origin = [
             key[0] * REGION_NODES - HALO_NODES,
@@ -370,13 +485,34 @@ impl Drainage {
             level[idx(i, j)] = f;
             heap.push(Reverse((sortable(f), idx(i, j))));
         };
+        let inflow = self
+            .coarse
+            .as_ref()
+            .map_or_else(|| vec![0; size], |c| c.inflow(origin, self.node_m, &height));
+        let on_edge = |i: i32, j: i32| i == 0 || j == 0 || i == WINDOW - 1 || j == WINDOW - 1;
+        // The edge either side of where a river comes in is no outlet either, or the river runs
+        // straight back out along the edge's lowest seed beside it.
+        let mut entry = vec![false; size];
+        for at in (0..size).filter(|&at| inflow[at] > 0) {
+            let (ci, cj) = (at as i32 % WINDOW, at as i32 / WINDOW);
+            for dj in -ENTRY_NODES..=ENTRY_NODES {
+                for di in -ENTRY_NODES..=ENTRY_NODES {
+                    let (i, j) = (ci + di, cj + dj);
+                    if (0..WINDOW).contains(&i) && (0..WINDOW).contains(&j) && on_edge(i, j) {
+                        entry[idx(i, j)] = true;
+                    }
+                }
+            }
+        }
         for j in 0..WINDOW {
             for i in 0..WINDOW {
                 let h = height[idx(i, j)];
-                let edge = i == 0 || j == 0 || i == WINDOW - 1 || j == WINDOW - 1;
                 if h <= self.sea_m {
                     seed(i, j, self.sea_m, &mut level);
-                } else if edge {
+                } else if entry[idx(i, j)] {
+                    // A river coming in is no outlet: the flood reaches it from inside, so it
+                    // drains inward carrying what the coarse solve gathered beyond the window.
+                } else if on_edge(i, j) {
                     let lake = self.coarse.as_ref().and_then(|c| {
                         c.lake_level_at(
                             (origin[0] + i) as f32 * self.node_m,
@@ -397,7 +533,7 @@ impl Drainage {
                     continue;
                 }
                 let n = idx(ni, nj);
-                if !level[n].is_nan() {
+                if !level[n].is_nan() || (entry[n] && on_edge(ci, cj)) {
                     continue;
                 }
                 let f = height[n].max(here + EPS_M);
@@ -430,7 +566,7 @@ impl Drainage {
                 spilled[at] = !lake[p] || spilled[p];
             }
         }
-        let mut catchment = vec![1u32; size];
+        let mut catchment: Vec<u32> = inflow.iter().map(|&n| 1 + n).collect();
         for &at in order.iter().rev() {
             if parent[at] != NO_PARENT {
                 let (di, dj) = STEPS[parent[at] as usize];

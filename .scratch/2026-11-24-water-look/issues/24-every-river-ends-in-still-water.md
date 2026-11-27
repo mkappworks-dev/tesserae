@@ -39,3 +39,12 @@ as a spring pool.
   downstream; it needs inflow nodes at the edge, a change to the solve's
   seeding. The 1 km halo keeps widths close at a border; the user has the
   call on whether it is needed.
+- 2026-11-27, window edges. Where the coarse solve's river crosses a window's
+  edge inward, what it gathered outside (less what it took out of the window
+  and brought back) enters on the lowest edge node near the crossing, and the
+  edge four nodes either side is no outlet, so the river drains inward. On 8
+  Terra worlds, border stream nodes a fifth or more apart in width: 5.3% to
+  3.5% (worst 73% to 65%). The rest are valleys the 128 m lattice cannot see.
+  A wider halo also helps, with inflow: 1.5 km 1.3%, 2 km 0.6%, at about 1.6x
+  and 2.6x a region's solve; left at 1 km until the profile shows what the
+  solve costs. Test `a_river_keeps_its_width_across_a_region_border`.
