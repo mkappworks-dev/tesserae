@@ -35,3 +35,14 @@ near; a thin white line crosses the view looking down.
 
 - 2026-11-27: the user chose clear water with a light blue tint at any
   distance over a realistic fade by 30 m.
+- 2026-11-27: under water is clear to 60% of the level-0 reach and fades to
+  the water's colour by it (Linear fog; the chunk shader draws it), under a
+  full-screen shimmer and a 3% tint on the Player's camera, still under
+  Reduced motion. The user kept 3%. Captures
+  `/tmp/tesserae-water-look-captures/29-after/sheet.png` (before, 0%, 3%).
+  The white line across the view: `main` shows the same line at the same
+  view (`30-after/main.png`), so it is not this branch's; it is not a coarse
+  level (unchanged under `TESSERAE_LOD_TINT`) nor a vertical water face
+  (unchanged with them painted magenta), and only shows under water. Its
+  cause is not yet found. Caustics and the light from above are left out:
+  the user chose clear water.

@@ -33,3 +33,7 @@ it, and white lines run along the edges of the surface's quads.
 - 2026-11-27: the user chose a clear surface over Snell's window and a mirror:
   from below the surface is see-through at every angle with a faint shimmering
   sheen, under 29's 3% tint and shimmer.
+- 2026-11-27: from below the surface hides 8% and carries a sheen up to 0.25
+  of the sky that moves with the ripples; the shore and trees show through it
+  (`/tmp/tesserae-water-look-captures/30-after/sheet.png`). The white lines
+  along its edges are the same as 29's line, on `main` too.
