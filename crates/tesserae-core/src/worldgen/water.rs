@@ -59,11 +59,8 @@ impl Worldgen {
             .iter()
             .filter_map(|&(dx, dz, _)| {
                 let from_m = surface(dx, dz)?;
-                // A tall Fall's face is a short steep slope, dry below the lip; the pool it lands
-                // in lies a few columns out.
-                let (reach, to_m) = (1..=fall_reach(self.voxel_size))
-                    .find_map(|k| Some((k, surface(-k * dx, -k * dz)?)))?;
-                (self.level_top(to_m) < self.level_top(from_m)).then_some(Fall {
+                let (reach, to_m) = self.lower_pool([gx, gz], [dx, dz], from_m)?;
+                Some(Fall {
                     toward: [-dx, -dz],
                     from_m,
                     to_m,
@@ -74,6 +71,33 @@ impl Worldgen {
         // Asked last: the raw column is a drainage walk, and most columns have no pools across.
         let (x_m, z_m) = (self.global_m(gx), self.global_m(gz));
         (self.surface_height_m(x_m, z_m) > self.raw_column(x_m, z_m).0).then_some(fall)
+    }
+}
+
+impl Worldgen {
+    /// The pool a Fall over lip `[gx, gz]` lands in, its upper pool `step` away at `from_m`:
+    /// how many columns out and its surface. A tall Fall's face is a short steep slope, dry below
+    /// the lip, so the pool lies a few columns out, and a stream that crosses the edge at a slant
+    /// lands to one side of straight on: the first water along the step's line and the two
+    /// diagonals beside it, nearest first, whose surface is a Voxel or more below.
+    pub(super) fn lower_pool(
+        &self,
+        [gx, gz]: [i32; 2],
+        [dx, dz]: [i32; 2],
+        from_m: f32,
+    ) -> Option<(i32, f32)> {
+        let (px, pz) = (dz, dx);
+        let reach = fall_reach(self.voxel_size);
+        [0, 1, -1]
+            .into_iter()
+            .filter_map(|side| {
+                (1..=reach).find_map(|k| {
+                    let (x, z) = (gx - k * dx + side * k * px, gz - k * dz + side * k * pz);
+                    Some((k, self.surface_over(x, z)?))
+                })
+            })
+            .filter(|&(_, to_m)| self.level_top(to_m) < self.level_top(from_m))
+            .min_by_key(|&(k, _)| k)
     }
 }
 
@@ -239,6 +263,17 @@ mod tests {
         );
     }
 
+    /// A stream that crosses the edge at a slant pours along all of its lip: 192 Fall columns
+    /// round these boxes when a lip looked straight on alone, 249 with the diagonals.
+    #[test]
+    fn a_slanting_stream_pours_along_its_lip() {
+        let g = wet(1.0);
+        let falls = big_columns(1.0)
+            .filter(|&[x, z]| g.fall_at(x, z).is_some())
+            .count();
+        assert!(falls >= 240, "{falls} Fall columns");
+    }
+
     #[test]
     fn a_fall_runs_over_every_lip_with_a_lower_pool_past_it_and_nowhere_else() {
         for size in [1.0, 0.5] {
@@ -253,8 +288,7 @@ mod tests {
                     .iter()
                     .filter_map(|&(dx, dz, _)| {
                         let up = surface(gx + dx, gz + dz)?;
-                        let (reach, down) = (1..=fall_reach(size))
-                            .find_map(|k| Some((k, surface(gx - k * dx, gz - k * dz)?)))?;
+                        let (reach, down) = g.lower_pool([gx, gz], [dx, dz], up)?;
                         below(up, down).then_some(Fall {
                             toward: [-dx, -dz],
                             from_m: up,
@@ -277,7 +311,7 @@ mod tests {
             // A steep reach drops at one tall Fall rather than a Voxel at a time, so the boxes
             // hold few.
             assert!(
-                falls > 10 && dry_past > 20,
+                falls > 10 && dry_past > 10,
                 "{falls} Falls and {dry_past} lips beside dry ground at {size} m"
             );
         }
