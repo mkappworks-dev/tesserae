@@ -154,6 +154,7 @@ pub(super) enum Operation {
     AntiAliasing(super::anti_alias::AntiAliasing),
     Scale(u32),
     AmbientOcclusion(bool),
+    WaterRefraction(bool),
     TextScale(u32),
     ReducedMotion(bool),
     SolidBackground(bool),

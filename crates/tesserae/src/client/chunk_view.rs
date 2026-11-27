@@ -13,6 +13,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoAutoAabb, RenderLayers};
 use bevy::light::NotShadowCaster;
+use bevy::pbr::ScreenSpaceTransmission;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy::tasks::{ComputeTaskPool, Task};
@@ -26,6 +27,7 @@ use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::{ChunkQuads, Placeholders};
 use crate::client::drawn_mask::{self, DrawnMask};
 use crate::client::in_flight::InFlight;
+use crate::client::profile::Preferences;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams, WaterView};
 use crate::render::fog::{self, FogSettings};
 use crate::render::quad_buffer::QuadBuffer;
@@ -250,7 +252,8 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<ChunkEntities>()
         .init_session_state::<super::material_textures::Textures>()
         .add_session_systems(Startup, (add_material, spawn_light))
-        .add_session_systems(PostStartup, spawn_camera);
+        .add_session_systems(PostStartup, spawn_camera)
+        .add_session_systems(Update, follow_refraction);
     add_view_systems(app);
 }
 
@@ -414,10 +417,6 @@ fn add_material(
         base: StandardMaterial {
             // The shader premultiplies, so water's reflection is not faded by its body's alpha.
             alpha_mode: AlphaMode::Premultiplied,
-            // Any transmission at all moves the layer into Bevy's transmissive pass, whose copy of
-            // the scene behind it the shader bends through the ripples; the shader zeroes Bevy's
-            // own transmission.
-            specular_transmission: if water_refraction() { 1e-3 } else { 0.0 },
             // The mesher hides water against water, so from inside a lake the
             // surface's underside is the only water face there is.
             double_sided: true,
@@ -451,15 +450,55 @@ fn add_material(
     });
 }
 
-/// Ticket 28's prototype, the bed bent through the water's ripples: under `dev` and `profiling`
-/// only, while it is timed against the frame budget.
+/// Any transmission at all moves water into Bevy's transmissive pass, whose copy of the scene
+/// behind it the shader bends through the ripples; the shader zeroes Bevy's own transmission.
+const REFRACTING_TRANSMISSION: f32 = 1e-3;
+
+type MainTransmission<'w, 's> =
+    Single<'w, 's, (Entity, Has<ScreenSpaceTransmission>), With<MainCamera>>;
+
+/// The Water refraction setting: the camera's copy of the scene and the transmissive water,
+/// together.
+fn follow_refraction(
+    mut commands: Commands,
+    preferences: Res<Preferences>,
+    terrain: Option<Res<TerrainMaterial>>,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+    main: Option<MainTransmission>,
+) {
+    let on = preferences.water_refraction || refraction_forced();
+    if let Some(main) = main {
+        let (camera, has) = *main;
+        if has != on {
+            let mut camera = commands.entity(camera);
+            if on {
+                camera.insert(ScreenSpaceTransmission::default());
+            } else {
+                camera.remove::<ScreenSpaceTransmission>();
+            }
+        }
+    }
+    let wanted = if on { REFRACTING_TRANSMISSION } else { 0.0 };
+    let Some(terrain) = terrain else {
+        return;
+    };
+    if materials
+        .get(&terrain.blended)
+        .is_some_and(|m| m.base.specular_transmission != wanted)
+        && let Some(mut blended) = materials.get_mut(&terrain.blended)
+    {
+        blended.base.specular_transmission = wanted;
+    }
+}
+
+/// `profile-frames --switches water-refraction` times it without touching the profile.
 #[cfg(any(feature = "dev", feature = "profiling"))]
-fn water_refraction() -> bool {
+fn refraction_forced() -> bool {
     std::env::var("TESSERAE_DIAG_WATER_REFRACTION").is_ok_and(|v| v != "0")
 }
 
 #[cfg(not(any(feature = "dev", feature = "profiling")))]
-fn water_refraction() -> bool {
+fn refraction_forced() -> bool {
     false
 }
 
@@ -1009,11 +1048,6 @@ fn spawn_camera(
             super::camera::CameraHome(pose),
         ))
         .id();
-    if water_refraction() {
-        commands
-            .entity(camera)
-            .insert(bevy::pbr::ScreenSpaceTransmission::default());
-    }
     if let Some(fog) = fog::camera_fog(
         fog::enabled(),
         &fog_settings,
@@ -1048,6 +1082,54 @@ mod tests {
             .init_resource::<WorldSettings>();
         app.world_mut().run_system_once(spawn_camera).unwrap();
         app
+    }
+
+    #[test]
+    fn the_camera_and_the_water_refract_with_the_setting() {
+        let mut app = App::new();
+        app.insert_resource(Preferences::default())
+            .init_resource::<Assets<ChunkMaterial>>();
+        let blended = app
+            .world_mut()
+            .resource_mut::<Assets<ChunkMaterial>>()
+            .add(ChunkMaterial {
+                base: StandardMaterial::default(),
+                extension: ChunkMaterialExtension::default(),
+            });
+        app.insert_resource(TerrainMaterial {
+            opaque: Handle::default(),
+            blended: blended.clone(),
+            cutout: Handle::default(),
+            opaque_untested: Handle::default(),
+            cutout_untested: Handle::default(),
+            drawn: Handle::default(),
+        });
+        app.world_mut().spawn((Camera3d::default(), MainCamera));
+        let mut state = |app: &mut App| {
+            app.world_mut().run_system_once(follow_refraction).unwrap();
+            let copied = app
+                .world_mut()
+                .query_filtered::<Has<ScreenSpaceTransmission>, With<MainCamera>>()
+                .single(app.world())
+                .unwrap();
+            let transmission = app
+                .world()
+                .resource::<Assets<ChunkMaterial>>()
+                .get(&blended)
+                .unwrap()
+                .base
+                .specular_transmission;
+            (copied, transmission > 0.0)
+        };
+        assert_eq!(state(&mut app), (false, false), "off by default");
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .water_refraction = true;
+        assert_eq!(state(&mut app), (true, true));
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .water_refraction = false;
+        assert_eq!(state(&mut app), (false, false));
     }
 
     #[test]

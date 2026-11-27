@@ -1,6 +1,6 @@
 # 28: The bed bends through the surface
 
-Status: needs-info
+Status: done
 Blocked by: 27
 
 Spec: [Water that looks natural](../spec.md). From the user's review.
@@ -34,3 +34,9 @@ it.
   budget. Left off; the user decides between a High-quality setting and
   dropping it. Risks if kept: glass behind water drops out of the bent view,
   and Transparent-phase effects drawn after it sort over water.
+
+- 2026-11-27: the user chose a player setting. Display → Image quality →
+  Water refraction, off by default, approved in the mockup first; it adds the
+  camera's copy of the scene and makes water transmissive together, and turns
+  both off again live. `TESSERAE_DIAG_WATER_REFRACTION` still forces it on for
+  `profile-frames`. Captures `/tmp/tesserae-water-look-captures/toggle/`.

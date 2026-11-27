@@ -40,6 +40,9 @@ pub(crate) struct Preferences {
     /// Screen-space AO: off by default, since it does not fit the frame budget. Absent from a
     /// profile saved before it, which reads as off.
     pub ambient_occlusion: bool,
+    /// The bed bent through the water's ripples: off by default, since it does not fit the frame
+    /// budget.
+    pub water_refraction: bool,
     pub pad: PadPreferences,
     pub touch: TouchPreferences,
     /// The last view, restored in every World: a preference of the user's,
@@ -138,6 +141,7 @@ impl Default for Preferences {
             anti_aliasing: default(),
             render_scale: 100,
             ambient_occlusion: false,
+            water_refraction: false,
             pad: PadPreferences::default(),
             touch: TouchPreferences::default(),
             view: default(),

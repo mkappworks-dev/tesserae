@@ -28,6 +28,7 @@ const settingsDefaults = {
   aa: "SMAA",
   renderScale: "100%",
   ambientOcclusion: false,
+  waterRefraction: false,
   fps: "No limit",
   // Proposed in step 22 (.scratch/2026-11-21-phase-22-lod-features/spec.md).
   distancePreset: "Medium",
@@ -702,6 +703,13 @@ function settingsBody() {
           "toggle",
           undefined,
           "Shade where blocks meet. Costs GPU time; not drawn with MSAA.",
+        ) +
+        row(
+          "Water refraction",
+          "waterRefraction",
+          "toggle",
+          undefined,
+          "Bend what shows through moving water. Costs GPU time.",
         ) +
         group("Map and compass") +
         row(
