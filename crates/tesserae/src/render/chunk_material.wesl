@@ -117,6 +117,9 @@ fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
 
 // Ripples calm toward the shore over this depth.
 const CALM_DEPTH_M: f32 = 1.0;
+// How much of the view a water surface seen from below hides, and how bright its sheen is.
+const UNDERSIDE_HIDES: f32 = 0.08;
+const UNDERSIDE_SHEEN: f32 = 0.25;
 
 const TINT_STRENGTH: f32 = 0.55;
 
@@ -392,8 +395,18 @@ fn fragment(
             albedo = body.albedo;
             hides = body.alpha;
         }
+        if from_below {
+            // The user chose a clear surface from below over Snell's window and its mirror:
+            // the sky and the shore show through at every angle, under a sheen that moves with
+            // the ripples, so the surface is seen without closing the view in.
+            hides = UNDERSIDE_HIDES;
+            albedo = pbr_input.material.base_color.rgb * hides;
+            let tilt = 1.0 - abs(dot(surface.normal, pbr_input.V));
+            reflection = sky * sky_reflection(pbr_input.V, seen)
+                * UNDERSIDE_SHEEN * clamp(0.3 + 6.0 * tilt, 0.0, 1.0);
+        }
         pbr_input.material.base_color = vec4<f32>(albedo * (1.0 - mirrored), 1.0);
-        reflection = mirrored * sky * sky_reflection(pbr_input.V, seen);
+        reflection += mirrored * sky * sky_reflection(pbr_input.V, seen);
         water_alpha = hides * (1.0 - mirrored) + mirrored;
     }
 
