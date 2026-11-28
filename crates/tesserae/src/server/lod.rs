@@ -1596,6 +1596,8 @@ fn with_top(quad: &Quad, cell: Option<[usize; 3]>, top: i32) -> Option<Quad> {
     let (mut u, mut v) = quad.spans().expect("a face");
     let sub = SUBDIV as u16;
     let one = |c: usize| [c as u16 * sub, (c as u16 + 1) * sub];
+    // A surface over the Chunk's top is the Chunk above's to draw; a side stops at the top.
+    let side_top = || u16::try_from(top.min((CHUNK_SIZE * SUBDIV) as i32)).ok();
     match face {
         POS_Y => {
             if let Some([x, _, z]) = cell {
@@ -1607,13 +1609,13 @@ fn with_top(quad: &Quad, cell: Option<[usize; 3]>, top: i32) -> Option<Quad> {
             if let Some([_, _, z]) = cell {
                 v = one(z);
             }
-            u[1] = u16::try_from(top).ok().filter(|&t| t > u[0])?;
+            u[1] = side_top().filter(|&t| t > u[0])?;
         }
         _ => {
             if let Some([x, _, _]) = cell {
                 u = one(x);
             }
-            v[1] = u16::try_from(top).ok().filter(|&t| t > v[0])?;
+            v[1] = side_top().filter(|&t| t > v[0])?;
         }
     }
     Some(Quad::face(face, plane, u, v, quad.material, quad.light))
@@ -5441,6 +5443,48 @@ mod tests {
                     [[0, row, 5]]
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_side_under_a_lake_surface_above_the_chunk_ends_at_the_chunks_top() {
+        let material = tesserae_core::testgen::fixtures().water;
+        let top = (CHUNK_SIZE * SUBDIV) as u16;
+        for face in [NEG_X, POS_X, NEG_Z, POS_Z] {
+            let height = [top - 16, top];
+            let (u, v) = if face / 2 == 0 {
+                (height, [80, 96])
+            } else {
+                ([80, 96], height)
+            };
+            let mut layer = MeshLayer {
+                quads: vec![Quad::face(
+                    face,
+                    if face % 2 == 1 { 96 } else { 80 },
+                    u,
+                    v,
+                    u32::from(material),
+                    Light::DARK,
+                )],
+            };
+            // The surface is three quarters of a Voxel over the Chunk's top.
+            level_the_water(
+                &mut layer,
+                UnderWater {
+                    level_m: CHUNK_SIZE as f32 + 0.75,
+                    material,
+                    dimming: 0,
+                    step_m: 0.25,
+                },
+                0.0,
+                1.0,
+                &ChunkOverlay::none(),
+                |_, _| Some(CHUNK_SIZE as f32 + 0.75),
+            );
+            assert_eq!(layer.quads.len(), 1, "face {face}");
+            let (u, v) = layer.quads[0].spans().expect("a face");
+            let height = if face / 2 == 0 { u } else { v };
+            assert_eq!(height, [top - 16, top], "face {face}");
         }
     }
 
