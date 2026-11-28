@@ -28,8 +28,8 @@ serde_json = "1"
 toml = "1"
 # The version is not redundant with the path: a path dependency without one
 # is unpublishable to crates.io, and cargo-deny counts it as a wildcard.
-tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
-tesserae-mods = { path = "../tesserae-mods", version = "0.0.0" }
+tesserae-core = { path = "../tesserae-core", version = "0.1.0" }
+tesserae-mods = { path = "../tesserae-mods", version = "0.1.0" }
 png = "0.18"
 trash = "5"
 
