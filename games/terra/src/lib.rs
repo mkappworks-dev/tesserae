@@ -17,7 +17,7 @@ use tesserae::mods::content::{
     CombustionDef, FluidDef, FluidState, GroundParams, HeatDef, ItemDef, MarkerIcon, MarkerKindDef,
     MaterialDef, Occlusion, OreDef, Reactant, ReactionDef, ReactionSide, RecipeDef, RecipeStack,
     RenderClass, SelectorRange, ShapeDef, SkyFog, SurfaceFeature, TileVariation, ToolDef, ToolKind,
-    ViewParams, WaterParams,
+    ViewParams, WaterLook, WaterParams,
 };
 use tesserae::mods::types::{Arm, CollisionBox, ConnectDef, NodeBox, Srgba};
 
@@ -735,6 +735,25 @@ impl Guest for Terra {
                 marker("death", MarkerIcon::Death, [217, 100, 92]),
             ],
             death_marker_kind: Some("terra:death".into()),
+            // A clear temperate water: a little more absorption than pure water's, so a deep lake
+            // and the open sea turn blue-teal, and the shallows still show the sand.
+            water_looks: vec![WaterLook {
+                material: "water".into(),
+                absorption_per_m: Some((0.42, 0.07, 0.02)),
+                scatter: Some(Srgba {
+                    r: 20,
+                    g: 70,
+                    b: 105,
+                    a: 255,
+                }),
+                roughness: None,
+                foam: Some(Srgba {
+                    r: 236,
+                    g: 240,
+                    b: 240,
+                    a: 255,
+                }),
+            }],
             templates: templates::templates(),
             settlements: structures::settlements(),
             voxel_uses: Vec::new(),

@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ['active', 'stationary', 'flight', 'transparency',
-            'sprint-flight', 'sprint-walk', 'dive', 'teleport', 'cave', 'hidden-hill', 'restart', 'revisit']
+            'sprint-flight', 'sprint-walk', 'dive', 'teleport', 'cave', 'hidden-hill', 'restart', 'revisit',
+            'lake', 'river', 'coast', 'underwater', 'slope', 'estuary', 'delta']
 # Saved to a fresh World folder inside each run's own folder.
 PERSISTENT = ['restart', 'revisit']
 # Per fixture, what moves the Eye; teleport's jump is the Server's, at 22 s.
@@ -32,6 +33,14 @@ MOTION = {
     'hidden-hill': dict(TESSERAE_SCREENSHOT_YAW_DEG='-81.1', TESSERAE_SCREENSHOT_PITCH_DEG='-13.1'),
     'cave': dict(TESSERAE_SCREENSHOT_TURN_DEG='360', TESSERAE_SCREENSHOT_PITCH_DEG='0',
                  TESSERAE_SCREENSHOT_FLY_AFTER_S='22', TESSERAE_SCREENSHOT_FLY_S='10'),
+    # The Server places the water fixtures' Eyes (`WATER_EYES_M`); these aim them.
+    'lake': dict(TESSERAE_SCREENSHOT_YAW_DEG='-90', TESSERAE_SCREENSHOT_PITCH_DEG='-8'),
+    'river': dict(TESSERAE_SCREENSHOT_YAW_DEG='135', TESSERAE_SCREENSHOT_PITCH_DEG='-25'),
+    'coast': dict(TESSERAE_SCREENSHOT_YAW_DEG='180', TESSERAE_SCREENSHOT_PITCH_DEG='-6'),
+    'underwater': dict(TESSERAE_SCREENSHOT_YAW_DEG='-90', TESSERAE_SCREENSHOT_PITCH_DEG='-8'),
+    'slope': dict(TESSERAE_SCREENSHOT_YAW_DEG='-46.2', TESSERAE_SCREENSHOT_PITCH_DEG='-40'),
+    'estuary': dict(TESSERAE_SCREENSHOT_YAW_DEG='0', TESSERAE_SCREENSHOT_PITCH_DEG='-75'),
+    'delta': dict(TESSERAE_SCREENSHOT_YAW_DEG='0', TESSERAE_SCREENSHOT_PITCH_DEG='-75'),
 }
 
 
@@ -335,7 +344,8 @@ def competitors():
         r'/(cargo|rustc|tesserae[^/ ]*|meshing-[^/ ]+|fluids-[^/ ]+)$', line)]
 
 
-SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'msaa-4', 'msaa-2', 'fxaa', 'smaa', 'no-shadows']
+SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'msaa-4', 'msaa-2', 'fxaa', 'smaa', 'no-shadows',
+            'water-refraction']
 
 
 def main():

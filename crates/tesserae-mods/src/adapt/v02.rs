@@ -209,6 +209,7 @@ fn combustion(c: old::CombustionDef) -> content::CombustionDef {
 /// The 0.3 Declaration a 0.2 one means; a dropped lake is warned of in `log`.
 pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Declaration {
     content::Declaration {
+        water_looks: Vec::new(),
         materials: d.materials.into_iter().map(material).collect(),
         shapes: d.shapes.into_iter().map(shape).collect(),
         appearance: d

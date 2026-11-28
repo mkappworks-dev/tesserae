@@ -45,6 +45,7 @@ fn slab(name: &str) -> content::ShapeDef {
 
 pub(super) fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
     Declaration {
+        water_looks: Vec::new(),
         materials: materials.iter().map(|n| material(n)).collect(),
         shapes: shapes.iter().map(|n| slab(n)).collect(),
         appearance: Vec::new(),

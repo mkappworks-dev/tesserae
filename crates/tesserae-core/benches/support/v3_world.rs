@@ -324,13 +324,16 @@ fn crops_in(g: &Worldgen, [cx, cy, cz]: [i32; 3]) -> usize {
 }
 
 /// The first Chunk column whose ground Chunk is well inside a planted field: a crop on an eighth of
-/// its columns, where a field's edge clipping a corner holds a few.
+/// its columns, where a field's edge clipping a corner holds a few; and the field runs on into the
+/// next Chunk along x or z, so it crosses a border.
 pub fn crop_field_column(g: &Worldgen) -> [i32; 2] {
     scan(g, |m| {
         let at = m.map(|v| (v / (CHUNK_SIZE as f32 * g.voxel_size())).floor() as i32);
+        let planted = |at: [i32; 2]| crops_in(g, straddle(g, at)) > 0;
         matches!(g.biome_at(m[0], m[1]), Some(FOREST | PLAIN))
             && dry_land(g, m, 0.0)
             && crops_in(g, straddle(g, at)) * 8 >= CHUNK_SIZE.pow(2)
+            && (planted([at[0] + 1, at[1]]) || planted([at[0], at[1] + 1]))
     })
 }
 

@@ -74,6 +74,12 @@ variation = "turned-and-patched"
 material = "water"
 color = [30, 80, 200, 128]
 
+[[water-looks]]
+material = "water"
+absorption-per-m = [0.4, 0.08, 0.02]
+scatter = [10, 60, 90]
+roughness = 0.1
+
 [survival]
 max-health = 30
 safe-fall-m = 4.5

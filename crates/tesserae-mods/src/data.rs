@@ -64,6 +64,18 @@ struct Data {
     templates: Vec<template::Template>,
     #[serde(default)]
     settlements: Vec<settlement::Settlement>,
+    #[serde(default, rename = "water-looks")]
+    water_looks: Vec<WaterLook>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct WaterLook {
+    material: String,
+    absorption_per_m: Option<[f32; 3]>,
+    scatter: Option<[u8; 3]>,
+    roughness: Option<f32>,
+    foam: Option<[u8; 3]>,
 }
 
 #[derive(Deserialize)]
@@ -288,7 +300,19 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
             .map_err(|reason| error(format!("{field}: `{path}` {reason}")))
     };
     let data = decode(id, payload.bytes())?;
+    let srgb = |[r, g, b]: [u8; 3]| content::Srgba { r, g, b, a: 255 };
     Ok(Declaration {
+        water_looks: data
+            .water_looks
+            .into_iter()
+            .map(|w| content::WaterLook {
+                material: w.material,
+                absorption_per_m: w.absorption_per_m.map(|[r, g, b]| (r, g, b)),
+                scatter: w.scatter.map(srgb),
+                roughness: w.roughness,
+                foam: w.foam.map(srgb),
+            })
+            .collect(),
         materials: data
             .materials
             .into_iter()

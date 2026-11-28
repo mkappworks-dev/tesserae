@@ -79,11 +79,23 @@ const DEV_VOXEL_SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 
 impl WorldSettings {
     /// The defaults, except that under `dev` `TESSERAE_VOXEL_SIZE_M` picks one
-    /// of [`DEV_VOXEL_SIZES`], so one binary opens a World at each of them.
+    /// of [`DEV_VOXEL_SIZES`], so one binary opens a World at each of them, and
+    /// `TESSERAE_SEED` picks the seed.
     /// Save data does not exist yet, so nothing else chooses it.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn from_env(env: impl Fn(&str) -> Option<String>) -> Self {
-        let defaults = WorldSettings::default();
+        // `TESSERAE_SEED` regenerates a reported World's ground afresh, where its own save keeps
+        // the Chunks it generated before a change.
+        let seed = env("TESSERAE_SEED").and_then(|asked| {
+            asked
+                .parse()
+                .inspect_err(|_| eprintln!("TESSERAE_SEED={asked} is not a whole number; ignored"))
+                .ok()
+        });
+        let defaults = WorldSettings {
+            seed: seed.unwrap_or(WorldSettings::default().seed),
+            ..WorldSettings::default()
+        };
         let Some(asked) = env("TESSERAE_VOXEL_SIZE_M") else {
             return defaults;
         };
@@ -181,11 +193,33 @@ mod tests {
 
     #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]
+    fn the_dev_seed_is_a_whole_number_or_the_default() {
+        let with = |v: Option<&str>| {
+            WorldSettings::from_env(|name| {
+                (name == "TESSERAE_SEED")
+                    .then_some(v)
+                    .flatten()
+                    .map(String::from)
+            })
+            .seed
+        };
+        let default = WorldSettings::default().seed;
+        assert_eq!(with(None), default);
+        assert_eq!(with(Some("817232797318845137")), 817_232_797_318_845_137);
+        for refused in ["-1", "1.5", "seed", ""] {
+            assert_eq!(with(Some(refused)), default, "{refused}");
+        }
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
     fn the_dev_voxel_size_is_one_of_the_tested_sizes_or_the_default() {
         let with = |v: Option<&str>| {
             WorldSettings::from_env(|name| {
-                assert_eq!(name, "TESSERAE_VOXEL_SIZE_M");
-                v.map(String::from)
+                (name == "TESSERAE_VOXEL_SIZE_M")
+                    .then_some(v)
+                    .flatten()
+                    .map(String::from)
             })
             .voxel_size
         };

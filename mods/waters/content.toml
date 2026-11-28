@@ -28,6 +28,10 @@ remove-time-s = 0.8
 material = "water"
 color = [26, 82, 158, 166]
 
+# Pure water: every value left to the engine's.
+[[water-looks]]
+material = "water"
+
 [[appearance]]
 material = "steam"
 color = [226, 232, 238, 90]

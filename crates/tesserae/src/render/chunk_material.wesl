@@ -10,21 +10,34 @@ import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::{
-        STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK, STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
-        STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT, STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
+        STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK, STANDARD_MATERIAL_FLAGS_ALPHA_MODE_PREMULTIPLIED,
+        STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS, STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT,
+        STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
     },
     mesh_view_bindings as view_bindings,
 };
 @if(DISTANCE_FOG)
-import bevy_pbr::render::fog::exponential_squared_fog;
+import bevy_pbr::render::fog::{exponential_squared_fog, linear_fog};
+@if(DISTANCE_FOG)
+import bevy_pbr::render::mesh_view_types::FOG_MODE_LINEAR;
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
-import bevy_pbr::render::mesh_view_bindings::{screen_space_ambient_occlusion_texture, view};
+import bevy_pbr::render::mesh_view_bindings::screen_space_ambient_occlusion_texture;
+import bevy_pbr::render::mesh_view_bindings::view;
+// Bound only in Bevy's transmissive pass, where the blended layer draws when it bends the bed.
+@if(VIEW_TRANSMISSION_TEXTURE)
+import bevy_pbr::render::mesh_view_bindings::{view_transmission_sampler, view_transmission_texture};
 @if(SCREEN_SPACE_AMBIENT_OCCLUSION)
 import bevy_pbr::ssao::utils::ssao_multibounce;
 import super::{
     leaf_hole::leaf_hole,
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, patch_colour, patched, sample_texture, uv_gradient},
+    water::{
+        FOAM_DEPTH_M, STILL_M_S, SeaWaves, WATER_REFLECTANCE, ambient_specular, column_depth_m,
+        column_point, falling_foam, flow_cycle, fresnel, is_water, sea_waves, sky_reflection,
+        seen_normal, water_body, water_foam_share, water_gradient, water_shape, water_surface,
+        water_view,
+    },
 };
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
@@ -101,6 +114,12 @@ fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
     }
     return false;
 }
+
+// Ripples calm toward the shore over this depth.
+const CALM_DEPTH_M: f32 = 1.0;
+// How much of the view a water surface seen from below hides, and how bright its sheen is.
+const UNDERSIDE_HIDES: f32 = 0.08;
+const UNDERSIDE_SHEEN: f32 = 0.25;
 
 const TINT_STRENGTH: f32 = 0.55;
 
@@ -191,11 +210,16 @@ fn fog_glow(direction: vec3<f32>) -> vec3<f32> {
     return glow * view_bindings::view.exposure;
 }
 
-// fog.rs always sets ExponentialSquared.
+// fog.rs always sets ExponentialSquared in air; under water, `client::underwater` sets Linear,
+// clear water until near the reach's edge, which takes no haze.
 fn apply_fog(color: vec4<f32>, world_position: vec3<f32>) -> vec4<f32> {
     let toward = world_position - view_bindings::view.world_position.xyz;
     let distance = length(toward);
-    return exponential_squared_fog(view_bindings::fog, color, distance, fog_glow(toward / distance));
+    if view_bindings::fog.mode == FOG_MODE_LINEAR {
+        return linear_fog(view_bindings::fog, color, distance, vec3<f32>(0.0));
+    }
+    let hazed = apply_haze(color, world_position);
+    return exponential_squared_fog(view_bindings::fog, hazed, distance, fog_glow(toward / distance));
 }
 
 @vertex
@@ -214,6 +238,7 @@ fn fragment(
     vertex_output.world_normal = in.world_normal;
     vertex_output.instance_index = in.instance_index;
     let uv_grad = uv_gradient(in.uv);
+    let water_grad = water_gradient(in.world_position.xyz);
 
     // Coarse geometry up to a Voxel above the real surface would stand over the
     // finer silhouette, and coarse water under finer water would be drawn twice.
@@ -223,11 +248,17 @@ fn fragment(
     }
 
     var pbr_input = pbr_input_from_standard_material(vertex_output, is_front);
+    // The material's transmission only says the layer is drawn with the scene behind it to hand;
+    // Bevy's own transmission would tint and blur it, so it is taken back out.
+    let refracts = pbr_input.material.specular_transmission > 0.0;
+    pbr_input.material.specular_transmission = 0.0;
 
     // Multiplied rather than assigned so the base material's base_color still
     // works as a whole-chunk tint.
     let slot = material_slot(in.material);
-    if has_texture(slot) {
+    let water = is_water(slot);
+    // Water's tile stays for Items, the inventory and the coarse colour; its surface is its own.
+    if has_texture(slot) && !water {
         pbr_input.material.base_color *= sample_texture(slot, in.uv, uv_grad, in.world_normal, in.voxel);
         if patched(slot, in.world_normal) {
             pbr_input.material.base_color = vec4<f32>(
@@ -250,8 +281,9 @@ fn fragment(
 
     // bevy_pbr bounces the occlusion off StandardMaterial's white base_color, before the Material's
     // colour is multiplied in, which lifts it to almost nothing; bounce it off the real albedo.
+    // Water is not in the prepass AO reads, so it would take the floor's occlusion.
     @if(SCREEN_SPACE_AMBIENT_OCCLUSION) {
-    if in.level == 0u {
+    if in.level == 0u && !water {
         let ssao_at = vec2<i32>(in.clip_position.xy - view.viewport.xy);
         let ssao = textureLoad(screen_space_ambient_occlusion_texture, ssao_at, 0i).r;
         // Faded by sky light, which already darkens what cannot see the sky: a shaded floor is
@@ -283,6 +315,101 @@ fn fragment(
     pbr_input.diffuse_occlusion *= max(vec3<f32>(sky * in.sky_view), cave_floor());
     pbr_input.directional_shadow_factor *= sky;
 
+    // Premultiplied: what the water sends toward the eye, as `alpha` of the colour below is lost.
+    // The body's share is scaled into its albedo, so bevy_pbr's lighting leaves the sun's glint
+    // and the sky's reflection unscaled by the body's alpha.
+    var reflection = vec3<f32>(0.0);
+    var water_alpha = 1.0;
+    // How far, in clip space, the bed seen through this fragment is bent.
+    var bend = vec2<f32>(0.0);
+    if water {
+        // From under the surface there is no sky to reflect, and the depth is not what the view
+        // crosses; the underwater fog does the rest.
+        let from_below = pbr_input.world_normal.y < -0.5;
+        let columns = in.water != 0u && !from_below;
+        var depth_m = 0.0;
+        var silt = 0.0;
+        var flow = vec2<f32>(0.0);
+        var foam = 0.0;
+        var waves = SeaWaves(vec2<f32>(0.0), 0.0, 0.0);
+        var cycle = 0.0;
+        if columns {
+            let point = column_point(in.voxel, in.uv);
+            // Depth, Flow and foam are the top's: a wall of water stands at its column's edge,
+            // where the filtered depth runs out as at a shore, so it takes its own column's.
+            if abs(pbr_input.world_normal.y) > 0.5 {
+                let shape = water_shape(in.water, point, in.level, in.world_position.xyz);
+                depth_m = shape.depth_m;
+                silt = shape.silt;
+                flow = shape.flow;
+                waves = sea_waves(in.world_position.xz, water_grad, shape, water_view.wind);
+                // Only running water, foam and falling water move with the flow cycle; still
+                // water skips its noise lookup.
+                if length(flow) >= STILL_M_S || (depth_m < FOAM_DEPTH_M && shape.sea > 0.0)
+                    || shape.landing > 0.0 || waves.breaking > 0.0
+                {
+                    cycle = flow_cycle(in.world_position.xz);
+                }
+                foam = water_foam_share(
+                    in.world_position.xz,
+                    water_grad,
+                    depth_m,
+                    shape.sea,
+                    flow,
+                    cycle,
+                    max(waves.breaking, shape.landing),
+                );
+            } else {
+                depth_m = column_depth_m(in.water, vec2<i32>(floor(point)));
+            }
+        }
+        if abs(pbr_input.world_normal.y) <= 0.5 {
+            cycle = flow_cycle(in.world_position.xz);
+            foam = falling_foam(in.world_position.xyz, pbr_input.world_normal, cycle);
+        }
+        let calm = select(1.0, smoothstep(0.0, CALM_DEPTH_M, depth_m), columns);
+        let surface = water_surface(
+            slot,
+            in.world_position.xyz,
+            water_grad,
+            pbr_input.N,
+            calm,
+            flow,
+            cycle,
+            waves,
+        );
+        pbr_input.N = surface.normal;
+        if refracts && columns && abs(pbr_input.world_normal.y) > 0.5 {
+            bend = bed_bend(in.world_position.xyz, surface.normal, depth_m);
+        }
+        pbr_input.material.perceptual_roughness = mix(surface.perceptual_roughness, 1.0, foam);
+        pbr_input.material.reflectance = vec3<f32>(WATER_REFLECTANCE);
+        let seen = seen_normal(surface.normal, pbr_input.V, surface.lost_slope);
+        let facing = dot(seen, pbr_input.V);
+        let mirrored = select(fresnel(facing), 0.0, from_below) * (1.0 - foam);
+        var albedo = pbr_input.material.base_color.rgb * pbr_input.material.base_color.a;
+        var hides = pbr_input.material.base_color.a;
+        if columns {
+            let cos_view = abs(dot(pbr_input.world_normal, pbr_input.V));
+            let body = water_body(slot, depth_m, cos_view, foam, silt);
+            albedo = body.albedo;
+            hides = body.alpha;
+        }
+        if from_below {
+            // The user chose a clear surface from below over Snell's window and its mirror:
+            // the sky and the shore show through at every angle, under a sheen that moves with
+            // the ripples, so the surface is seen without closing the view in.
+            hides = UNDERSIDE_HIDES;
+            albedo = pbr_input.material.base_color.rgb * hides;
+            let tilt = 1.0 - abs(dot(surface.normal, pbr_input.V));
+            reflection = sky * sky_reflection(pbr_input.V, seen)
+                * UNDERSIDE_SHEEN * clamp(0.3 + 6.0 * tilt, 0.0, 1.0);
+        }
+        pbr_input.material.base_color = vec4<f32>(albedo * (1.0 - mirrored), 1.0);
+        reflection += mirrored * sky * sky_reflection(pbr_input.V, seen);
+        water_alpha = hides * (1.0 - mirrored) + mirrored;
+    }
+
     // Block light is a local source, so it is emissive: tinted by the Voxel's
     // own palette colour, so a face a lantern reaches still shows its Material
     // instead of turning into a flat glow. Its exposure weight is 1, so it goes
@@ -313,12 +440,52 @@ fn fragment(
     } else {
         out.color = pbr_input.material.base_color;
     }
+    if water {
+        // The sky's reflection replaces the ambient light's specular, which at a low angle is
+        // nearly all of the ambient and turned the far water grey.
+        let sent = out.color.rgb - ambient_specular(pbr_input) + reflection;
+        // Back out of premultiplied, so fog and the tonemapper see a colour, as for glass.
+        out.color = vec4<f32>(sent / water_alpha, water_alpha);
+    }
     @if(DISTANCE_FOG)
     if (pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT) != 0u {
-        out.color = apply_fog(apply_haze(out.color, in.world_position.xyz), in.world_position.xyz);
+        out.color = apply_fog(out.color, in.world_position.xyz);
     }
     // Fogged above; Bevy's own fog would sample the shadow map again.
     pbr_input.material.flags &= ~STANDARD_MATERIAL_FLAGS_FOG_ENABLED_BIT;
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+    // bevy_pbr leaves a premultiplied material's colour as the shader writes it.
+    if alpha_mode == STANDARD_MATERIAL_FLAGS_ALPHA_MODE_PREMULTIPLIED {
+        out.color = vec4<f32>(out.color.rgb * out.color.a, out.color.a);
+    }
+    @if(VIEW_TRANSMISSION_TEXTURE)
+    if any(bend != vec2<f32>(0.0)) {
+        // The blend adds the scene straight behind at 1 - alpha; adding the difference to the
+        // bent one swaps it for the bent one, so the blend and the fog stay as they are.
+        let here = (in.clip_position.xy - view.viewport.xy) / view.viewport.zw;
+        let straight = textureSampleLevel(view_transmission_texture, view_transmission_sampler, here, 0.0).rgb;
+        let bent = textureSampleLevel(view_transmission_texture, view_transmission_sampler, here + bend, 0.0).rgb;
+        out.color = vec4<f32>(out.color.rgb + (1.0 - out.color.a) * (bent - straight), out.color.a);
+    }
     return out;
+}
+
+// How far a ray through the water bends from the view: by the ripple's tilt, over the depth it
+// crosses, as a quarter of the tilt per metre (water's index against air), held to near water,
+// where it shows, and to a few metres of depth, past which the bed is hidden anyway.
+const BEND_PER_SLOPE: f32 = 0.25;
+const BEND_DEPTH_M: f32 = 2.0;
+const BEND_FAR_M: f32 = 40.0;
+
+fn bed_bend(world_position: vec3<f32>, normal: vec3<f32>, depth_m: f32) -> vec2<f32> {
+    let distance = length(world_position - view.world_position.xyz);
+    let near = 1.0 - smoothstep(0.5 * BEND_FAR_M, BEND_FAR_M, distance);
+    if near <= 0.0 {
+        return vec2<f32>(0.0);
+    }
+    let shift = vec3<f32>(-normal.x, 0.0, -normal.z) * BEND_PER_SLOPE * min(depth_m, BEND_DEPTH_M) * near;
+    let a = view.clip_from_world * vec4<f32>(world_position, 1.0);
+    let b = view.clip_from_world * vec4<f32>(world_position + shift, 1.0);
+    // Clip space runs y up and screen space y down.
+    return (b.xy / b.w - a.xy / a.w) * vec2<f32>(0.5, -0.5);
 }

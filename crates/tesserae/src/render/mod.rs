@@ -10,6 +10,8 @@ pub(crate) mod texture_atlas;
 pub(crate) mod texture_mips;
 pub(crate) mod tile_icon;
 mod view_caches;
+pub mod water;
+pub mod wobble;
 
 use bevy::asset::embedded_asset;
 use bevy::pbr::MaterialPlugin;
@@ -30,6 +32,8 @@ pub fn plugin(app: &mut App) {
     load_shader_library!(app, "leaf_hole.wesl");
     load_shader_library!(app, "chunk_vertex.wesl");
     load_shader_library!(app, "material_texture.wesl");
+    load_shader_library!(app, "sky_colour.wesl");
+    load_shader_library!(app, "water.wesl");
     app.add_plugins((
         MaterialPlugin::<ChunkMaterial>::default(),
         bevy::ui_render::UiMaterialPlugin::<tile_icon::TileIcon>::default(),
@@ -38,5 +42,6 @@ pub fn plugin(app: &mut App) {
         quad_buffer::plugin,
         sky::plugin,
         view_caches::plugin,
+        wobble::plugin,
     ));
 }

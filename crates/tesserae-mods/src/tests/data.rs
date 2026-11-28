@@ -100,6 +100,18 @@ fn component() -> Declaration {
         state,
     };
     Declaration {
+        water_looks: vec![content::WaterLook {
+            material: "water".into(),
+            absorption_per_m: Some((0.4, 0.08, 0.02)),
+            scatter: Some(types::Srgba {
+                r: 10,
+                g: 60,
+                b: 90,
+                a: 255,
+            }),
+            roughness: Some(0.1),
+            foam: None,
+        }],
         materials: vec![
             material("rock", 15, O::Opaque, R::Opaque, true, 0, None),
             material("water", 2, O::SameMaterial, R::Blend, false, 0, Some(0.5)),
@@ -776,6 +788,18 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
             "haze",
         ),
         ("rarity = 0.05", "rarity = 0.05\nluck = 1", "luck"),
+        ("roughness = 0.1", "roughness = 0.1\nglint = 1", "glint"),
+        (
+            "absorption-per-m = [0.4, 0.08, 0.02]",
+            "absorption-per-m = [0.4, 0.08, 200.0]",
+            "absorption-per-m",
+        ),
+        (
+            "absorption-per-m = [0.4, 0.08, 0.02]",
+            "absorption-per-m = [0.4, 0.08, nan]",
+            "absorption-per-m",
+        ),
+        ("roughness = 0.1", "roughness = 0.0", "roughness"),
         ("max-health = 30", "max-health = 30\nmana = 5", "mana"),
         (
             "keep-inventory = true",

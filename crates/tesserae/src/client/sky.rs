@@ -565,6 +565,7 @@ mod tests {
             let mut app = app();
             app.init_resource::<PublishedBody>()
                 .add_message::<MaterialPalette>()
+                .add_message::<crate::content::MaterialWaterLooks>()
                 .add_plugins(underwater::plugin);
             let camera = app
                 .world_mut()

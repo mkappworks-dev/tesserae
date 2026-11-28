@@ -13,6 +13,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoAutoAabb, RenderLayers};
 use bevy::light::NotShadowCaster;
+use bevy::pbr::ScreenSpaceTransmission;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy::tasks::{ComputeTaskPool, Task};
@@ -26,7 +27,8 @@ use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::{ChunkQuads, Placeholders};
 use crate::client::drawn_mask::{self, DrawnMask};
 use crate::client::in_flight::InFlight;
-use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
+use crate::client::profile::Preferences;
+use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams, WaterView};
 use crate::render::fog::{self, FogSettings};
 use crate::render::quad_buffer::QuadBuffer;
 use crate::server::streaming::{
@@ -231,7 +233,7 @@ impl Built {
     fn new(mesh: &ChunkMesh, level: u32, voxel_size: f32) -> Self {
         Self {
             opaque: ChunkQuads::pack(&mesh.opaque, level),
-            blended: ChunkQuads::pack(&mesh.blended, level),
+            blended: ChunkQuads::pack(&mesh.blended, level).map(|q| q.with_water(&mesh.water)),
             order: BlendOrder::new(&mesh.blended, voxel_size),
             cutout: ChunkQuads::pack(&mesh.cutout, level),
         }
@@ -250,7 +252,8 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<ChunkEntities>()
         .init_session_state::<super::material_textures::Textures>()
         .add_session_systems(Startup, (add_material, spawn_light))
-        .add_session_systems(PostStartup, spawn_camera);
+        .add_session_systems(PostStartup, spawn_camera)
+        .add_session_systems(Update, follow_refraction);
     add_view_systems(app);
 }
 
@@ -262,11 +265,14 @@ pub(super) fn plugin(app: &mut App) {
 fn add_view_systems(app: &mut App) {
     app.init_session_state::<super::material_textures::Textures>()
         .init_session_state::<Building>()
+        .init_session_state::<CurrentWind>()
         .init_session_state::<Placeholders>();
     app.add_session_systems(
         Update,
         (
             update_textures.after(super::material_textures::receive),
+            receive_wind,
+            follow_view,
             receive_meshes,
             drop_meshes,
             land_meshes,
@@ -298,6 +304,70 @@ fn update_textures(
     }
 }
 
+/// How far the sky's zenith may drift, in linear colour, before water's copy follows: each change
+/// re-uploads the blended material, and the zenith moves every frame through the day.
+const ZENITH_STEP: f32 = 1.0 / 512.0;
+
+/// Where running water calms, as shares of the level-0 reach: gone by its edge, so it meets
+/// coarse water, which carries no Flow, without a step.
+const FLOW_FADE: [f32; 2] = [0.6, 0.9];
+
+/// The World's Wind, as the Server sent it at the session's start.
+#[derive(Resource, Default)]
+struct CurrentWind(Option<tesserae_core::wind::Wind>);
+
+fn receive_wind(
+    mut messages: MessageReader<crate::content::WorldWind>,
+    mut wind: ResMut<CurrentWind>,
+) {
+    if let Some(message) = messages.read().last() {
+        wind.0 = Some(message.0);
+    }
+}
+
+/// What [`follow_view`] reads of the World's settings.
+type ViewSettings<'w> = (
+    Option<Res<'w, FogSettings>>,
+    Option<Res<'w, StreamingSettings>>,
+    Option<Res<'w, WorldSettings>>,
+);
+
+/// Keeps what water reflects in step with the sky's zenith, where its Flow fades with the reach,
+/// and the Wind its waves run along. Only the blended layer draws water.
+fn follow_view(
+    (settings, streaming, world): ViewSettings,
+    (terrain, wind): (Res<TerrainMaterial>, Res<CurrentWind>),
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+) {
+    let (Some(settings), Some(streaming)) = (settings, streaming) else {
+        return;
+    };
+    let zenith = crate::render::sky::zenith(settings.sky);
+    let [from, to] = FLOW_FADE.map(|share| share * streaming.view_distance_m);
+    let voxel_m = world.map_or(1.0, |w| w.voxel_size);
+    let flow_fade_m = Vec4::new(from, to, voxel_m, 0.0);
+    let wind = wind.0.map_or(Vec4::ZERO, |w| {
+        Vec4::new(w.toward[0], w.toward[1], w.strength, 0.0)
+    });
+    let Some(now) = materials.get(&terrain.blended) else {
+        return;
+    };
+    let view = &now.extension.water_view;
+    if (view.zenith - zenith).abs().max_element() <= ZENITH_STEP
+        && view.flow_fade_m == flow_fade_m
+        && view.wind == wind
+    {
+        return;
+    }
+    if let Some(mut material) = materials.get_mut(&terrain.blended) {
+        material.extension.water_view = WaterView {
+            zenith,
+            flow_fade_m,
+            wind,
+        };
+    }
+}
+
 /// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
 /// order, so a capture can show what the sort fixes.
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -314,11 +384,20 @@ fn add_material(
     mut commands: Commands,
     mut materials: ResMut<Assets<ChunkMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    images: Option<ResMut<Assets<Image>>>,
     mut palette: MessageReader<crate::content::MaterialPalette>,
+    mut water_looks: MessageReader<crate::content::MaterialWaterLooks>,
 ) {
     let mut extension = ChunkMaterialExtension::default();
     for message in palette.read() {
         extension.apply_palette(message);
+    }
+    for message in water_looks.read() {
+        extension.water = crate::render::water::table(&message.0);
+    }
+    if let Some(mut images) = images {
+        extension.water_normals = Some(images.add(crate::render::water::normal_map()));
+        extension.water_foam = Some(images.add(crate::render::water::foam_mask()));
     }
     let drawn = buffers.add(ShaderBuffer::new(vec![0u32], RenderAssetUsages::default()));
     let quads = QuadBuffer::new(&mut buffers);
@@ -336,7 +415,8 @@ fn add_material(
     };
     let blended = ChunkMaterial {
         base: StandardMaterial {
-            alpha_mode: AlphaMode::Blend,
+            // The shader premultiplies, so water's reflection is not faded by its body's alpha.
+            alpha_mode: AlphaMode::Premultiplied,
             // The mesher hides water against water, so from inside a lake the
             // surface's underside is the only water face there is.
             double_sided: true,
@@ -368,6 +448,58 @@ fn add_material(
         cutout: materials.add(cutout),
         drawn,
     });
+}
+
+/// Any transmission at all moves water into Bevy's transmissive pass, whose copy of the scene
+/// behind it the shader bends through the ripples; the shader zeroes Bevy's own transmission.
+const REFRACTING_TRANSMISSION: f32 = 1e-3;
+
+type MainTransmission<'w, 's> =
+    Single<'w, 's, (Entity, Has<ScreenSpaceTransmission>), With<MainCamera>>;
+
+/// The Water refraction setting: the camera's copy of the scene and the transmissive water,
+/// together.
+fn follow_refraction(
+    mut commands: Commands,
+    preferences: Res<Preferences>,
+    terrain: Option<Res<TerrainMaterial>>,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+    main: Option<MainTransmission>,
+) {
+    let on = preferences.water_refraction || refraction_forced();
+    if let Some(main) = main {
+        let (camera, has) = *main;
+        if has != on {
+            let mut camera = commands.entity(camera);
+            if on {
+                camera.insert(ScreenSpaceTransmission::default());
+            } else {
+                camera.remove::<ScreenSpaceTransmission>();
+            }
+        }
+    }
+    let wanted = if on { REFRACTING_TRANSMISSION } else { 0.0 };
+    let Some(terrain) = terrain else {
+        return;
+    };
+    if materials
+        .get(&terrain.blended)
+        .is_some_and(|m| m.base.specular_transmission != wanted)
+        && let Some(mut blended) = materials.get_mut(&terrain.blended)
+    {
+        blended.base.specular_transmission = wanted;
+    }
+}
+
+/// `profile-frames --switches water-refraction` times it without touching the profile.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn refraction_forced() -> bool {
+    std::env::var("TESSERAE_DIAG_WATER_REFRACTION").is_ok_and(|v| v != "0")
+}
+
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
+fn refraction_forced() -> bool {
+    false
 }
 
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -953,6 +1085,54 @@ mod tests {
     }
 
     #[test]
+    fn the_camera_and_the_water_refract_with_the_setting() {
+        let mut app = App::new();
+        app.insert_resource(Preferences::default())
+            .init_resource::<Assets<ChunkMaterial>>();
+        let blended = app
+            .world_mut()
+            .resource_mut::<Assets<ChunkMaterial>>()
+            .add(ChunkMaterial {
+                base: StandardMaterial::default(),
+                extension: ChunkMaterialExtension::default(),
+            });
+        app.insert_resource(TerrainMaterial {
+            opaque: Handle::default(),
+            blended: blended.clone(),
+            cutout: Handle::default(),
+            opaque_untested: Handle::default(),
+            cutout_untested: Handle::default(),
+            drawn: Handle::default(),
+        });
+        app.world_mut().spawn((Camera3d::default(), MainCamera));
+        let state = |app: &mut App| {
+            app.world_mut().run_system_once(follow_refraction).unwrap();
+            let copied = app
+                .world_mut()
+                .query_filtered::<Has<ScreenSpaceTransmission>, With<MainCamera>>()
+                .single(app.world())
+                .unwrap();
+            let transmission = app
+                .world()
+                .resource::<Assets<ChunkMaterial>>()
+                .get(&blended)
+                .unwrap()
+                .base
+                .specular_transmission;
+            (copied, transmission > 0.0)
+        };
+        assert_eq!(state(&mut app), (false, false), "off by default");
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .water_refraction = true;
+        assert_eq!(state(&mut app), (true, true));
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .water_refraction = false;
+        assert_eq!(state(&mut app), (false, false));
+    }
+
+    #[test]
     fn the_camera_is_where_it_is_placed_before_the_first_propagation() {
         let mut app = camera_app(Vec3::new(3.0, 4.0, 5.0), StreamingSettings::default());
         let (local, global) = app
@@ -1161,6 +1341,8 @@ mod tests {
             .add_message::<LodMeshReady>()
             .add_message::<LodUnloaded>()
             .add_message::<crate::content::MaterialPalette>()
+            .add_message::<crate::content::MaterialWaterLooks>()
+            .add_message::<crate::content::WorldWind>()
             .add_systems(Startup, add_material);
         add_view_systems(&mut app);
         // The mesh systems take the dev-only counter as a `ResMut`, so without
@@ -1244,6 +1426,33 @@ mod tests {
             let palette = materials.get(handle).unwrap().extension.palette;
             assert_eq!(palette[8], expected);
             assert_eq!(palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
+        }
+    }
+
+    #[test]
+    fn the_water_look_message_marks_exactly_its_slots_as_water() {
+        use crate::content::{MaterialWaterLooks, WaterLook};
+        use crate::render::water::ROWS_PER_SLOT;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<ChunkMaterial>()
+            .init_asset::<ShaderBuffer>()
+            .init_asset::<Image>()
+            .add_message::<crate::content::MaterialPalette>()
+            .add_message::<MaterialWaterLooks>()
+            .add_systems(Startup, add_material);
+        app.world_mut()
+            .write_message(MaterialWaterLooks(vec![(5, WaterLook::PURE)]));
+        app.update();
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for handle in terrain.all() {
+            let extension = &materials.get(handle).unwrap().extension;
+            let water: Vec<usize> = (0..=crate::render::chunk_material::PALETTE_LEN)
+                .filter(|slot| extension.water[slot * ROWS_PER_SLOT].w == 1.0)
+                .collect();
+            assert_eq!(water, [5]);
+            assert!(extension.water_normals.is_some() && extension.water_foam.is_some());
         }
     }
 
@@ -2549,7 +2758,7 @@ mod tests {
         };
         assert_eq!(
             alpha_of(&app, blended_at(&app, 0, coord).unwrap()),
-            AlphaMode::Blend
+            AlphaMode::Premultiplied
         );
         assert_eq!(
             alpha_of(&app, entity_for(&app, coord).unwrap()),

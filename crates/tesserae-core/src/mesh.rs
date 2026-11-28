@@ -490,6 +490,9 @@ pub struct ChunkMesh {
     /// Shaped Voxels pass 2 gave geometry to, including those whose every face
     /// turned out to be hidden.
     pub shaped_voxels: u32,
+    /// [`crate::water_columns::water_columns`], which the mesh job adds; empty
+    /// for a dry Chunk.
+    pub water: Vec<crate::water_columns::WaterColumn>,
 }
 
 impl ChunkMesh {

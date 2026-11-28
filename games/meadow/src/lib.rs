@@ -490,6 +490,7 @@ impl Guest for Meadow {
             plants: Vec::new(),
             marker_kinds: Vec::new(),
             death_marker_kind: None,
+            water_looks: Vec::new(),
             templates: templates::templates(),
             settlements: structures::settlements(),
             voxel_uses: Vec::new(),

@@ -571,6 +571,12 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences, map_allo
             "Shade where blocks meet. Costs GPU time; not drawn with MSAA.",
             |row| toggle(row, p.ambient_occlusion, Operation::AmbientOcclusion),
         );
+        setting_row(
+            card,
+            "Water refraction",
+            "Bend what shows through moving water. Costs GPU time.",
+            |row| toggle(row, p.water_refraction, Operation::WaterRefraction),
+        );
     });
     group(list, "MAP AND COMPASS", |card| {
         setting_row(

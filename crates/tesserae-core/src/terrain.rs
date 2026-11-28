@@ -721,7 +721,7 @@ impl Base {
 pub(crate) struct Column {
     pub(crate) height_m: f32,
     pub(crate) inland_m: Option<f32>,
-    cut_m: f32,
+    river_cut_m: f32,
     warped: (f32, f32),
     fields: FieldNoise<f32>,
     peaks: f32,
@@ -775,7 +775,7 @@ impl Terrain {
         Column {
             height_m: base_m - wet.cut_m,
             inland_m: wet.level_m,
-            cut_m: wet.cut_m,
+            river_cut_m: wet.river_cut_m,
             warped: s.warped,
             fields: s.fields,
             peaks: s.peaks,
@@ -786,6 +786,11 @@ impl Terrain {
     /// caller's.
     pub(crate) fn inland_water_m(&self, x_m: f32, z_m: f32) -> Option<f32> {
         self.drainage.wet(x_m, z_m, f32::MIN).level_m
+    }
+
+    /// The Flow of the lake or river water over a column, in m/s along x and z.
+    pub(crate) fn flow(&self, x_m: f32, z_m: f32) -> [f32; 2] {
+        self.drainage.flow(x_m, z_m)
     }
 
     /// What a Biome's selectors ask of the column, and how its Climate shifts there: the air is
@@ -805,7 +810,7 @@ impl Terrain {
                 altitude_m,
                 coast_m,
                 erosion: f.erosion,
-                river_m: c.cut_m,
+                river_m: c.river_cut_m,
             },
             climate_shift(altitude_m, coast_m),
         )
@@ -1065,8 +1070,9 @@ mod tests {
     fn site_asked_apart(t: &Terrain, x_m: f32, z_m: f32) -> (Site, (f32, f32)) {
         let f = t.base.fields(x_m, z_m);
         let h = t.base.base_height_m(x_m, z_m);
-        let river_m = t.drainage.wet(x_m, z_m, h).cut_m;
-        let altitude_m = h - river_m - t.base.sea_m;
+        let wet = t.drainage.wet(x_m, z_m, h);
+        let river_m = wet.river_cut_m;
+        let altitude_m = h - wet.cut_m - t.base.sea_m;
         let coast_m = (f.continent - COAST_CONTINENT) * t.base.continent_size_m * COAST_M_PER_UNIT;
         (
             Site {
@@ -1088,6 +1094,155 @@ mod tests {
         }
         let floor_m = t.height_m(x_m, z_m) - b.sea_m;
         floor_m <= -SEABED_CLEAR_M && b.formation_m(wx, wz, floor_m) >= 1.0
+    }
+
+    /// Each region solves its rivers over a window of its own, so a river's width comes from two
+    /// catchments either side of a border. The coarse solve's rivers fed in at a window's edge
+    /// bring border stream nodes more than a fifth apart from 5.3% to 3.5% on these worlds; the
+    /// rest are valleys its 128 m lattice cannot see.
+    #[test]
+    fn a_river_keeps_its_width_across_a_region_border() {
+        let p = crate::testgen::world_params();
+        let (mut nodes, mut apart) = (0, 0);
+        for seed in 0..8u32 {
+            let t = Terrain::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for key in [
+                [0, 0],
+                [-1, 0],
+                [0, -1],
+                [-1, -1],
+                [1, 1],
+                [2, -2],
+                [-3, 2],
+                [4, 1],
+            ] {
+                let (n, a, _) = t.drainage.border_widths(key);
+                (nodes, apart) = (nodes + n, apart + a);
+            }
+        }
+        assert!(nodes > 1000, "{nodes} stream nodes on the borders");
+        assert!(
+            apart * 100 <= nodes * 4,
+            "{apart} of {nodes} border stream nodes are a fifth apart in width"
+        );
+    }
+
+    /// D8 draws streams side by side down an even slope: 9.2% of stream nodes on these worlds
+    /// before one joined the other, 1.4% after.
+    #[test]
+    fn few_streams_run_side_by_side() {
+        let p = crate::testgen::world_params();
+        let (mut streams, mut beside) = (0, 0);
+        for seed in 0..8u32 {
+            let t = Terrain::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for key in [
+                [0, 0],
+                [-1, 0],
+                [0, -1],
+                [-1, -1],
+                [1, 1],
+                [2, -2],
+                [-3, 2],
+                [4, 1],
+            ] {
+                let (s, b) = t.drainage.parallel_streams(key);
+                (streams, beside) = (streams + s, beside + b);
+            }
+        }
+        assert!(streams > 5000, "{streams} stream nodes");
+        assert!(
+            beside * 100 <= streams * 2,
+            "{beside} of {streams} stream nodes run beside another"
+        );
+    }
+
+    /// What a few regions of each of these worlds' streams measure, for the criteria below.
+    struct Streams {
+        segments: u32,
+        rise_m: f32,
+        pool_speeds_m_s: Vec<f32>,
+        low_mouths: u32,
+        deltas: u32,
+        bends: u32,
+        straight: u32,
+    }
+
+    fn streams() -> Streams {
+        let p = crate::testgen::world_params();
+        let mut s = Streams {
+            segments: 0,
+            rise_m: f32::MIN,
+            pool_speeds_m_s: Vec::new(),
+            low_mouths: 0,
+            deltas: 0,
+            bends: 0,
+            straight: 0,
+        };
+        for seed in 0..8u32 {
+            let t = Terrain::new(seed.wrapping_mul(0x9e37_79b9), &p);
+            for key in [
+                [0, 0],
+                [-1, 0],
+                [0, -1],
+                [-1, -1],
+                [1, 1],
+                [2, -2],
+                [-3, 2],
+                [4, 1],
+            ] {
+                let (n, rise) = t.drainage.surface_rise_m(key);
+                (s.segments, s.rise_m) = (s.segments + n, s.rise_m.max(rise));
+                s.pool_speeds_m_s.extend(t.drainage.pool_speeds_m_s(key));
+                let (mouths, deltas) = t.drainage.low_mouths(key);
+                (s.low_mouths, s.deltas) = (s.low_mouths + mouths, s.deltas + deltas);
+                let (bends, straight) = t.drainage.straight_bends(key);
+                (s.bends, s.straight) = (s.bends + bends, s.straight + straight);
+            }
+        }
+        s
+    }
+
+    /// A lip standing above the pool behind it is a dam across the stream.
+    #[test]
+    fn a_streams_surface_never_rises_downstream() {
+        let s = streams();
+        assert!(s.segments > 5000, "{} segments", s.segments);
+        assert!(s.rise_m < 1e-3, "the surface rises {} m", s.rise_m);
+    }
+
+    #[test]
+    fn pools_and_river_mouths_run_under_a_metre_a_second() {
+        let s = streams();
+        assert!(s.pool_speeds_m_s.len() > 1000);
+        let fastest = s.pool_speeds_m_s.iter().copied().fold(0.0f32, f32::max);
+        assert!(fastest < 1.0, "a pool runs {fastest} m/s");
+    }
+
+    /// 48 of 58 when first counted.
+    #[test]
+    fn most_river_mouths_on_a_low_coast_fan_into_a_delta() {
+        let s = streams();
+        assert!(s.low_mouths > 20, "{} low mouths", s.low_mouths);
+        assert!(
+            s.deltas * 3 >= s.low_mouths * 2,
+            "{} of {}",
+            s.deltas,
+            s.low_mouths
+        );
+    }
+
+    /// On the lattice alone every channel ran straight on through most nodes; with each node
+    /// jittered off it, 3.8% of bends are within 2 degrees of straight.
+    #[test]
+    fn channels_bend_at_their_nodes() {
+        let s = streams();
+        assert!(s.bends > 5000, "{} bends", s.bends);
+        assert!(
+            s.straight * 100 <= s.bends * 5,
+            "{} of {} straight",
+            s.straight,
+            s.bends
+        );
     }
 
     #[test]

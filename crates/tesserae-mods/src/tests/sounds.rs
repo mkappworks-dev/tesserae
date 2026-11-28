@@ -12,6 +12,7 @@ pub(super) const STEREO: &[u8] = include_bytes!("../../tests/fixtures/sounds/ste
 
 pub(super) fn empty() -> Declaration {
     Declaration {
+        water_looks: Vec::new(),
         materials: Vec::new(),
         shapes: Vec::new(),
         appearance: Vec::new(),

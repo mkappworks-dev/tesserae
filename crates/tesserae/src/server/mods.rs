@@ -25,7 +25,8 @@ use tesserae_mods::{
 
 use crate::content::{
     CatalogueMaterial, CatalogueShape, CatalogueTemplate, CatalogueTool, CharacterModel,
-    ContentCatalogue, MaterialPalette, MaterialTexture, MaterialTextures,
+    ContentCatalogue, MaterialPalette, MaterialTexture, MaterialTextures, MaterialWaterLooks,
+    WaterLook,
 };
 use crate::world::WorldSettings;
 
@@ -139,6 +140,7 @@ pub struct LoadedMods {
     pub contact_damage: Vec<(MaterialId, f32)>,
     pub sounds: tesserae_mods::Sounds,
     pub recipes: Vec<tesserae_core::craft::Recipe>,
+    pub water_looks: Vec<(MaterialId, WaterLook)>,
 }
 
 impl Default for LoadedMods {
@@ -168,6 +170,7 @@ impl Default for LoadedMods {
             contact_damage: Vec::new(),
             sounds: tesserae_mods::Sounds::default(),
             recipes: Vec::new(),
+            water_looks: Vec::new(),
         }
     }
 }
@@ -649,6 +652,7 @@ pub(crate) async fn declare_all(
 ) -> Result<LoadedMods, String> {
     let mut loaded = LoadedMods::default();
     let mut behaviours = Vec::new();
+    let mut declared_looks = Vec::new();
     let mut character_from: Option<String> = None;
     for component in compiled {
         let id = &component.found.manifest.id;
@@ -686,6 +690,7 @@ pub(crate) async fn declare_all(
         loaded.remove_times.extend(applied.remove_times);
         loaded.contact_damage.extend(applied.contact_damage);
         behaviours.push(applied.behaviour);
+        declared_looks.push((id.clone(), applied.water_looks));
         for row in applied.appearance {
             if let Some(index) = loaded
                 .registry
@@ -738,8 +743,24 @@ pub(crate) async fn declare_all(
     let templates = tesserae_mods::DeclaredTemplates::take(&mut behaviours);
     let settlements = tesserae_mods::DeclaredSettlements::take(&mut behaviours);
     let underground = tesserae_mods::DeclaredUnderground::take(&mut behaviours);
+    let water: Vec<String> = behaviours
+        .iter()
+        .flat_map(|b| b.tagged(WATER_TAG))
+        .map(str::to_owned)
+        .collect();
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    loaded.water_looks = water_looks(&water, &loaded.registry, &loaded.tables);
+    for (mod_id, looks) in declared_looks {
+        for (row, look) in looks.into_iter().enumerate() {
+            let (id, look) = declared_look(&mod_id, row, look, &loaded.registry, &loaded.tables)?;
+            match loaded.water_looks.iter_mut().find(|(m, _)| *m == id) {
+                Some(slot) => slot.1 = look,
+                None => loaded.water_looks.push((id, look)),
+            }
+        }
+    }
+    loaded.water_looks.sort_by_key(|&(id, _)| id);
     // Grown Materials decide which implicit Items exist, so Plants resolve
     // before the Items and are checked against them after.
     loaded.tables.plants = plants
@@ -919,6 +940,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<MaterialTextures>()
         .add_session_message::<CharacterModel>()
         .add_session_message::<MaterialPalette>()
+        .add_session_message::<MaterialWaterLooks>()
+        .add_session_message::<crate::content::WorldWind>()
         .add_session_message::<ContentCatalogue>()
         .add_session_message::<crate::content::WorldFacts>()
         .add_session_message::<crate::content::SoundLibrary>()
@@ -1098,9 +1121,81 @@ fn install(world: &mut World) {
         humidity_size_m: climate.humidity_size_m,
     });
     world.write_message(MaterialPalette(loaded.appearance));
+    world.write_message(MaterialWaterLooks(loaded.water_looks));
+    world.write_message(crate::content::WorldWind(tesserae_core::wind::wind(
+        settings.seed,
+    )));
     world.write_message(MaterialTextures(loaded.textures));
     world.write_message(CharacterModel(loaded.character.map(std::sync::Arc::new)));
     world.write_message(catalogue);
+}
+
+/// The tag that makes a blended Fluid Material water.
+const WATER_TAG: &str = "water";
+
+/// A Mod's declared water look over pure water's, refused unless it names one of the Mod's own
+/// blended Fluids.
+fn declared_look(
+    mod_id: &str,
+    row: usize,
+    declared: tesserae_mods::WaterLook,
+    registry: &Registry,
+    tables: &Tables,
+) -> Result<(MaterialId, WaterLook), String> {
+    let refuse = |why: &str| {
+        format!(
+            "mod `{mod_id}`: water-looks[{row}].material `{}` {why}",
+            declared.material
+        )
+    };
+    let id = registry
+        .id_of(Kind::Material, &format!("{mod_id}:{}", declared.material))
+        .ok_or_else(|| refuse("is not one of its Materials"))? as MaterialId;
+    if tables.materials.def(id).render != tesserae_core::RenderClass::Blend
+        || !tables.fluids.contains(id)
+    {
+        return Err(refuse("is not a blended Fluid"));
+    }
+    let linear = |r, g, b| {
+        let l = Color::srgb_u8(r, g, b).to_linear();
+        [l.red, l.green, l.blue]
+    };
+    let pure = WaterLook::PURE;
+    Ok((
+        id,
+        WaterLook {
+            absorption_per_m: declared
+                .absorption_per_m
+                .map_or(pure.absorption_per_m, |(r, g, b)| [r, g, b]),
+            scatter: declared
+                .scatter
+                .map_or(pure.scatter, |c| linear(c.r, c.g, c.b)),
+            roughness: declared.roughness.unwrap_or(pure.roughness),
+            foam: declared.foam.map_or(pure.foam, |c| linear(c.r, c.g, c.b)),
+        },
+    ))
+}
+
+/// Pure water's look for each of `tagged` that is a blended Fluid; glass or a solid tagged `water`
+/// draws as before.
+fn water_looks(
+    tagged: &[String],
+    registry: &Registry,
+    tables: &Tables,
+) -> Vec<(MaterialId, WaterLook)> {
+    let mut looks: Vec<_> = tagged
+        .iter()
+        .filter_map(|name| registry.id_of(Kind::Material, name))
+        .map(|id| id as MaterialId)
+        .filter(|&id| {
+            tables.materials.def(id).render == tesserae_core::RenderClass::Blend
+                && tables.fluids.contains(id)
+        })
+        .map(|id| (id, WaterLook::PURE))
+        .collect();
+    looks.sort_by_key(|&(id, _)| id);
+    looks.dedup_by_key(|&mut (id, _)| id);
+    looks
 }
 
 pub(in crate::server) fn catalogue(
@@ -1382,6 +1477,65 @@ surface = "plain:rock"
                 .materials
                 .iter()
                 .any(|m| m.name == "plain:rock" && m.solid)
+        );
+    }
+
+    #[test]
+    fn only_blended_fluids_tagged_water_are_water() {
+        let s = Scratch::new();
+        let fluid = |name: &str| {
+            format!(
+                "[[fluids]]\nmaterial = \"plain:{name}\"\nreach-m = 7.0\nsideways-m-per-s = 4.0\n\
+                 downward-m-per-s = 8.0\nrecession-m-per-s = 4.0\nreset-drop-m = 0.5\n\
+                 waterlogs = false\nextinguishes = false\n"
+            )
+        };
+        let material = |name: &str, render: &str, solid: bool, tags: &str| {
+            format!(
+                "[[materials]]\nname = \"{name}\"\nemission = 0\ndimming = 2\n\
+                 occlusion = \"same-material\"\nrender = \"{render}\"\nsolid = {solid}\n\
+                 tags = [{tags}]\n"
+            )
+        };
+        let content = [
+            DATA_GAME.to_owned(),
+            material("water", "blend", false, "\"water\""),
+            material("glass", "blend", true, "\"water\""),
+            material("steam", "blend", false, ""),
+            material("brine", "blend", false, "\"salt\", \"water\""),
+            fluid("water"),
+            fluid("steam"),
+            fluid("brine"),
+        ]
+        .concat();
+        data(&s, "plain", true, "", &content);
+        let loaded = s.load(TrustMode::All).unwrap();
+        let id = |name: &str| {
+            loaded
+                .registry
+                .id_of(Kind::Material, &format!("plain:{name}"))
+                .unwrap() as MaterialId
+        };
+        assert_eq!(
+            loaded.water_looks,
+            [
+                (id("water"), WaterLook::PURE),
+                (id("brine"), WaterLook::PURE)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_water_look_naming_a_material_that_is_not_a_blended_fluid_is_refused() {
+        let s = Scratch::new();
+        let content = format!("{DATA_GAME}\n[[water-looks]]\nmaterial = \"rock\"\n");
+        data(&s, "plain", true, "", &content);
+        let Err(error) = s.load(TrustMode::All) else {
+            panic!("rock is no water");
+        };
+        assert!(
+            error.contains("plain") && error.contains("water-looks[0]") && error.contains("rock"),
+            "{error}"
         );
     }
 
@@ -2784,6 +2938,13 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .next()
             .unwrap();
         assert_eq!(message.0, vec![(8, [64, 128, 192, 128])]);
+        let wind = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::WorldWind>>()
+            .drain()
+            .next()
+            .expect("the Wind reaches the Client as the session starts");
+        assert_eq!(wind.0, tesserae_core::wind::wind(123));
         let mut uniform = ChunkMaterialExtension::default();
         uniform.apply_palette(&message);
         let expected = Color::srgba(64.0 / 255.0, 128.0 / 255.0, 192.0 / 255.0, 128.0 / 255.0)
@@ -3339,6 +3500,34 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     /// surface averages to from afar: the linear mean of a block's drawn texels. A sprite's is its
     /// edge colour, the linear mean of its drawn texels with a clear one beside them (left, right,
     /// above or below on the same face), so a cutout's filtered rim shows no fringe.
+    #[test]
+    fn terras_declared_water_look_reaches_the_per_slot_table() {
+        use crate::render::water::{ROWS_PER_SLOT, table};
+        let loaded = super::runtime::tests::terra_loaded(1.0);
+        let water = loaded
+            .registry
+            .id_of(Kind::Material, "terra:water")
+            .expect("Terra's water");
+        let rows = table(&loaded.water_looks);
+        assert_eq!(
+            rows[water * ROWS_PER_SLOT],
+            Vec4::new(0.42, 0.07, 0.02, 1.0)
+        );
+        let scatter = Color::srgb_u8(20, 70, 105).to_linear();
+        let row = rows[water * ROWS_PER_SLOT + 1];
+        assert!((row.x - scatter.red).abs() < 1e-6 && (row.z - scatter.blue).abs() < 1e-6);
+        assert_eq!(row.w, WaterLook::PURE.roughness, "left to the engine's");
+        let waters = loaded
+            .water_looks
+            .iter()
+            .filter(|(_, l)| *l != WaterLook::PURE);
+        assert_eq!(
+            waters.count(),
+            1,
+            "only Terra's own differs from pure water"
+        );
+    }
+
     #[test]
     fn terra_appearance_colours_are_a_blocks_tile_mean_and_a_sprites_edge_colour() {
         let loaded = super::runtime::tests::terra_loaded(1.0);

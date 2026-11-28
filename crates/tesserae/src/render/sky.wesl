@@ -1,7 +1,8 @@
 // The sky gradient, the sun, the moon and the stars, behind everything; see render/sky.rs.
 
-import bevy_pbr::render::mesh_view_bindings::{fog, lights, view};
+import bevy_pbr::render::mesh_view_bindings::view;
 @if(TONEMAP_IN_SHADER) import bevy_core_pipeline::tonemapping::tone_mapping;
+import super::sky_colour::{horizon, zenith_share};
 
 // Mirrors SkyMaterial in sky.rs.
 struct Sky {
@@ -15,11 +16,6 @@ struct Sky {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(0)
 var<uniform> sky: Sky;
-
-// How fast the horizon's colour gives way to the zenith's with height: half of
-// the way by about 3 degrees, so even a view pitched down shows blue above a
-// lighter band.
-const HORIZON_FALLOFF: f32 = 12.0;
 
 // Larger than the real sun's quarter degree, which is under two pixels at the
 // default field of view.
@@ -89,22 +85,6 @@ fn vertex(in: Vertex) -> SkyOutput {
     out.clip = vec4<f32>(in.position.xy, 0.0, 1.0);
     out.ndc = in.position.xy;
     return out;
-}
-
-// The glow bevy_pbr's fog adds toward each directional light (its `apply_fog`), so the horizon
-// glows as the fogged terrain at the reach does and the reach's edge stays hidden. No shadow:
-// the reach is past the last cascade.
-fn fog_glow(direction: vec3<f32>) -> vec3<f32> {
-    if fog.directional_light_color.a <= 0.0 {
-        return vec3<f32>(0.0);
-    }
-    var glow = vec3<f32>(0.0);
-    for (var i: u32 = 0u; i < lights.n_directional_lights; i = i + 1u) {
-        let light = lights.directional_lights[i];
-        let toward = max(dot(direction, light.direction_to_light), 0.0);
-        glow += pow(toward, fog.directional_light_exponent) * light.color.rgb * view.exposure;
-    }
-    return glow * fog.directional_light_color.rgb * fog.directional_light_color.a;
 }
 
 // What the tonemapper shows `colour` as, so the sky can be mixed in screen
@@ -193,12 +173,12 @@ fn fragment(in: SkyOutput) -> @location(0) vec4<f32> {
     let near = view.world_from_clip * vec4<f32>(in.ndc, 1.0, 1.0);
     let direction = normalize(near.xyz / near.w - view.world_position.xyz);
 
-    var horizon = sky.zenith.rgb;
+    var low = sky.zenith.rgb;
     @if(DISTANCE_FOG) {
-        horizon = seen(fog.base_color.rgb + fog_glow(direction));
+        low = seen(horizon(direction));
     }
-    let up = 1.0 - exp(-max(direction.y, 0.0) * HORIZON_FALLOFF);
-    var colour = mix(horizon, sky.zenith.rgb, up);
+    let up = zenith_share(direction);
+    var colour = mix(low, sky.zenith.rgb, up);
 
     // The disc sets behind the horizon; its glow fades with the sun's height rather than at the
     // horizon line, which would draw an edge across the sky seen from above the reach.

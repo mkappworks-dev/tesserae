@@ -51,10 +51,16 @@ pub(super) fn plugin(app: &mut App) {
     if kind == "hidden-hill" {
         app.add_session_systems(FixedUpdate, into_sky.before(super::streaming::Streaming));
     }
+    if WATER_EYES_M.iter().any(|(name, _)| *name == kind) {
+        app.add_session_systems(
+            FixedUpdate,
+            to_water_eye.before(super::streaming::Streaming),
+        );
+    }
 }
 
 const BUILT: [&str; 3] = ["transparency", "active", "hidden-hill"];
-const MOVED: [&str; 9] = [
+const MOVED: [&str; 16] = [
     "stationary",
     "flight",
     "sprint-flight",
@@ -64,6 +70,13 @@ const MOVED: [&str; 9] = [
     "cave",
     "restart",
     "revisit",
+    "lake",
+    "river",
+    "coast",
+    "underwater",
+    "slope",
+    "estuary",
+    "delta",
 ];
 /// Fixtures that need saves, so their eviction and reopening are a Persistent
 /// World's.
@@ -162,6 +175,42 @@ fn jump(
     player.set_eye(to);
     status.moves += 1;
     info!("profile_fixture teleport from={eye} to={to}");
+}
+
+/// Where the water fixtures stand the Eye on Terra's default seed, found once
+/// from the Generator and kept fixed so every water ticket's captures compare
+/// the same view; `scripts/profile-frames` aims them. Off whole metres, so the
+/// Eye never sits on a Voxel plane.
+const WATER_EYES_M: [(&str, Vec3); 7] = [
+    // 60 m west of the middle of a lake standing at 67.25 m, 19 m deep.
+    ("lake", Vec3::new(-738.3, 69.7, 935.3)),
+    // 3 m over a pool at 37.6 m, above a lip and pools falling to 32.4 m.
+    ("river", Vec3::new(-4061.3, 40.6, 448.7)),
+    // At the water's edge of a beach, the sea at 24 m deepening to 10 m within 100 m.
+    ("coast", Vec3::new(-8247.3, 26.7, 2487.4)),
+    // 4 m under the lake's surface, over its deepest Voxel.
+    ("underwater", Vec3::new(-678.3, 63.3, 925.4)),
+    // 15 m over a brook halfway down its 40 m fall from a mountain, looking down it.
+    ("slope", Vec3::new(4101.3, 100.3, 3263.3)),
+    // 46 m over river mouths, looking down on them: one 2.7 km from spawn, and the
+    // widest within 10 km.
+    ("estuary", Vec3::new(-2279.3, 70.3, 2825.3)),
+    ("delta", Vec3::new(2585.3, 70.3, 9353.3)),
+];
+
+/// Moves the Player to its water fixture's Eye on the first tick, before
+/// anything streams around spawn.
+fn to_water_eye(mut player: Single<&mut super::player::Player>, mut done: Local<bool>) {
+    if std::mem::replace(&mut *done, true) {
+        return;
+    }
+    let kind = std::env::var("TESSERAE_PROFILE_FIXTURE").unwrap_or_default();
+    let (_, to) = WATER_EYES_M
+        .into_iter()
+        .find(|(name, _)| *name == kind)
+        .expect("a water fixture");
+    player.set_eye(to);
+    info!("profile_fixture {kind} eye={to}");
 }
 
 /// How far from spawn the cave fixture looks for a cave.

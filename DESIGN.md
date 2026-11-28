@@ -876,7 +876,24 @@ Notes:
   heightfield (`fbm2`, the drainage's lookup and the base height) is most of it,
   and `tech/phase-17-worldgen-performance` takes it on with bit-identical
   changes. Weather (step 24) follows and reads the Climate by altitude and
-  coast; weather never edits terrain.
+  coast; weather never edits terrain. Its water was then given a natural look
+  (`.scratch/2026-11-24-water-look/`): headwater brooks, meanders that grow with
+  the river, and estuaries and deltas where rivers meet the sea, in version 3
+  before the first release; the Generator answers each column's Flow and each
+  lip's Fall; and a wet Chunk's mesh carries water columns (depth, Flow, foam,
+  falling and sea flags) for its blended layer, coarse levels from the
+  Generator's depth. The chunk shader's water path is physically based:
+  reflectance 0.02 and the sky's reflection weighted by Fresnel, ripples on the
+  hour's clock, colour from the light each channel loses over the water's depth,
+  shore foam, flow-mapped running rivers and white water, Falls drawn as sheets
+  and falling walls, and six Gerstner waves along the World's Wind that shoal
+  toward the shore. Under water each colour fades at its own rate. A Game or Mod
+  may declare a water look (contract line 0.3); motion is drawn, never simulated
+  ([ADR-0038](./docs/adr/0038-water-motion-is-drawn-never-simulated.md)).
+  Against `main` with the water fixtures, on the M5 at 1080p offscreen, the GPU
+  frame grew 0.3 to 0.4 ms at the lake, coast and underwater fixtures and was no
+  worse in `flight`; the median frame grew 0.7 ms at the lake and 0.85 ms under
+  water, over the spec's 0.5 ms, which waits on the user.
 - **Step 22** is done. It draws the far field as level 0 would
   ([ADR-0035](docs/adr/0035-a-coarse-level-draws-level-0s-answer.md)): every
   coarse column agrees with level 0's water or land and top Material at its
@@ -1011,12 +1028,14 @@ Not blocking 1.0, in rough order of value:
   06 of `.scratch/2026-10-12-material-table-transparency/`), with each Chunk's
   blended quads in an exact order. A coarse blended fragment is discarded where
   the finer level has drawn its Chunk, so water is never drawn twice at a ring
-  join (the LOD spec's decision 9). A Game's World may have lakes: `WaterParams`
-  fills open air up to one level with a fluid the Game declared, and slope
-  smoothing leaves an underwater step as a step; the engine's default World has
-  none. A fluid is not solid to a body or the edit ray (`MaterialDef::solid`),
-  and leaves are cut out on a pass of their own. The Client's hotbar is a
-  stopgap.
+  join (the LOD spec's decision 9). The blended pass is premultiplied: the chunk
+  shader premultiplies every blended fragment, so water's reflection and glint
+  are not faded by its body's alpha while glass and steam draw as before. A
+  Game's World may have lakes: `WaterParams` fills open air up to one level with
+  a fluid the Game declared, and slope smoothing leaves an underwater step as a
+  step; the engine's default World has none. A fluid is not solid to a body or
+  the edit ray (`MaterialDef::solid`), and leaves are cut out on a pass of their
+  own. The Client's hotbar is a stopgap.
 - **Data-only Mods start step 10 and are the agreed next session.** A
   Declaration read from a data file beside `mod.toml`, with no component,
   through the same validation path. Most of a Game's `declare` is data, and

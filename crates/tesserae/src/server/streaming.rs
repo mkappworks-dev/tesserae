@@ -771,6 +771,7 @@ fn stream(
         budget.in_flight.mesh,
         budget.wait_for_settled_light,
         &tables.0,
+        &generator,
     );
 }
 
@@ -1236,6 +1237,7 @@ fn dispatch_meshes(
     in_flight: usize,
     wait_for_settled_light: bool,
     tables: &Arc<Tables>,
+    generator: &WorldGenerator,
 ) {
     #[cfg(not(any(feature = "dev", feature = "profiling")))]
     let _ = load;
@@ -1270,13 +1272,14 @@ fn dispatch_meshes(
             .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
         let tables = Arc::clone(tables);
+        let worldgen = generator.0.clone();
         #[cfg(any(feature = "dev", feature = "profiling"))]
         let work = {
             let known = meshes.connectivity_of(coord, &own.chunk);
-            move || build_mesh(&own, &around, known, &tables)
+            move || build_mesh((coord, &own), &around, known, &tables, &worldgen)
         };
         #[cfg(not(any(feature = "dev", feature = "profiling")))]
-        let work = move || build_mesh(&own, &around, &tables);
+        let work = move || build_mesh((coord, &own), &around, &tables, &worldgen);
         #[cfg(any(feature = "dev", feature = "profiling"))]
         if meshes.reach.on {
             let walk = reached.get_or_insert_with(|| reachable(store, meshes, center, load));

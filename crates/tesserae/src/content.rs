@@ -6,6 +6,38 @@ use tesserae_core::{MaterialId, ShapeId};
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 
+/// The World's Wind, sent when a World session starts; constant for the World.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct WorldWind(pub tesserae_core::wind::Wind);
+
+/// How water Materials are drawn, beside [`MaterialPalette`]: tags, Fluid rows and render classes
+/// never reach the Client, so the Server decides which Materials are water.
+#[derive(Message, Clone, Debug, Default, PartialEq)]
+pub struct MaterialWaterLooks(pub Vec<(MaterialId, WaterLook)>);
+
+/// What light does in a water Material.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WaterLook {
+    /// Per metre, red, green and blue.
+    pub absorption_per_m: [f32; 3],
+    /// Linear: the colour light scattered back out of the water body takes.
+    pub scatter: [f32; 3],
+    pub roughness: f32,
+    /// Linear.
+    pub foam: [f32; 3],
+}
+
+impl WaterLook {
+    /// Pure water: Pope and Fry's absorption at 650, 550 and 450 nm and the surface's roughness
+    /// before ripples.
+    pub const PURE: Self = Self {
+        absorption_per_m: [0.34, 0.0565, 0.0092],
+        scatter: [0.0, 0.03, 0.16],
+        roughness: 0.08,
+        foam: [0.85, 0.88, 0.9],
+    };
+}
+
 /// Shared RGBA texture atlases and how each varies, keyed by registered Material id.
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialTextures(pub Vec<MaterialTexture>);

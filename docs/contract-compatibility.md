@@ -363,6 +363,14 @@ is never cut by the hour; `none` plays `music` at every hour, so a Soundscape
 declared before sounds as it did. A Declaration built against the earlier 0.3
 text needs a rebuild.
 
+A `declaration` of line 0.3 then gained `water-looks`, a list of `water-look`
+last: per water Material, its `absorption-per-m` for red, green and blue (each
+from 0 to 100), `scatter` and `foam` colours and `roughness` (from 0.02 to 1),
+each optional, the engine's pure water filling the rest. A row must name one of
+the Mod's own blended Fluids. The 0.1 and 0.2 adapters give none, and a Material
+tagged `water` that declares none draws as pure water. A Declaration built
+against the earlier 0.3 text needs a rebuild.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and
