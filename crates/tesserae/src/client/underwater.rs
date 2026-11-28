@@ -75,7 +75,7 @@ fn water_fog(hue: [f32; 3], reach_m: f32) -> DistanceFog {
 }
 
 /// How far the view shimmers under water, as a share of its height.
-const WOBBLE_STRENGTH: f32 = 0.004;
+const WOBBLE_STRENGTH: f32 = 0.002;
 
 /// How much of the water's colour is laid over the view under water: barely seen, so a still view
 /// still reads as water.
@@ -95,6 +95,38 @@ fn under_tint() -> f32 {
     UNDER_TINT
 }
 
+/// How fast the shimmer sways against the shader's own rates: slow enough to read as calm water,
+/// not heat haze.
+const WOBBLE_SPEED: f32 = 0.6;
+
+/// `TESSERAE_DIAG_WOBBLE=<share>` overrides [`WOBBLE_STRENGTH`], so captures can compare shimmers.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn wobble_strength() -> f32 {
+    std::env::var("TESSERAE_DIAG_WOBBLE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(WOBBLE_STRENGTH)
+}
+
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
+fn wobble_strength() -> f32 {
+    WOBBLE_STRENGTH
+}
+
+/// `TESSERAE_DIAG_WOBBLE_SPEED=<factor>` overrides [`WOBBLE_SPEED`].
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn wobble_speed() -> f32 {
+    std::env::var("TESSERAE_DIAG_WOBBLE_SPEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(WOBBLE_SPEED)
+}
+
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
+fn wobble_speed() -> f32 {
+    WOBBLE_SPEED
+}
+
 /// Moves the shimmer on with the clock; still under Reduced motion.
 fn shimmer(
     time: Option<Res<Time>>,
@@ -103,8 +135,8 @@ fn shimmer(
 ) {
     let still = preferences.is_some_and(|p| p.reduced_motion);
     for mut wobble in &mut wobbles {
-        wobble.time_s = time.as_ref().map_or(0.0, |t| t.elapsed_secs_wrapped());
-        wobble.strength = if still { 0.0 } else { WOBBLE_STRENGTH };
+        wobble.time_s = time.as_ref().map_or(0.0, |t| t.elapsed_secs_wrapped()) * wobble_speed();
+        wobble.strength = if still { 0.0 } else { wobble_strength() };
     }
 }
 
