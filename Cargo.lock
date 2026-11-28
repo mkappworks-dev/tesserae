@@ -6085,7 +6085,7 @@ dependencies = [
 
 [[package]]
 name = "tesserae"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bevy",
  "libc",
@@ -6105,7 +6105,7 @@ dependencies = [
 
 [[package]]
 name = "tesserae-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "base64",
  "criterion",
@@ -6122,7 +6122,7 @@ dependencies = [
 
 [[package]]
 name = "tesserae-mods"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "criterion",
