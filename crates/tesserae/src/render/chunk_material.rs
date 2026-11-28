@@ -231,6 +231,7 @@ impl MaterialExtension for ChunkMaterialExtension {
         ];
         defs.extend(water::ripple_shader_defs());
         defs.extend(water::column_shader_defs());
+        defs.extend(water::fall_shader_defs());
         defs.extend(super::texture_atlas::face_word_shader_defs());
         defs.extend(quad_layout_defs());
         defs.extend(super::fog::haze_shader_defs());

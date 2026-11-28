@@ -164,6 +164,47 @@ pub fn ripple_shader_defs() -> Vec<ShaderDefVal> {
     defs
 }
 
+/// The least share of a Fall's sheet that is white, between its streaks: most of it is clear
+/// water over wet rock, as a thin sheet reads.
+const FALL_WHITE_LEAST: f32 = 0.12;
+/// Where the foam mask turns a Fall's sheet white: about one stripe in four.
+const FALL_STREAKS_FROM: f32 = 0.55;
+const FALL_STREAKS_WIDTH: f32 = 0.3;
+
+/// `TESSERAE_DIAG_<name>=<value>` overrides a look value, so a run can compare them.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn diag(name: &str, value: f32) -> f32 {
+    std::env::var(format!("TESSERAE_DIAG_{name}"))
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(value)
+}
+
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
+fn diag(_: &str, value: f32) -> f32 {
+    value
+}
+
+/// How white `water.wesl` draws a Fall's sheet, from [`FALL_WHITE_LEAST`] and its streaks;
+/// `TESSERAE_DIAG_FALL_WHITE` and `TESSERAE_DIAG_FALL_STREAKS` override them.
+pub fn fall_shader_defs() -> Vec<ShaderDefVal> {
+    let from = diag("FALL_STREAKS", FALL_STREAKS_FROM);
+    [
+        (
+            "CHUNK_FALL_WHITE_LEAST",
+            diag("FALL_WHITE", FALL_WHITE_LEAST),
+        ),
+        ("CHUNK_FALL_STREAKS_FROM", from),
+        (
+            "CHUNK_FALL_STREAKS_TO",
+            (from + FALL_STREAKS_WIDTH).min(1.0),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, value)| ShaderDefVal::UInt(name.into(), value.to_bits()))
+    .collect()
+}
+
 /// How `water.wesl` reads a layer's water columns: their side, the Chunk's and the apron, and
 /// each word's units and flags, as `tesserae_core::water_columns` packs them.
 pub fn column_shader_defs() -> Vec<ShaderDefVal> {

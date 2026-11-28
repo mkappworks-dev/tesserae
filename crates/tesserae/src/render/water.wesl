@@ -274,9 +274,6 @@ fn water_foam_share(
 const FALL_M_S: f32 = 6.0;
 const FALL_ACROSS_M: f32 = 0.8;
 const FALL_DOWN_M: f32 = 12.0;
-// Falling water is full of air, so most of a wall of it is white and hides the rock behind: the
-// least share of it that is, between the mask's streaks of glassier water.
-const FALL_WHITE_LEAST: f32 = 0.6;
 
 // How much of a wall of water is white: long fine strands running down it over white water.
 fn falling_foam(world_position: vec3<f32>, normal: vec3<f32>, cycle: f32) -> f32 {
@@ -291,7 +288,12 @@ fn falling_foam(world_position: vec3<f32>, normal: vec3<f32>, cycle: f32) -> f32
         ),
         taps.weights,
     ) / (taps.weights.x + taps.weights.y);
-    return mix(FALL_WHITE_LEAST, 1.0, smoothstep(0.3, 0.7, mask));
+    let least = bitcast<f32>(constants::CHUNK_FALL_WHITE_LEAST);
+    let streaks = vec2<f32>(
+        bitcast<f32>(constants::CHUNK_FALL_STREAKS_FROM),
+        bitcast<f32>(constants::CHUNK_FALL_STREAKS_TO),
+    );
+    return mix(least, 1.0, smoothstep(streaks.x, streaks.y, mask));
 }
 
 // The body of water under a fragment, premultiplied: what it sends toward the eye as albedo, and
